@@ -2523,13 +2523,23 @@ addEventListener('pagehide', () => { flushSaves(); });
 
 /* offline support */
 if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')){
+  const offerUpdate = w => { if(w && navigator.serviceWorker.controller) toast('A new version of Inkwell is ready', 'Reload', () => w.postMessage('skipWaiting')); };
   navigator.serviceWorker.register('sw.js').then(reg => {
+    // an update that finished downloading while the app was in the background
+    if(reg.waiting) offerUpdate(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
-      w && w.addEventListener('statechange', () => {
-        if(w.state === 'installed' && navigator.serviceWorker.controller) toast('A new version of Inkwell is ready', 'Reload', () => w.postMessage('skipWaiting'));
-      });
+      w && w.addEventListener('statechange', () => { if(w.state === 'installed') offerUpdate(w); });
     });
+    // look for a new version when the app comes back to the front and every 15 minutes
+    let lastCheck = Date.now();
+    const check = () => {
+      if(!navigator.onLine) return;
+      lastCheck = Date.now();
+      reg.update().then(() => { if(reg.waiting) offerUpdate(reg.waiting); }).catch(() => {});
+    };
+    document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && Date.now() - lastCheck > 60000) check(); });
+    setInterval(() => { if(document.visibilityState === 'visible') check(); }, 15 * 60000);
   }).catch(() => {});
   let reloaded = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; flushSaves().then(() => location.reload()); });

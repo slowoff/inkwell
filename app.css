@@ -22,7 +22,7 @@
 }}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:var(--desk);color:var(--fg);font-family:var(--f-ui);font-size:15px;overflow:hidden;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;overscroll-behavior:none}
+body{color:var(--fg);font-family:var(--f-ui);font-size:15px;overflow:hidden;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;overscroll-behavior:none}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;-webkit-user-select:none;user-select:none;padding:0}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 input,textarea{font:inherit;color:inherit}
@@ -30,7 +30,10 @@ svg{display:block;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:ro
 svg circle[r="1"],svg circle[r="1.3"]{fill:currentColor}
 [hidden]{display:none!important}
 
-.app{position:fixed;inset:0;display:grid;grid-template-columns:auto minmax(0,1fr);padding-top:var(--sat)}
+.app{position:fixed;left:0;right:0;top:0;height:100%;height:100dvh;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:minmax(0,1fr);padding-top:var(--sat);background:var(--panel)}
+@media (display-mode: standalone){.app{height:100vh}}
+html,body{background:var(--paper)}
+.app.focus{grid-template-columns:minmax(0,1fr)}
 .side{display:grid;grid-template-columns:232px 264px;min-height:0;border-right:1px solid var(--line)}
 .app.focus .side{display:none}
 
@@ -102,7 +105,7 @@ svg circle[r="1"],svg circle[r="1.3"]{fill:currentColor}
 .empty strong{display:block;color:var(--fg);font-size:15px;margin-bottom:4px}
 
 /* ---------- main ---------- */
-.main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:var(--sar)}
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:var(--sar);grid-column:-2/-1}
 .bar1,.bar2{display:flex;align-items:center;gap:4px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;min-width:0}
 .bar2{overflow-x:auto;scrollbar-width:none}
 .bar2::-webkit-scrollbar{display:none}

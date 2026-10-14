@@ -1593,7 +1593,7 @@ function normBg(bg){
   return b;
 }
 async function openPage(id, opts = {}){
-  if(cur && cur.id === id) return;
+  if(cur && cur.id === id){ if(width() === 'narrow') app.dataset.view = 'editor'; return; }
   await closeCurrent();
   const page = getDoc(id);
   if(!page){ showEmpty(); return; }

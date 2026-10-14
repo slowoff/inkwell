@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Inkwell</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Inkwell">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#F4F6F8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15191E" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="lib/katex/katex.min.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app" id="app" data-left="list" data-view="list">
+
+  <aside class="side" id="side">
+    <section class="nav" aria-label="Notebooks">
+      <div class="nav-head">
+        <div class="brand">Inkwell</div>
+        <button class="icon-btn" id="settingsBtn" title="Sync and settings" aria-label="Sync and settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+        <button class="icon-btn" id="addNb" title="New notebook" aria-label="New notebook"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+      <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search" type="search" placeholder="Search all pages" autocomplete="off" aria-label="Search all pages"></label>
+      <div class="nb-list" id="nbList"></div>
+      <div class="nav-foot">
+        <button class="status" id="status" data-s="local"><span class="dot"></span><span id="statusText">On this device only</span></button>
+      </div>
+    </section>
+
+    <section class="list" aria-label="Pages">
+      <div class="list-head">
+        <button class="icon-btn only-compact" id="listBack" aria-label="Back to notebooks"><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <div class="list-title" id="listTitle"></div>
+        <button class="icon-btn" id="editSec" title="Rename section" aria-label="Rename section"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg></button>
+        <div class="split">
+          <button class="new-page" id="newPage"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Page</button>
+          <button class="new-more" id="newMore" aria-label="New page from template" title="From template"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+        </div>
+      </div>
+      <div id="secEdit"></div>
+      <div class="pages" id="pageList"></div>
+    </section>
+  </aside>
+
+  <main class="main" id="main">
+    <header class="bar1">
+      <button class="tb" id="sideBtn" title="Show or hide notebooks" aria-label="Show or hide notebooks"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <button class="tb" id="backLink" title="Back to previous page" aria-label="Back to previous page" hidden><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span id="backLinkName"></span></button>
+      <input class="title-in" id="title" placeholder="Untitled page" autocomplete="off" aria-label="Page title">
+      <button class="tb" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="tb" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+      <span class="sep"></span>
+      <button class="tb" id="insertBtn" title="Import PDF or image" aria-label="Import PDF or image"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg><span class="lbl">Import</span></button>
+      <button class="tb" id="paperBtn" title="Paper" aria-label="Paper"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/></svg><span class="lbl">Paper</span></button>
+      <button class="tb" id="moreBtn" title="More" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
+    </header>
+
+    <div class="bar2" id="toolbar">
+      <div class="tools" role="toolbar" aria-label="Tools">
+        <button class="tool" data-tool="pen" title="Pen (P)" aria-label="Pen"><svg viewBox="0 0 24 24"><path d="M15 4l5 5L9 20H4v-5L15 4z"/></svg></button>
+        <button class="tool" data-tool="hl" title="Highlighter (H)" aria-label="Highlighter"><svg viewBox="0 0 24 24"><path d="m9 15 7-7 3 3-7 7H9v-3z"/><path d="M4 21h9"/></svg></button>
+        <button class="tool" data-tool="eraser" title="Eraser (E)" aria-label="Eraser"><svg viewBox="0 0 24 24"><path d="m7 21-4-4L14 6l6 6-9 9H7zM21 21H11M9 10l6 6"/></svg></button>
+        <button class="tool" data-tool="lasso" title="Lasso (L)" aria-label="Lasso"><svg viewBox="0 0 24 24"><path d="M7 16c-2.5-1-4-3-4-5 0-4 4-7 9-7s9 3 9 7-4 7-9 7c-1.5 0-3-.3-4-.8"/><path d="M8 16a2 2 0 1 0 0 .1M8 18c0 1.5-.5 2.5-2 3"/></svg></button>
+        <button class="tool" data-tool="text" title="Text box (T)" aria-label="Text box"><svg viewBox="0 0 24 24"><path d="M5 6V5h14v1M12 5v14M9 19h6"/></svg></button>
+        <button class="tool" data-tool="math" title="Formula (M)" aria-label="Formula"><svg viewBox="0 0 24 24"><path d="M5 6h7M5 6l4 6-4 6h7M15 10l5 8M20 10l-5 8"/></svg></button>
+        <button class="tool" data-tool="tape" title="Hide-answer tape" aria-label="Hide-answer tape"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="8" rx="1"/><path d="M7 8l-2 8M12 8l-2 8M17 8l-2 8"/></svg></button>
+      </div>
+      <span class="sep"></span>
+      <div class="opts" id="opts">
+        <div class="swatches" id="swatches"></div>
+        <button class="tb" id="colorBtn" title="More colours" aria-label="More colours"><span class="rainbow"></span></button>
+        <label class="size" id="sizeWrap" title="Thickness"><span class="size-dot" id="sizeDot"></span><input type="range" id="size" min="1" max="100" aria-label="Thickness"></label>
+      </div>
+      <span class="spacer"></span>
+      <button class="tb" id="rulerBtn" title="Ruler" aria-label="Ruler"><svg viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="8" rx="1.5" transform="rotate(-30 12 12)"/><path d="m7.6 13.6 1-1.7M10.6 11.9l1.5-2.6M13.6 10.1l1-1.7" /></svg></button>
+      <button class="toggle" id="fingerBtn" title="When off, fingers scroll and zoom and only the Apple Pencil writes"><span class="sw"></span><span>Finger draws</span></button>
+      <button class="tb zoom" id="zoomBtn" title="Reset zoom">100%</button>
+    </div>
+
+    <div class="stage" id="stage">
+      <canvas id="bg"></canvas>
+      <div class="world" id="worldBack"></div>
+      <canvas id="ink"></canvas>
+      <div class="world" id="worldFront"></div>
+      <canvas id="live"></canvas>
+      <div class="ruler" id="ruler" hidden><div class="ruler-ticks" id="rulerTicks"></div><span class="ruler-angle" id="rulerAngle">0°</span></div>
+      <div class="sel" id="selBox" hidden>
+        <div class="sel-rect" id="selRect"><span class="sel-handle" id="selHandle"></span></div>
+        <div class="sel-menu" id="selMenu">
+          <div class="sel-colors" id="selColors"></div>
+          <button class="tb" id="selDup">Duplicate</button>
+          <button class="tb" id="selDel">Delete</button>
+        </div>
+      </div>
+      <div class="fmt" id="fmtBar" hidden>
+        <button class="tb" data-cmd="bold" aria-label="Bold"><b>B</b></button>
+        <button class="tb" data-cmd="italic" aria-label="Italic"><i>I</i></button>
+        <button class="tb" data-cmd="underline" aria-label="Underline"><u>U</u></button>
+        <button class="tb" data-block="h1">H1</button>
+        <button class="tb" data-block="h2">H2</button>
+        <button class="tb" data-block="p">Text</button>
+        <button class="tb" data-act="bullet" aria-label="Bullet list"><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10"/><circle cx="5" cy="6" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="5" cy="18" r="1"/></svg></button>
+        <button class="tb" data-act="check" aria-label="Checklist"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="6" height="6" rx="1.5"/><path d="m4.8 16 1.6 1.6L9.5 14.5M13 7h8M13 16h8"/></svg></button>
+        <button class="tb" data-act="mark" aria-label="Highlight text"><svg viewBox="0 0 24 24"><path d="m9 15 7-7 3 3-7 7H9v-3z"/><path d="M4 21h9"/></svg></button>
+        <button class="tb" data-act="tcolor" aria-label="Text colour"><span class="tcolor-a">A</span></button>
+        <button class="tb" data-act="link" aria-label="Link to page"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Link</span></button>
+        <button class="tb" data-act="done">Done</button>
+      </div>
+      <div class="stage-empty" id="stageEmpty" hidden><div><h3>No page open</h3><p>Pick a page on the left or create a new one.</p></div></div>
+    </div>
+  </main>
+</div>
+
+<!-- popovers -->
+<div class="pop" id="paperPop" hidden>
+  <div class="pop-title">Paper</div>
+  <div class="seg" id="paperType">
+    <button data-v="blank">Blank</button><button data-v="lined">Lined</button><button data-v="grid">Grid</button><button data-v="dots">Dots</button>
+  </div>
+  <label class="field" id="fxWrap"><span>Width <b id="fxVal"></b></span><input type="range" id="fx" min="3" max="20" step="0.5"></label>
+  <label class="field" id="fyWrap"><span id="fyLbl">Line height <b id="fyVal"></b></span><input type="range" id="fy" min="3" max="20" step="0.5"></label>
+  <label class="check-row"><input type="checkbox" id="linkXY"> Square cells</label>
+  <button class="btn ghost" id="paperDefault">Use for new pages</button>
+</div>
+
+<div class="pop" id="morePop" hidden>
+  <button class="menu-item" id="mExport">Export page as PDF</button>
+  <button class="menu-item" id="mTemplate">Save page as template</button>
+  <button class="menu-item" id="mFit">Fit everything on screen</button>
+  <button class="menu-item danger" id="mDelete">Delete page</button>
+</div>
+
+<div class="pop" id="newPop" hidden>
+  <div class="pop-title">New page from</div>
+  <div id="tmplList"></div>
+</div>
+
+<div class="pop" id="colorPop" hidden>
+  <div class="pop-title">Colour</div>
+  <div class="palette" id="palette"></div>
+  <label class="custom-color"><input type="color" id="customColor"><span>Custom colour</span></label>
+  <p class="hint">Tap a colour to use it. Press and hold a swatch in the toolbar to swap it for the current colour.</p>
+</div>
+
+<div class="pop" id="tcolorPop" hidden>
+  <div class="palette" id="tpalette"></div>
+</div>
+
+<!-- dialogs -->
+<div class="modal" id="importDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Import</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="import-pick" id="importPick">
+      <p>Choose a PDF or an image. Word files: save as PDF first.</p>
+      <label class="btn primary file-btn">Choose file<input type="file" id="importFile" accept="application/pdf,image/*"></label>
+    </div>
+    <div class="import-setup" id="importSetup" hidden>
+      <div class="import-preview" id="importPreview"></div>
+      <label class="field"><span>Size <b id="impSizeVal">100%</b> <em>(100% = A4 width)</em></span><input type="range" id="impSize" min="20" max="200" step="5" value="100"></label>
+      <label class="field" id="impPagesWrap"><span>Pages <em id="impCount"></em></span><input type="text" id="impPages" placeholder="All, or e.g. 1-3, 5" autocomplete="off"></label>
+      <div class="dlg-actions"><button class="btn ghost" id="impOther">Other file</button><button class="btn primary" id="impGo">Print onto page</button></div>
+      <p class="hint" id="impStatus"></p>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="mathDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Formula</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="math-keys" id="mathKeys"></div>
+    <textarea id="mathIn" rows="3" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="\frac{a+b}{2} = x^2"></textarea>
+    <div class="math-preview" id="mathPreview"></div>
+    <label class="field"><span>Size <b id="mathSizeVal"></b></span><input type="range" id="mathSize" min="14" max="64" step="1"></label>
+    <div class="dlg-actions"><button class="btn danger" id="mathDel">Delete</button><button class="btn primary" id="mathOk">Done</button></div>
+  </div>
+</div>
+
+<div class="modal" id="linkDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3 id="linkTitle">Link to page</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <input type="search" id="linkSearch" class="text-in" placeholder="Search pages" autocomplete="off">
+    <div class="link-list" id="linkList"></div>
+  </div>
+</div>
+
+<div class="modal" id="tmplDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Save as template</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <label class="field"><span>Template name</span><input type="text" id="tmplName" class="text-in" autocomplete="off"></label>
+    <p class="hint">Saves the paper, text, formulas, ink and imported pages on this page. New pages made from it start as a copy.</p>
+    <div class="dlg-actions"><span></span><button class="btn primary" id="tmplSave">Save template</button></div>
+  </div>
+</div>
+
+<div class="modal" id="settingsDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Sync</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div id="setNoConfig" hidden>
+      <p>Sync is not set up yet. Add your Supabase URL and key to <code>config.js</code>, upload it again, then reopen Inkwell.</p>
+      <p class="hint">Until then, notes are saved on this device.</p>
+    </div>
+    <form id="authForm" hidden>
+      <p class="hint">Sign in with the same account on every device. Your notes stay private to this account.</p>
+      <label class="field"><span>Email</span><input type="email" id="authEmail" class="text-in" autocomplete="username" required></label>
+      <label class="field"><span>Password</span><input type="password" id="authPass" class="text-in" autocomplete="current-password" minlength="6" required></label>
+      <div class="dlg-actions"><button type="button" class="btn ghost" id="authSignup">Create account</button><button type="submit" class="btn primary">Sign in</button></div>
+      <p class="hint" id="authMsg"></p>
+    </form>
+    <div id="signedIn" hidden>
+      <p>Signed in as <b id="whoami"></b></p>
+      <p class="hint" id="syncInfo"></p>
+      <div class="dlg-actions"><button class="btn ghost" id="signOut">Sign out</button><button class="btn primary" id="syncNow">Sync now</button></div>
+    </div>
+    <hr>
+    <div class="dlg-actions"><span class="hint" id="storageInfo"></span><button class="btn ghost" id="backupBtn">Download backup</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden><span id="toastText"></span><button id="toastBtn" hidden></button></div>
+<input type="file" id="restoreFile" accept="application/json" hidden>
+<div id="printRoot" aria-hidden="true"></div>
+
+<script src="config.js"></script>
+<script src="lib/katex/katex.min.js"></script>
+<script src="lib/pdf.min.js"></script>
+<script src="lib/supabase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

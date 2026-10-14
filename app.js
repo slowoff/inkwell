@@ -47,7 +47,7 @@ function toast(msg, btnLabel, onBtn){
    ===================================================================== */
 const DEFAULT_PREFS = {
   tool: 'pen',
-  pen: {c: 'auto', s: 40}, hl: {c: '#F5C400', s: 40}, eraser: {s: 30},
+  pen: {c: 'auto', s: 40}, hl: {c: '#F5C400', s: 40}, eraser: {s: 30, mode: 'stroke'},
   penFavs: ['auto', '#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF'],
   hlFavs: ['#F5C400', '#4CC26B', '#FF6FA3', '#3BA5F0'],
   finger: false,
@@ -956,7 +956,10 @@ function onCancel(e){
 function cancelAct(){
   if(!act) return;
   clearTimeout(act.hold);
-  if(act.kind === 'erase' && act.removed.length) setItems(act.removed.map(it => [it.id, it]));
+  if(act.kind === 'erase'){
+    const back = [...act.added.keys()].map(id => [id, null]).concat(act.removed.map(it => [it.id, it]));
+    if(back.length) setItems(back);
+  }
   act = null; clearLive();
 }
 
@@ -1010,7 +1013,8 @@ function startTool(e, sx, sy, pr){
     act.last = [X, Y];
     armHold();
   } else if(tool === 'eraser'){
-    clearSel(); act.kind = 'erase'; act.removed = []; act.cursor = [sx, sy]; eraseAt(sx, sy);
+    clearSel(); act.kind = 'erase'; act.mode = prefs.eraser.mode === 'area' ? 'area' : 'stroke';
+    act.removed = []; act.added = new Map(); act.cursor = [sx, sy]; act.lastW = null; eraseAt(sx, sy);
   } else if(tool === 'lasso'){
     act.kind = 'lasso'; act.poly = [sx, sy];
   } else if(tool === 'tape'){
@@ -1057,7 +1061,10 @@ function endTool(e){
     if(a.pts.length < 3) return;
     addItems([{t: 's', id: 's' + newId(), c: a.c, w: a.w, hl: a.hl, p: a.pts}]);
   } else if(a.kind === 'erase'){
-    if(a.removed.length) commit(a.removed.map(it => [it.id, it]), a.removed.map(it => [it.id, null]));
+    // one undo step: originals that were cut back in, pieces left over out
+    const before = a.removed.map(it => [it.id, it]).concat([...a.added.keys()].map(id => [id, null]));
+    const after = a.removed.map(it => [it.id, null]).concat([...a.added.values()].map(it => [it.id, it]));
+    if(before.length) commit(before, after);
   } else if(a.kind === 'lasso'){
     finishLasso(a);
   } else if(a.kind === 'tape'){
@@ -1102,10 +1109,20 @@ function drawLive(){
   }
 }
 
-/* eraser: removes whole strokes it touches */
+/* eraser: 'stroke' removes whole strokes it touches, 'area' (partial) rubs out only the ink under it */
 function eraseAt(sx, sy){
   const R = eraserRadius() / cam.z;
   const [wx, wy] = toWorld(sx, sy);
+  // fill the gap since the last position so fast moves don't skip ink
+  const last = act.lastW; act.lastW = [wx, wy];
+  if(last){
+    const d = Math.hypot(wx - last[0], wy - last[1]), n = Math.floor(d / (R * 0.5));
+    for(let k = 1; k <= n; k++){ const t = k / (n + 1); eraseWorld(last[0] + (wx - last[0]) * t, last[1] + (wy - last[1]) * t, R); }
+  }
+  eraseWorld(wx, wy, R);
+}
+function eraseWorld(wx, wy, R){
+  if(act.mode === 'area'){ eraseArea(wx, wy, R); return; }
   let hit = false;
   for(const it of [...cur.items.values()]){
     if(it.t !== 's') continue;
@@ -1119,6 +1136,46 @@ function eraseAt(sx, sy){
       else if(i + 3 < p.length && segDist2(wx, wy, p[i], p[i+1], p[i+3], p[i+4]) <= lim) touched = true;
     }
     if(touched){ act.removed.push(it); cur.items.delete(it.id); geo.delete(it.id); hit = true; }
+  }
+  if(hit) changed();
+}
+function eraseArea(wx, wy, R){
+  let hit = false;
+  for(const it of [...cur.items.values()]){
+    if(it.t !== 's') continue;
+    const g = geoOf(it), pad = R + it.w / 2;
+    if(wx < g.b[0] - pad || wx > g.b[2] + pad || wy < g.b[1] - pad || wy > g.b[3] + pad) continue;
+    const cut = R + it.w * 0.35, lim = cut * cut, p = it.p;
+    // densify only the segments near the eraser, so the cut is clean even on long straight lines
+    const step = Math.max(0.4, cut * 0.35), q = [];
+    let near = false;
+    for(let i = 0; i < p.length; i += 3){
+      q.push(p[i], p[i+1], p[i+2]);
+      if(i + 3 >= p.length) break;
+      const d2 = segDist2(wx, wy, p[i], p[i+1], p[i+3], p[i+4]);
+      if(d2 > lim * 4) continue;
+      near = true;
+      const len = Math.hypot(p[i+3] - p[i], p[i+4] - p[i+1]), n = Math.floor(len / step);
+      for(let k = 1; k < n; k++){ const t = k / n; q.push(p[i] + (p[i+3] - p[i]) * t, p[i+1] + (p[i+4] - p[i+1]) * t, p[i+2] + (p[i+5] - p[i+2]) * t); }
+    }
+    if(!near && p.length > 3) continue;
+    // split into the runs of points that stay
+    const pieces = []; let run = [], gone = false;
+    for(let i = 0; i < q.length; i += 3){
+      const dx = q[i] - wx, dy = q[i+1] - wy;
+      if(dx * dx + dy * dy <= lim){ gone = true; if(run.length) pieces.push(run); run = []; }
+      else run.push(q[i], q[i+1], q[i+2]);
+    }
+    if(run.length) pieces.push(run);
+    if(!gone) continue;
+    hit = true;
+    cur.items.delete(it.id); geo.delete(it.id);
+    if(act.added.has(it.id)) act.added.delete(it.id); else act.removed.push(it);
+    for(const pp of pieces){
+      if(pp.length < 6) continue;   // a lone point is just a crumb
+      const np = {t: 's', id: 's' + newId(), c: it.c, w: it.w, hl: it.hl, p: pp};
+      cur.items.set(np.id, np); act.added.set(np.id, np);
+    }
   }
   if(hit) changed();
 }
@@ -2256,6 +2313,8 @@ function renderOpts(){
   const t = prefs.tool, ink = t === 'pen' || t === 'hl';
   $('opts').hidden = !(ink || t === 'eraser');
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
+  $('eraseMode').hidden = t !== 'eraser';
+  if(t === 'eraser') $('eraseMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.eraser.mode === 'area' ? 'area' : 'stroke')));
   if(ink){
     const favs = t === 'pen' ? prefs.penFavs : prefs.hlFavs, c = prefs[t].c;
     $('swatches').innerHTML = favs.map((f, i) => `<button class="swatch ${t === 'hl' ? 'hl' : ''} ${f === c ? 'on' : ''}" data-i="${i}" aria-label="Colour"><span style="--c:${f === 'auto' ? 'var(--fg)' : f}"></span></button>`).join('');
@@ -2266,6 +2325,7 @@ function renderOpts(){
     $('sizeDot').style.setProperty('--d', d + 'px');
   }
 }
+$('eraseMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.eraser.mode = b.dataset.m; savePrefs(); renderOpts(); });
 document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if(b) setTool(b.dataset.tool); });
 $('size').addEventListener('input', () => { const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
 let lp = null;

@@ -614,7 +614,7 @@ function contentBox(){
    ===================================================================== */
 function setItems(pairs){
   for(const [id, it] of pairs){
-    if(it){ cur.items.set(id, it); if(it.t !== 's') itemEl(it); }
+    if(it){ cur.items.set(id, it); if(it.t !== 's') itemEl(it); cur.lastId = id; }
     else { cur.items.delete(id); geo.delete(id); dropEl(id); }
   }
   changed();
@@ -649,6 +649,7 @@ async function saveContent(){
   const items = [...c.items.values()].map(ser);
   const rec = c.crec || {id: 'c_' + c.id, kind: 'content', deleted: false};
   rec.data = {bg: c.bg, items};
+  if(c.lastId) rec.data.last = c.lastId;
   c.crec = rec;
   await writeDoc(rec);
   const page = getDoc(c.id);
@@ -1227,7 +1228,7 @@ selRect.addEventListener('pointermove', e => {
     tf = {dx: 0, dy: 0, s, ax: b[0], ay: b[1]};
   } else tf = {dx: (sx - selDrag.sx) / cam.z, dy: (sy - selDrag.sy) / cam.z, s: 1, ax: 0, ay: 0};
   const moved = selDrag.orig.map(it => transformItem(it, tf));
-  for(const it of moved){ cur.items.set(it.id, it); if(it.t !== 's') itemEl(it); }
+  for(const it of moved){ cur.items.set(it.id, it); if(it.t !== 's') itemEl(it); cur.lastId = it.id; }
   selDrag.cur = moved;
   computeSel(); invalidate(0, 1, 1);
 });
@@ -1307,7 +1308,7 @@ function placeAt(a){
     if(it && it.t === 'm'){ openMath(it); return; }
     const fs = clamp(1 / cam.z, 0.25, 6);
     const nt = {t: 'x', id: 'x' + newId(), x: a.w0[0] - 4 * fs, y: a.w0[1] - 16 * fs, w: clamp((W - a.sx - 16) / cam.z, 160 * fs, 460 * fs), fs, html: ''};
-    cur.items.set(nt.id, nt);
+    cur.items.set(nt.id, nt); cur.lastId = nt.id;
     itemEl(nt);
     startEditing(nt.id, null, null, true);
   } else if(a.tool === 'math'){
@@ -1340,7 +1341,7 @@ function syncEditingHTML(){
   const el = elMap.get(editing.id), it = cur && cur.items.get(editing.id);
   if(!el || !it) return;
   const html = el.innerHTML;
-  if(html !== it.html){ cur.items.set(it.id, Object.assign({}, it, {html})); el._html = html; }
+  if(html !== it.html){ cur.items.set(it.id, Object.assign({}, it, {html})); el._html = html; cur.lastId = it.id; }
 }
 function finishEditing(){
   if(!editing || !cur) { editing = null; return; }
@@ -1360,7 +1361,7 @@ function finishEditing(){
   }
   const html = cleanHTML(el.innerHTML);
   const nit = Object.assign({}, it, {html});
-  cur.items.set(ed.id, nit); el._html = html;
+  cur.items.set(ed.id, nit); el._html = html; if(html !== it.html) cur.lastId = ed.id;
   prepTextEl(el);
   if(ed.isNew) commit([[ed.id, null]], [[ed.id, nit]]);
   else if(ed.before.html !== html || ed.before.w !== nit.w) commit([[ed.id, ed.before]], [[ed.id, nit]]);
@@ -1602,7 +1603,7 @@ async function openPage(id, opts = {}){
   const crec = await IDB.get('docs', 'c_' + id);
   const ok = crec && !crec.deleted && crec.data;
   const data = ok ? crec.data : {bg: Object.assign({}, prefs.bg), items: []};
-  cur = {id, crec: ok ? crec : null, bg: normBg(data.bg), items: new Map(), undo: [], redo: []};
+  cur = {id, crec: ok ? crec : null, bg: normBg(data.bg), items: new Map(), undo: [], redo: [], lastId: typeof data.last === 'string' ? data.last : null};
   for(const s of data.items || []){ const it = deser(s); if(it && it.id) cur.items.set(it.id, it); }
   ui.page = id; ui.sec = page.data.sec;
   const sec = getDoc(page.data.sec); if(sec) ui.nb = sec.data.nb;
@@ -1902,6 +1903,78 @@ $('sideBtn').addEventListener('click', () => {
 });
 addEventListener('resize', () => {
   if(width() === 'narrow') app.classList.remove('focus'); else app.classList.toggle('focus', !!prefs.focus);
+});
+
+/* continue where you left off: jump to the last thing written or changed on this page */
+function lastSpotItem(){
+  if(!cur || !cur.items.size) return null;
+  if(cur.lastId && cur.items.has(cur.lastId)) return cur.items.get(cur.lastId);
+  // pages from before this was tracked: newest item by its time-based id
+  let best = null, key = '';
+  for(const it of cur.items.values()){ const k = String(it.id).slice(1); if(!best || k > key){ best = it; key = k; } }
+  return best;
+}
+let camAnim = 0;
+function continueHere(){
+  if(!cur) return;
+  finishEditing();
+  const it = lastSpotItem();
+  if(!it){ toast('Nothing written on this page yet'); return; }
+  const b = itemBox(it);
+  const z = cam.z;
+  const vw = W / z, vh = H / z;
+  // horizontal: keep the view if the spot already fits, otherwise centre it
+  const left = -cam.ox / z;
+  let tx = cam.ox;
+  if(b[0] < left + 16 / z || b[2] > left + vw - 16 / z){
+    const cx = (b[2] - b[0] < vw - 32 / z) ? (b[0] + b[2]) / 2 : b[0] + (vw / 2 - 32 / z);
+    tx = W / 2 - cx * z;
+  }
+  // vertical: bottom of the spot at 60% of the screen height, so there is room to keep writing below
+  const ty = H * 0.6 - b[3] * z;
+  const fx = cam.ox, fy = cam.oy, t0 = performance.now(), d = 260;
+  cancelAnimationFrame(camAnim);
+  const step = now => {
+    const k = Math.min(1, (now - t0) / d), e = 1 - Math.pow(1 - k, 3);
+    cam.ox = fx + (tx - fx) * e; cam.oy = fy + (ty - fy) * e;
+    invalidate();
+    if(k < 1) camAnim = requestAnimationFrame(step); else saveCamSoon();
+  };
+  camAnim = requestAnimationFrame(step);
+}
+$('continueBtn').addEventListener('click', continueHere);
+
+/* sidebar width: drag the edges, double-tap an edge to reset */
+const SIDE_LIM = {navW: [150, 420, 232], listW: [180, 560, 264], oneW: [200, 520, 280]};
+function applySideWidths(){
+  for(const k in SIDE_LIM){
+    const v = +prefs[k];
+    if(isFinite(v) && v > 0) app.style.setProperty('--' + k, clamp(v, SIDE_LIM[k][0], SIDE_LIM[k][1]) + 'px');
+    else app.style.removeProperty('--' + k);
+  }
+}
+applySideWidths();
+document.querySelectorAll('.side-grip').forEach(g => {
+  let drag = null, lastTap = 0;
+  const key = () => g.dataset.grip === 'nav' ? 'navW' : (matchMedia('(max-width:1100px)').matches ? 'oneW' : 'listW');
+  const colW = () => g.dataset.grip === 'nav' ? $('side').querySelector('.nav').getBoundingClientRect().width
+    : matchMedia('(max-width:1100px)').matches ? $('side').getBoundingClientRect().width - 1 : $('side').querySelector('.list').getBoundingClientRect().width;
+  g.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    const now = Date.now();
+    if(now - lastTap < 350){ delete prefs[key()]; savePrefs(); applySideWidths(); lastTap = 0; return; }
+    lastTap = now;
+    drag = {id: e.pointerId, x: e.clientX, w: colW() || SIDE_LIM[key()][2], k: key()};
+    g.setPointerCapture(e.pointerId); g.classList.add('on');
+  });
+  g.addEventListener('pointermove', e => {
+    if(!drag || e.pointerId !== drag.id) return;
+    const L = SIDE_LIM[drag.k];
+    prefs[drag.k] = Math.round(clamp(drag.w + e.clientX - drag.x, L[0], L[1]));
+    applySideWidths();
+  });
+  const end = e => { if(!drag || e.pointerId !== drag.id) return; drag = null; g.classList.remove('on'); savePrefs(); };
+  g.addEventListener('pointerup', end); g.addEventListener('pointercancel', end);
 });
 
 /* =====================================================================

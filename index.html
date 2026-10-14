@@ -46,6 +46,8 @@
       <div id="secEdit"></div>
       <div class="pages" id="pageList"></div>
     </section>
+    <div class="side-grip" data-grip="nav" title="Drag to resize, double-tap to reset" aria-hidden="true"></div>
+    <div class="side-grip" data-grip="list" title="Drag to resize, double-tap to reset" aria-hidden="true"></div>
   </aside>
 
   <main class="main" id="main">
@@ -53,6 +55,7 @@
       <button class="tb" id="sideBtn" title="Show or hide notebooks" aria-label="Show or hide notebooks"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
       <button class="tb" id="backLink" title="Back to previous page" aria-label="Back to previous page" hidden><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span id="backLinkName"></span></button>
       <input class="title-in" id="title" placeholder="Untitled page" autocomplete="off" aria-label="Page title">
+      <button class="tb" id="continueBtn" title="Continue where you left off" aria-label="Continue where you left off"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="lbl">Continue</span></button>
       <button class="tb" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
       <button class="tb" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
       <span class="sep"></span>

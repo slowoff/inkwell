@@ -2126,7 +2126,7 @@ async function loadImport(f){
   if(isPdf){
     if(!window.pdfjsLib) throw new Error('PDF reader missing');
     const pdf = await pdfjsLib.getDocument({data: new Uint8Array(await f.arrayBuffer())}).promise;
-    imp = {kind: 'pdf', pdf, n: pdf.numPages};
+    imp = {kind: 'pdf', pdf, n: pdf.numPages, name: f.name.replace(/\.pdf$/i, '').trim()};
     $('impPagesWrap').hidden = false; $('impPages').value = '';
     $('impCount').textContent = `(${pdf.numPages} page${pdf.numPages === 1 ? '' : 's'})`;
     for(let i = 1; i <= Math.min(5, pdf.numPages); i++){ const r = await renderPdfPage(pdf, i, 120); prev.appendChild(r.canvas); }
@@ -2162,6 +2162,8 @@ $('impGo').addEventListener('click', async () => {
   go.disabled = true;
   // place below everything already on the page, then scroll there
   const cb = contentBox();
+  // empty, untitled page + PDF: the page takes the PDF's file name
+  const pageDoc = getDoc(cur.id), nameAfterPdf = imp.kind === 'pdf' && !cb && !!imp.name && !!pageDoc && !(pageDoc.data.title || '').trim() && !$('title').value.trim();
   const [vx, vy] = toWorld(W > 600 ? 48 : 16, 24);
   const x0 = cb ? cb[0] : vx, y0 = cb ? cb[3] + 48 : vy;
   let y = y0; const items = [];
@@ -2197,6 +2199,8 @@ $('impGo').addEventListener('click', async () => {
     go.disabled = false;
     if(!items.length) return;
   }
+  const pd = nameAfterPdf && items.length && getDoc(cur.id);
+  if(pd && !(pd.data.title || '').trim() && !$('title').value.trim()){ $('title').value = imp.name; await patchDoc(pd, {title: imp.name}); refreshPageItem(cur.id); }
   if(items.length){ addItems(items); setTool('pen'); cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon(); }
   hideModal('importDlg');
   toast(items.length === 1 ? 'Placed on the page' : `Placed ${items.length} pages`);

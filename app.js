@@ -560,16 +560,20 @@ function itemEl(it){
     el.classList.toggle('doc', !!it.doc);
     el.style.width = it.w + 'px'; el.style.height = it.h + 'px';
     if(el._a !== it.a){
-      el._a = it.a; el.classList.add('missing'); el.textContent = 'Loading';
+      el._a = it.a; el.classList.add('missing');
+      for(const n of [...el.childNodes]) if(n !== el._pf) n.remove();
+      const msg = document.createElement('span'); msg.textContent = 'Loading'; el.insertBefore(msg, el.firstChild);
       assetURL(it.a).then(u => {
         if(el._a !== it.a) return;
-        if(!u){ el.textContent = 'Not downloaded yet'; return; }
-        el.textContent = '';
+        if(!u){ msg.textContent = 'Not downloaded yet'; return; }
+        msg.remove();
         const img = new Image(); img.src = u; img.draggable = false; img.alt = '';
         img.style.cssText = 'width:100%;height:100%;display:block;border-radius:2px';
-        el.appendChild(img); el.classList.remove('missing');
+        el.insertBefore(img, el.firstChild); el.classList.remove('missing');
       });
     }
+    if(it.f && it.f.length) syncFields(el, it);
+    else if(el._pf){ el._pf.remove(); el._pf = null; }
   } else if(it.t === 'x'){
     el.classList.add('it-text');
     el.style.width = it.w + 'px';
@@ -595,6 +599,133 @@ function itemEl(it){
   return el;
 }
 function dropEl(id){ const el = elMap.get(id); if(el){ el.remove(); elMap.delete(id); } }
+
+/* ---------- Fillable PDF form fields (on imported PDF pages) ----------
+   Stored on the image item as it.f = [{k, n, x, y, w, h, v, ...}]; x/y/w/h are fractions of the page.
+   k: 'tx' text, 'cb' checkbox, 'rb' radio (ev = its value), 'ch' dropdown, 'ls' list (o = [[value, label]]).
+   Fields can be clicked and typed into with a mouse (PC); on the iPad they only show their values. */
+function fieldFont(f, it){
+  if(f.s) return f.s * it.w;
+  if(f.k === 'tx' && !f.ml || f.k === 'ch') return Math.min(f.h * it.h * 0.62, it.w * 0.0235);
+  return it.w * 0.0202;
+}
+function makeField(f, i){
+  let c;
+  if(f.k === 'tx'){
+    c = document.createElement(f.ml ? 'textarea' : 'input');
+    if(!f.ml) c.type = 'text';
+    if(f.mx) c.maxLength = f.mx;
+    if(f.al) c.style.textAlign = f.al === 1 ? 'center' : 'right';
+    c.spellcheck = false; c.autocomplete = 'off';
+  } else if(f.k === 'cb' || f.k === 'rb'){
+    c = document.createElement('input'); c.type = 'checkbox';
+  } else {
+    c = document.createElement('select');
+    if(f.k === 'ls'){ c.size = Math.max(2, (f.o || []).length); if(f.ms) c.multiple = true; }
+    else { const o = document.createElement('option'); o.value = ''; o.textContent = ''; c.appendChild(o); }
+    for(const [v, l] of f.o || []){ const o = document.createElement('option'); o.value = v; o.textContent = l; c.appendChild(o); }
+  }
+  c.className = 'pf pf-' + f.k;
+  c.dataset.i = i;
+  if(f.ro) c.disabled = true;
+  c.tabIndex = 0;
+  Object.assign(c.style, {left: f.x * 100 + '%', top: f.y * 100 + '%', width: f.w * 100 + '%', height: f.h * 100 + '%'});
+  return c;
+}
+function setFieldValue(c, f){
+  if(f.k === 'tx'){ const v = f.v || ''; if(c.value !== v) c.value = v; }
+  else if(f.k === 'cb') c.checked = !!f.v;
+  else if(f.k === 'rb') c.checked = !!f.v && f.v === f.ev;
+  else if(c.multiple){ const vs = Array.isArray(f.v) ? f.v : f.v ? [f.v] : []; for(const o of c.options) o.selected = vs.includes(o.value); }
+  else { const v = Array.isArray(f.v) ? (f.v[0] || '') : (f.v || ''); c.value = v; if(c.value !== v) c.selectedIndex = -1; }
+}
+function syncFields(el, it){
+  let L = el._pf;
+  if(!L || L._n !== it.f.length){
+    if(L) L.remove();
+    L = el._pf = document.createElement('div');
+    L.className = 'pf-layer'; L._n = it.f.length;
+    it.f.forEach((f, i) => L.appendChild(makeField(f, i)));
+    el.appendChild(L);
+  }
+  const ch = L.children;
+  for(let i = 0; i < ch.length; i++){
+    const c = ch[i], f = it.f[i];
+    c.style.fontSize = fieldFont(f, it) + 'px';
+    if(c !== document.activeElement) setFieldValue(c, f);
+  }
+}
+function fieldValueOf(c, f){
+  if(f.k === 'tx') return c.value;
+  if(f.k === 'cb') return c.checked;
+  if(f.k === 'rb') return c.checked ? f.ev : '';
+  if(c.multiple) return [...c.selectedOptions].map(o => o.value);
+  return c.value;
+}
+function fieldText(it){
+  let t = '';
+  for(const f of it.f || []){
+    if(f.k === 'tx' && f.v) t += ' ' + f.v;
+    else if((f.k === 'ch' || f.k === 'ls') && f.v && f.v.length){
+      const vs = Array.isArray(f.v) ? f.v : [f.v];
+      t += ' ' + vs.map(v => { const o = (f.o || []).find(o => o[0] === v); return o ? o[1] : v; }).join(' ');
+    }
+  }
+  return t;
+}
+let pfEdit = null;   // {id, before}: the item as it was when the field got focus (one undo step per field edit)
+function pfTarget(e){
+  const c = e.target && e.target.closest && e.target.closest('.pf');
+  if(!c || !cur) return null;
+  const host = c.closest('.it'); const it = host && cur.items.get(host.dataset.id);
+  return it && it.f ? {c, it, i: +c.dataset.i} : null;
+}
+function pfUpdate(e){
+  const t = pfTarget(e); if(!t) return;
+  const f = t.it.f[t.i]; if(!f) return;
+  let v = fieldValueOf(t.c, f);
+  let list;
+  if(f.k === 'rb'){
+    if(!t.c.checked && f.v === f.ev) v = '';            // clicking the chosen radio again clears the group
+    list = t.it.f.map(g => g.k === 'rb' && g.n === f.n ? Object.assign({}, g, {v}) : g);
+  } else {
+    if(JSON.stringify(v) === JSON.stringify(f.v)) return;
+    list = t.it.f.slice(); list[t.i] = Object.assign({}, f, {v});
+  }
+  const nit = Object.assign({}, t.it, {f: list});
+  if(!pfEdit || pfEdit.id !== nit.id) pfEdit = {id: nit.id, before: t.it};
+  setItems([[nit.id, nit]]);
+  if(f.k === 'rb'){ const L = elMap.get(nit.id); L && L._pf && [...L._pf.children].forEach((c, i) => setFieldValue(c, list[i])); }
+}
+function pfCommit(){
+  if(!pfEdit || !cur) return;
+  const now = cur.items.get(pfEdit.id);
+  if(now && now !== pfEdit.before){ commit([[pfEdit.id, pfEdit.before]], [[pfEdit.id, now]]); pfEdit.before = now; }
+}
+worldBack.addEventListener('focusin', e => {
+  const t = pfTarget(e); if(!t) return;
+  pfEdit = {id: t.it.id, before: t.it};
+  // keep the field on screen (Tab can jump to a field outside the view)
+  const r = t.c.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+  let dx = 0, dy = 0;
+  if(r.right > sr.right - 20) dx = sr.right - 20 - r.right;
+  if(r.left + dx < sr.left + 20) dx = sr.left + 20 - r.left;
+  if(r.bottom > sr.bottom - 20) dy = sr.bottom - 20 - r.bottom;
+  if(r.top + dy < sr.top + 20) dy = sr.top + 20 - r.top;
+  if(dx || dy){ cam.ox += dx; cam.oy += dy; invalidate(); saveCamSoon(); }
+});
+worldBack.addEventListener('input', pfUpdate);
+worldBack.addEventListener('change', e => { pfUpdate(e); if(pfTarget(e)) pfCommit(); });
+worldBack.addEventListener('focusout', e => {
+  const t = pfTarget(e); if(!t) return;
+  pfCommit(); pfEdit = null;
+  const it = cur.items.get(t.it.id); if(it && it.f && it.f[t.i]) setFieldValue(t.c, it.f[t.i]);
+});
+worldBack.addEventListener('keydown', e => {
+  if(e.key === 'Enter' && e.target.matches && e.target.matches('input.pf')){ e.preventDefault(); e.target.blur(); }
+});
+// focusing a field must never scroll the stage itself
+stage.addEventListener('scroll', () => { if(stage.scrollTop || stage.scrollLeft){ stage.scrollTop = 0; stage.scrollLeft = 0; } });
 function itemBox(it){
   if(it.t === 's') return geoOf(it).b;
   if(it.t === 'i' || it.t === 'tp') return [it.x, it.y, it.x + it.w, it.y + it.h];
@@ -690,6 +821,7 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 function onDown(e){
   if(!cur) return;
   if(e.target.closest('.sel-menu,.fmt,.sel-rect,#tHandle')) return;
+  if(e.target.closest('.pf') && getComputedStyle(e.target.closest('.pf')).pointerEvents !== 'none') return;
   const editEl = editing && elMap.get(editing.id);
   const inEdit = !!(editEl && editEl.contains(e.target));
   const [sx, sy] = pt(e);
@@ -1807,7 +1939,7 @@ async function buildSearch(){
   for(const d of all){
     if(d.kind !== 'content' || d.deleted || !d.data) continue;
     let txt = '';
-    for(const it of d.data.items || []){ if(it.t === 'x') txt += ' ' + htmlText(it.html); else if(it.t === 'm') txt += ' ' + it.tex; }
+    for(const it of d.data.items || []){ if(it.t === 'x') txt += ' ' + htmlText(it.html); else if(it.t === 'm') txt += ' ' + it.tex; else if(it.t === 'i' && it.f) txt += fieldText(it); }
     map.set(d.id.slice(2), txt.toLowerCase());
   }
   searchCache = map;
@@ -2193,7 +2325,49 @@ $('importFile').addEventListener('change', async () => {
   try { await loadImport(f); $('impStatus').textContent = ''; }
   catch(e){ console.warn(e); $('impStatus').textContent = 'This file could not be opened. ' + (e && e.name === 'PasswordException' ? 'It is password protected.' : 'Try saving it as PDF again.'); $('impGo').disabled = true; }
 });
-async function renderPdfPage(pdf, n, targetW){
+// Reads a PDF page's fillable fields. Returns {f: fields for the item, blank: [[annotationId, emptyValue]]}.
+async function pdfFields(page){
+  let an;
+  try { an = await page.getAnnotations({intent: 'display'}); } catch(e){ console.warn(e); return {f: [], blank: []}; }
+  const vp = page.getViewport({scale: 1}), r4 = v => Math.round(v * 1e4) / 1e4;
+  const f = [], blank = [];
+  for(const a of an || []){
+    if(a.subtype !== 'Widget' || a.hidden) continue;
+    let k;
+    if(a.fieldType === 'Tx') k = 'tx';
+    else if(a.fieldType === 'Btn') k = a.checkBox ? 'cb' : a.radioButton ? 'rb' : null;
+    else if(a.fieldType === 'Ch') k = a.combo ? 'ch' : 'ls';
+    if(!k || !a.rect) continue;
+    const [x1, y1, x2, y2] = vp.convertToViewportRectangle(a.rect);
+    const x = Math.min(x1, x2), y = Math.min(y1, y2), w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+    if(w < 3 || h < 3) continue;
+    const o = {k, n: a.fieldName || '', x: r4(x / vp.width), y: r4(y / vp.height), w: r4(w / vp.width), h: r4(h / vp.height)};
+    const fv = a.fieldValue;
+    if(k === 'tx'){
+      o.v = typeof fv === 'string' ? fv : Array.isArray(fv) ? fv.join(' ') : '';
+      if(a.multiLine) o.ml = 1;
+      if(a.maxLen > 0) o.mx = a.maxLen;
+      if(a.textAlignment === 1 || a.textAlignment === 2) o.al = a.textAlignment;
+    } else if(k === 'cb'){
+      o.v = !!fv && fv !== 'Off';
+    } else if(k === 'rb'){
+      o.ev = String(a.buttonValue == null ? '' : a.buttonValue);
+      o.v = fv && fv !== 'Off' ? String(fv) : '';
+    } else {
+      o.o = (a.options || []).map(p => { const ev = Array.isArray(p.exportValue) ? p.exportValue[0] : p.exportValue, dv = Array.isArray(p.displayValue) ? p.displayValue[0] : p.displayValue; return [String(ev == null ? dv : ev), String(dv == null ? ev : dv)]; });
+      const vs = (Array.isArray(fv) ? fv : fv ? [fv] : []).map(String);
+      if(k === 'ls' && a.multiSelect){ o.ms = 1; o.v = vs; } else o.v = vs[0] || '';
+    }
+    const ds = a.defaultAppearanceData && a.defaultAppearanceData.fontSize;
+    if((k === 'tx' || k === 'ch' || k === 'ls') && ds > 0) o.s = r4(ds / vp.width);
+    if(a.readOnly) o.ro = 1;
+    f.push(o);
+    if(!a.readOnly) blank.push([a.id, k === 'tx' ? '' : k === 'cb' || k === 'rb' ? false : []]);
+  }
+  // read-only fields keep their printed look; drop their overlay so nothing is drawn twice
+  return {f: f.filter(o => !o.ro), blank};
+}
+async function renderPdfPage(pdf, n, targetW, blank){
   const page = await pdf.getPage(n);
   const v1 = page.getViewport({scale: 1});
   const vp = page.getViewport({scale: targetW / v1.width});
@@ -2201,7 +2375,13 @@ async function renderPdfPage(pdf, n, targetW){
   c.width = Math.max(1, Math.round(vp.width)); c.height = Math.max(1, Math.round(vp.height));
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-  await page.render({canvasContext: ctx, viewport: vp}).promise;
+  const opts = {canvasContext: ctx, viewport: vp};
+  if(blank && blank.length){
+    // fillable fields: print them empty, their values live in Inkwell's own field layer on top
+    for(const [id, value] of blank) pdf.annotationStorage.setValue(id, {value});
+    opts.annotationMode = pdfjsLib.AnnotationMode.ENABLE_STORAGE;
+  }
+  await page.render(opts).promise;
   page.cleanup();
   return {canvas: c, w: v1.width, h: v1.height};
 }
@@ -2251,20 +2431,23 @@ $('impGo').addEventListener('click', async () => {
   const pageDoc = getDoc(cur.id), nameAfterPdf = imp.kind === 'pdf' && !cb && !!imp.name && !!pageDoc && !(pageDoc.data.title || '').trim() && !$('title').value.trim();
   const [vx, vy] = toWorld(W > 600 ? 48 : 16, 24);
   const x0 = cb ? cb[0] : vx, y0 = cb ? cb[3] + 48 : vy;
-  let y = y0; const items = [];
+  let y = y0, nFields = 0; const items = [];
   try {
     if(imp.kind === 'pdf'){
       const pages = parsePages($('impPages').value, imp.n);
       if(!pages.length){ $('impStatus').textContent = 'No pages match that range.'; go.disabled = false; return; }
       for(let k = 0; k < pages.length; k++){
         $('impStatus').textContent = `Printing page ${k + 1} of ${pages.length}`;
-        const page = await imp.pdf.getPage(pages[k]); const v1 = page.getViewport({scale: 1}); page.cleanup();
+        const page = await imp.pdf.getPage(pages[k]); const v1 = page.getViewport({scale: 1});
+        const pf = await pdfFields(page); page.cleanup();
         const wWorld = v1.width / 595.28 * A4W * size, hWorld = wWorld * v1.height / v1.width;
         const px = Math.round(clamp(wWorld * 2.4, 900, 2400));
-        const r = await renderPdfPage(imp.pdf, pages[k], px);
+        const r = await renderPdfPage(imp.pdf, pages[k], px, pf.f.length ? pf.blank : null);
         const a = await saveAsset(await canvasBlob(r.canvas));
         r.canvas.width = r.canvas.height = 1;
-        items.push({t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a, doc: 1});
+        const item = {t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a, doc: 1};
+        if(pf.f.length){ item.f = pf.f; nFields += pf.f.length; }
+        items.push(item);
         y += hWorld + 24;
       }
     } else {
@@ -2288,7 +2471,7 @@ $('impGo').addEventListener('click', async () => {
   if(pd && !(pd.data.title || '').trim() && !$('title').value.trim()){ $('title').value = imp.name; await patchDoc(pd, {title: imp.name}); refreshPageItem(cur.id); }
   if(items.length){ addItems(items); setTool('pen'); cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon(); }
   hideModal('importDlg');
-  toast(items.length === 1 ? 'Placed on the page' : `Placed ${items.length} pages`);
+  toast((items.length === 1 ? 'Placed on the page' : `Placed ${items.length} pages`) + (nFields ? ` · ${nFields} fillable field${nFields === 1 ? '' : 's'}` : ''));
 });
 
 /* =====================================================================
@@ -2323,6 +2506,26 @@ async function exportPdf(){
     if(it.t !== 'i') continue;
     const u = await assetURL(it.a);
     if(u) parts.push(`<img src="${u}" style="position:absolute;left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px">`);
+    for(const f of it.f || []){
+      let txt = '', mark = false;
+      if(f.k === 'ls'){
+        // list box: show all options with the chosen ones highlighted, like on screen
+        const vs = Array.isArray(f.v) ? f.v : f.v ? [f.v] : [], fs = fieldFont(f, it);
+        const rows = (f.o || []).map(([v, l]) => `<div style="padding:0 ${fs * 0.15}px;${vs.includes(v) ? 'background:#9fbbe8;' : ''}white-space:pre;overflow:hidden">${esc(l)}</div>`).join('');
+        parts.push(`<div style="position:absolute;left:${it.x + f.x * it.w}px;top:${it.y + f.y * it.h}px;width:${f.w * it.w}px;height:${f.h * it.h}px;overflow:hidden;box-sizing:border-box;background:#fff;box-shadow:inset 0 0 0 1px #888;font:${fs}px/1.2 Helvetica,Arial,sans-serif;color:#111">${rows}</div>`);
+        continue;
+      }
+      if(f.k === 'tx') txt = f.v || '';
+      else if(f.k === 'cb'){ txt = f.v ? '\u2713' : ''; mark = true; }
+      else if(f.k === 'rb'){ txt = f.v && f.v === f.ev ? '\u25CF' : ''; mark = true; }
+      else txt = fieldText({f: [f]}).trim();
+      if(!txt) continue;
+      const fx = it.x + f.x * it.w, fy = it.y + f.y * it.h, fw = f.w * it.w, fh = f.h * it.h;
+      const fs = mark ? fh * 0.8 : fieldFont(f, it);
+      const align = mark ? 'center' : f.al === 1 ? 'center' : f.al === 2 ? 'right' : 'left';
+      const lay = mark || !(f.ml || f.k === 'ls') ? `display:flex;align-items:center;justify-content:${mark ? 'center' : align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start'};white-space:pre` : `white-space:pre-wrap;text-align:${align}`;
+      parts.push(`<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:#111;${lay}">${esc(txt)}</div>`);
+    }
   }
   let ink = '';
   for(const pass of [1, 0]) for(const it of cur.items.values()){

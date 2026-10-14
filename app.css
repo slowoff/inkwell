@@ -164,6 +164,27 @@ html,body{background:var(--paper)}
 .it-img.doc img{transition:filter .2s}
 @media (prefers-color-scheme: dark){.it-img.doc img{filter:invert(.9) hue-rotate(180deg)}.it-img.doc{background:#1b2027}}
 .it-img.missing{background:var(--panel2);box-shadow:0 0 0 1px var(--line);display:grid;place-items:center;color:var(--faint);font-size:14px}
+/* fillable PDF fields: values always shown, editable with a mouse (PC) */
+.pf-layer{position:absolute;inset:0;pointer-events:none}
+.it-img.missing .pf-layer{display:none}
+.pf{position:absolute;box-sizing:border-box;margin:0;padding:0 .15em;border:0;border-radius:1px;background:transparent;color:#111;font-family:Helvetica,Arial,sans-serif;line-height:1.15;outline:none;pointer-events:none;-webkit-appearance:none;appearance:none;-webkit-user-select:text;user-select:text}
+textarea.pf{resize:none;overflow:hidden;padding:.12em .2em;white-space:pre-wrap}
+.pf-cb:checked{background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4 10.5l4 4 8-9' fill='none' stroke='%23111' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/82% no-repeat}
+.pf-rb{border-radius:50%}
+.pf-rb:checked{background:radial-gradient(circle,#111 0 28%,transparent 31%)}
+select.pf{padding:0 .15em;text-overflow:ellipsis}
+select.pf-ls{background:#fff;overflow:hidden;box-shadow:inset 0 0 0 1px #888}
+select.pf option{color:#111;background:#fff}
+select.pf-ls option:checked{background:#9fbbe8}
+@media (hover:hover) and (pointer:fine){
+  .pf{pointer-events:auto;cursor:text}
+  .pf-cb,.pf-rb,select.pf{cursor:pointer}
+  .pf:disabled{pointer-events:none}
+  .pf:hover{background-color:rgba(60,110,230,.10)}
+  .pf:focus{background-color:rgba(60,110,230,.07);box-shadow:0 0 0 1.5px #3b6fe0}
+}
+@media (prefers-color-scheme: dark){.it-img.doc .pf-layer{filter:invert(.9) hue-rotate(180deg)}}
+@media print{.pf-layer{display:none}}
 .it-text{-webkit-user-select:none;user-select:none;min-width:40px;min-height:30px;padding:2px 6px;border-radius:4px;font-size:17px;line-height:1.55;outline:none;overflow-wrap:anywhere;cursor:text}
 .it-text[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;box-shadow:0 0 0 1.5px var(--accent);background:color-mix(in srgb,var(--paper) 88%,transparent)}
 .it-text:empty::before{content:"Type here";color:var(--faint)}

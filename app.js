@@ -1961,19 +1961,31 @@ document.querySelectorAll('.side-grip').forEach(g => {
     : matchMedia('(max-width:1100px)').matches ? $('side').getBoundingClientRect().width - 1 : $('side').querySelector('.list').getBoundingClientRect().width;
   g.addEventListener('pointerdown', e => {
     e.preventDefault();
-    const now = Date.now();
-    if(now - lastTap < 350){ delete prefs[key()]; savePrefs(); applySideWidths(); lastTap = 0; return; }
-    lastTap = now;
-    drag = {id: e.pointerId, x: e.clientX, w: colW() || SIDE_LIM[key()][2], k: key()};
+    drag = {id: e.pointerId, x: e.clientX, y: e.clientY, w: colW() || SIDE_LIM[key()][2], k: key(), moved: false};
     g.setPointerCapture(e.pointerId); g.classList.add('on');
   });
   g.addEventListener('pointermove', e => {
     if(!drag || e.pointerId !== drag.id) return;
+    if(!drag.moved && Math.abs(e.clientX - drag.x) < 4) return;
+    drag.moved = true;
     const L = SIDE_LIM[drag.k];
     prefs[drag.k] = Math.round(clamp(drag.w + e.clientX - drag.x, L[0], L[1]));
     applySideWidths();
   });
-  const end = e => { if(!drag || e.pointerId !== drag.id) return; drag = null; g.classList.remove('on'); savePrefs(); };
+  const end = e => {
+    if(!drag || e.pointerId !== drag.id) return;
+    const d = drag; drag = null; g.classList.remove('on');
+    if(d.moved){ savePrefs(); lastTap = 0; return; }
+    if(e.type !== 'pointerup') return;
+    const now = Date.now();
+    if(now - lastTap < 350){ delete prefs[d.k]; savePrefs(); applySideWidths(); lastTap = 0; return; }
+    lastTap = now;
+    // a plain tap goes through to whatever is under the handle (page list, notebook counts)
+    g.style.pointerEvents = 'none';
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    g.style.pointerEvents = '';
+    if(under && under !== g) under.click();
+  };
   g.addEventListener('pointerup', end); g.addEventListener('pointercancel', end);
 });
 

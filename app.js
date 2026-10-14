@@ -51,6 +51,7 @@ const DEFAULT_PREFS = {
   penFavs: ['auto', '#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF'],
   hlFavs: ['#F5C400', '#4CC26B', '#FF6FA3', '#3BA5F0'],
   finger: false,
+  snapLines: true,
   ruler: {on: false, cx: null, cy: null, a: 0},
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
   focus: false, open: {}
@@ -570,6 +571,7 @@ function itemEl(it){
         const img = new Image(); img.src = u; img.draggable = false; img.alt = '';
         img.style.cssText = 'width:100%;height:100%;display:block;border-radius:2px';
         el.insertBefore(img, el.firstChild); el.classList.remove('missing');
+        if(!lineReady.has(it.a)) setTimeout(() => pageLines(it.a), 200);
       });
     }
     if(it.f && it.f.length) syncFields(el, it);
@@ -578,6 +580,8 @@ function itemEl(it){
     el.classList.add('it-text');
     el.style.width = it.w + 'px';
     el.style.fontSize = (17 * (it.fs || 1)) + 'px';
+    el.style.lineHeight = it.lh ? it.lh + 'px' : '';   // lh: text placed on a worksheet's answer lines
+    el.classList.toggle('lh', !!it.lh);
     if(!(editing && editing.id === it.id) && el._html !== it.html){
       el.innerHTML = cleanHTML(it.html);
       el._html = it.html;
@@ -1335,7 +1339,7 @@ function transformItem(it, tf){
     o.p = p; o.w = it.w * tf.s;
   } else {
     [o.x, o.y] = m(it.x, it.y);
-    if(it.t === 'x'){ o.w = it.w * tf.s; o.fs = (it.fs || 1) * tf.s; }
+    if(it.t === 'x'){ o.w = it.w * tf.s; o.fs = (it.fs || 1) * tf.s; if(it.lh) o.lh = it.lh * tf.s; }
     else if(it.t === 'm'){ o.fs = (it.fs || 24) * tf.s; }
     else { o.w = it.w * tf.s; o.h = it.h * tf.s; }
   }
@@ -1431,6 +1435,93 @@ function tapAt(target, sx, sy){
   closePops();
 }
 
+/* ---------- Answer lines on imported pages (typed text snaps onto them) ----------
+   Found by scanning the page image for long thin horizontal lines; works for PDFs and pictures,
+   old imports included. Cached per image; nothing is stored. */
+const lineCache = new Map(), lineReady = new Map();   // asset id -> Promise / lines [{y, x1, x2}] as page fractions
+function pageLines(aId){
+  let p = lineCache.get(aId);
+  if(!p){
+    p = detectLines(aId).catch(e => { console.warn(e); return null; }).then(r => {
+      if(r) lineReady.set(aId, r); else lineCache.delete(aId);
+      return r || [];
+    });
+    lineCache.set(aId, p);
+  }
+  return p;
+}
+async function detectLines(aId){
+  const u = await assetURL(aId); if(!u) return null;
+  const img = new Image(); img.src = u; await img.decode();
+  const W0 = img.naturalWidth, H0 = img.naturalHeight; if(!W0 || !H0) return null;
+  const sc = Math.min(1, 1400 / W0), w = Math.max(1, Math.round(W0 * sc)), h = Math.max(1, Math.round(H0 * sc));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', {willReadFrequently: true}); ctx.drawImage(img, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data; c.width = c.height = 1;
+  const lum = new Uint8Array(w * h), hist = new Uint32Array(256);
+  for(let i = 0; i < w * h; i++){ const l = (px[4 * i] * 77 + px[4 * i + 1] * 150 + px[4 * i + 2] * 29) >> 8; lum[i] = l; hist[l]++; }
+  let bg = 0; for(let acc = 0; bg < 255 && (acc += hist[bg]) < w * h / 2; bg++);   // median = paper colour (light or dark)
+  const ink = new Uint8Array(w * h); for(let i = 0; i < w * h; i++) ink[i] = Math.abs(lum[i] - bg) > 60 ? 1 : 0;
+  const gap = Math.max(2, Math.round(w * 0.004)), minLen = w * 0.1;
+  const segs = [];
+  for(let y = 0; y < h; y++){
+    const row = y * w; let s = -1, last = -1, n = 0;
+    const flush = () => { if(s >= 0 && last - s + 1 >= minLen && n / (last - s + 1) >= 0.6) segs.push({y, x1: s, x2: last}); };
+    for(let x = 0; x < w; x++) if(ink[row + x]){ if(s < 0 || x - last > gap){ flush(); s = x; n = 0; } last = x; n++; }
+    flush();
+  }
+  // join touching rows into lines; keep only thin ones with clear paper above and below (not text, not filled boxes)
+  const bands = [];
+  for(const g of segs){
+    const b = bands.find(b => g.y - b.y2 <= 1 && Math.min(b.x2, g.x2) - Math.max(b.x1, g.x1) > 0.5 * Math.min(b.x2 - b.x1, g.x2 - g.x1));
+    if(b){ b.y2 = g.y; b.x1 = Math.min(b.x1, g.x1); b.x2 = Math.max(b.x2, g.x2); } else bands.push({y1: g.y, y2: g.y, x1: g.x1, x2: g.x2});
+  }
+  const clear = (y, x1, x2) => { if(y < 0 || y >= h) return true; let n = 0; for(let x = x1; x <= x2; x++) n += ink[y * w + x]; return n / (x2 - x1 + 1) < 0.3; };
+  const maxT = Math.max(3, Math.round(h * 0.004)), out = [];
+  for(const b of bands){
+    if(b.y2 - b.y1 + 1 > maxT) continue;
+    if(!clear(b.y1 - 3, b.x1, b.x2) || !clear(b.y2 + 3, b.x1, b.x2)) continue;
+    out.push({y: (b.y1 + b.y2 + 1) / 2 / h, x1: b.x1 / w, x2: (b.x2 + 1) / w});
+  }
+  return out.sort((a, b) => a.y - b.y);
+}
+// The answer line to write on for a tap/click at world point (wx, wy), or null.
+function snapLineAt(wx, wy){
+  if(!cur) return null;
+  const imgs = [...cur.items.values()].filter(it => it.t === 'i' && wx >= it.x && wx <= it.x + it.w && wy >= it.y - 20 && wy <= it.y + it.h);
+  for(const it of imgs.reverse()){
+    const fr = lineReady.get(it.a);
+    if(!fr){ pageLines(it.a); continue; }
+    // world coordinates; skip the edges of fillable field boxes
+    const ls = fr.map(l => ({y: it.y + l.y * it.h, x1: it.x + l.x1 * it.w, x2: it.x + l.x2 * it.w}))
+      .filter(l => !(it.f || []).some(f => { const fx1 = it.x + f.x * it.w, fx2 = fx1 + f.w * it.w, fy1 = it.y + f.y * it.h, fy2 = fy1 + f.h * it.h;
+        return Math.min(l.x2, fx2) - Math.max(l.x1, fx1) > 0 && (Math.abs(l.y - fy1) < 4 || Math.abs(l.y - fy2) < 4); }));
+    const near = ls.filter(l => wx >= l.x1 - 24 && wx <= l.x2 + 24 && l.y >= wy - 10);
+    if(!near.length) continue;
+    const c = near[0], i = ls.indexOf(c), tol = it.w * 0.03;
+    const same = (a, b) => Math.abs(a.x1 - b.x1) < tol && Math.abs(a.x2 - b.x2) < tol;
+    let d = 0;
+    const nx = ls[i + 1], pv = ls[i - 1];
+    if(nx && same(c, nx) && nx.y - c.y > 8 && nx.y - c.y < 90) d = nx.y - c.y;
+    else if(pv && same(c, pv) && c.y - pv.y > 8 && c.y - pv.y < 90) d = c.y - pv.y;
+    const dd = d || 30;
+    if(c.y - wy > Math.max(dd * 1.3, 26)) continue;   // too far above the line (e.g. on the question text)
+    return {x1: c.x1, x2: c.x2, y: c.y, d: dd};
+  }
+  return null;
+}
+// distance from the top of the first line to the text baseline, for font size F and line height lh
+function baselineOf(F, lh){
+  const p = document.createElement('div');
+  p.className = 'it it-text lh';
+  p.style.cssText = `visibility:hidden;left:0;top:0;width:300px;padding:0;font-size:${F}px;line-height:${lh}px`;
+  p.innerHTML = '<p>Xg<span style="display:inline-block;width:0;height:0"></span></p>';
+  worldFront.appendChild(p);
+  const b = p.querySelector('span').offsetTop;
+  p.remove();
+  return b;
+}
+
 /* ---------- text boxes ---------- */
 let editing = null, keepEditing = false;
 function placeAt(a){
@@ -1439,7 +1530,13 @@ function placeAt(a){
     if(it && it.t === 'x'){ startEditing(id, SR.left + a.sx, SR.top + a.sy); return; }
     if(it && it.t === 'm'){ openMath(it); return; }
     const fs = clamp(1 / cam.z, 0.25, 6);
-    const nt = {t: 'x', id: 'x' + newId(), x: a.w0[0] - 4 * fs, y: a.w0[1] - 16 * fs, w: clamp((W - a.sx - 16) / cam.z, 160 * fs, 460 * fs), fs, html: ''};
+    let nt = {t: 'x', id: 'x' + newId(), x: a.w0[0] - 4 * fs, y: a.w0[1] - 16 * fs, w: clamp((W - a.sx - 16) / cam.z, 160 * fs, 460 * fs), fs, html: ''};
+    const sn = prefs.snapLines ? snapLineAt(a.w0[0], a.w0[1]) : null;
+    if(sn){
+      // sit on the answer line; every further line of text lands on the next ruled line
+      const F = clamp(sn.d * 0.55, 8, 40), lh = Math.round(sn.d * 100) / 100;
+      nt = {t: 'x', id: nt.id, x: sn.x1 - 6, y: sn.y - 2 - baselineOf(F, lh) - F * 0.2, w: Math.max(60, sn.x2 - sn.x1 + 12), fs: F / 17, lh, html: ''};
+    }
     cur.items.set(nt.id, nt); cur.lastId = nt.id;
     itemEl(nt);
     startEditing(nt.id, null, null, true);
@@ -2220,6 +2317,7 @@ $('mDelete').addEventListener('click', () => {
   if(!d.classList.contains('armed')){ d.classList.add('armed'); d.textContent = 'Tap again to delete this page'; return; }
   closePops(); if(cur) deletePage(cur.id);
 });
+$('mSnap').addEventListener('click', () => { prefs.snapLines = !prefs.snapLines; savePrefs(); $('mSnap').classList.toggle('on', prefs.snapLines); toast(prefs.snapLines ? 'Typed text snaps to answer lines' : 'Text snapping off'); });
 $('mFit').addEventListener('click', () => {
   closePops(); const b = contentBox();
   if(!b){ zoomAt(W / 2, H / 2, 1); return; }
@@ -2701,6 +2799,7 @@ async function boot(){
   if(!docs.size){ await seed(); await loadDocs(); if(!ui.page){ ui.nb = 'nb-school'; ui.sec = 'sec-general'; ui.page = 'pg-welcome'; } }
   ensureUi();
   $('fingerBtn').classList.toggle('on', prefs.finger);
+  $('mSnap').classList.toggle('on', prefs.snapLines);
   if(prefs.focus && width() !== 'narrow') app.classList.add('focus');
   setTool(prefs.tool);
   renderNav(); renderList();

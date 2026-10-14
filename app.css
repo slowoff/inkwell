@@ -162,7 +162,6 @@ html,body{background:var(--paper)}
 .it{position:absolute}
 .it-img{display:block;border-radius:2px;box-shadow:0 0 0 1px var(--line),0 2px 8px rgba(0,0,0,.08);background:#fff}
 .it-img.doc img{transition:filter .2s}
-@media (prefers-color-scheme: dark){.it-img.doc img{filter:invert(.9) hue-rotate(180deg)}.it-img.doc{background:#1b2027}}
 .it-img.missing{background:var(--panel2);box-shadow:0 0 0 1px var(--line);display:grid;place-items:center;color:var(--faint);font-size:14px}
 /* fillable PDF fields: values always shown, editable with a mouse (PC) */
 .pf-layer{position:absolute;inset:0;pointer-events:none}
@@ -183,7 +182,6 @@ select.pf-ls option:checked{background:#9fbbe8}
   .pf:hover{background-color:rgba(60,110,230,.10)}
   .pf:focus{background-color:rgba(60,110,230,.07);box-shadow:0 0 0 1.5px #3b6fe0}
 }
-@media (prefers-color-scheme: dark){.it-img.doc .pf-layer{filter:invert(.9) hue-rotate(180deg)}}
 @media print{.pf-layer{display:none}}
 .it-text{-webkit-user-select:none;user-select:none;min-width:40px;min-height:30px;padding:2px 6px;border-radius:4px;font-size:17px;line-height:1.55;outline:none;overflow-wrap:anywhere;cursor:text}
 .it-text[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;box-shadow:0 0 0 1.5px var(--accent);background:color-mix(in srgb,var(--paper) 88%,transparent)}
@@ -191,6 +189,11 @@ select.pf-ls option:checked{background:#9fbbe8}
 .it-text p,.it-text div{margin:0}
 .it-text h1{margin:0;font-family:var(--f-display);font-size:26px;line-height:1.35}
 .it-text h2{margin:0;font-family:var(--f-display);font-size:20px;line-height:1.4}
+/* text and formulas on an imported page keep dark ink in dark mode (the page stays white) */
+.it-text.on-paper,.it-math.on-paper{color:#18212B}
+.it-text.on-paper[contenteditable="true"]{background:rgba(255,255,255,.85)}
+.it-text.on-paper.lh[contenteditable="true"]{background:transparent}
+.it-text.on-paper:empty::before{color:#8a94a0}
 .it-text.lh[contenteditable="true"]{background:transparent}
 .it-text.lh h1,.it-text.lh h2,.it-text.lh li,.it-text.lh p,.it-text.lh div{line-height:inherit}
 .it-text ul,.it-text ol{margin:0;padding-left:24px}

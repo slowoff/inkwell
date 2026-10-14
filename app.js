@@ -399,6 +399,23 @@ function strokeBox(it){
   return [x0 - m, y0 - m, x1 + m, y1 + m];
 }
 const geo = new Map();
+// imported pages/pictures (always shown light, also in dark mode)
+function paperRects(){
+  const r = [];
+  if(cur) for(const it of cur.items.values()) if(it.t === 'i') r.push([it.x, it.y, it.x + it.w, it.y + it.h]);
+  return r;
+}
+function onPaperAt(rects, x, y){ return rects.some(r => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]); }
+function refreshPaper(){
+  if(!cur) return;
+  const rects = paperRects();
+  for(const it of cur.items.values()){
+    if(it.t !== 'x' && it.t !== 'm') continue;
+    const el = elMap.get(it.id); if(!el) continue;
+    const b = itemBox(it);
+    el.classList.toggle('on-paper', onPaperAt(rects, (b[0] + b[2]) / 2, Math.min(b[1] + 14, (b[1] + b[3]) / 2)));
+  }
+}
 function geoOf(it){
   let g = geo.get(it.id);
   if(g && g.it === it) return g;
@@ -421,7 +438,9 @@ function lum(hex){
   const n = parseInt(m[1], 16);
   return 0.2126 * (n >> 16) / 255 + 0.7152 * (n >> 8 & 255) / 255 + 0.0722 * (n & 255) / 255;
 }
-function inkColor(c, print){
+// onPaper: drawn over an imported page/picture, which always stays light, so use light-mode ink there
+function inkColor(c, print, onPaper){
+  if(onPaper) print = true;
   const dark = !print && darkMQ.matches;
   if(!c || c === 'auto') return print ? '#18212B' : tokens.fg;
   const l = lum(c);
@@ -512,14 +531,15 @@ function drawInk(){
   inkCtx.clearRect(0, 0, inkCv.width, inkCv.height);
   if(!cur) return;
   inkCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
-  const v = viewRect();
+  const v = viewRect(), pages = paperRects();
   for(const pass of [1, 0]){
-    inkCtx.globalAlpha = pass ? (darkMQ.matches ? 0.34 : 0.4) : 1;
     for(const it of cur.items.values()){
       if(it.t !== 's' || (it.hl ? 1 : 0) !== pass) continue;
       const g = geoOf(it);
       if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
-      inkCtx.fillStyle = inkColor(it.c);
+      const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
+      inkCtx.globalAlpha = pass ? (darkMQ.matches && !paper ? 0.34 : 0.4) : 1;
+      inkCtx.fillStyle = inkColor(it.c, false, paper);
       inkCtx.fill(g.path);
     }
   }
@@ -776,7 +796,7 @@ function redo(){
   setItems(op.a); cur.undo.push(op); clearSel(); updUndo();
 }
 function updUndo(){ $('undo').disabled = !cur || !cur.undo.length; $('redo').disabled = !cur || !cur.redo.length; }
-function changed(){ lastLocalEdit = Date.now(); invalidate(0, 1, 1); saveContentSoon(); }
+function changed(){ lastLocalEdit = Date.now(); invalidate(0, 1, 1); saveContentSoon(); refreshPaper(); }
 
 async function saveContent(){
   if(!cur) return;
@@ -1059,8 +1079,9 @@ function drawLive(){
   if(!act) return;
   if(act.kind === 'stroke'){
     liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
-    liveCtx.globalAlpha = act.hl ? (darkMQ.matches ? 0.34 : 0.4) : 1;
-    liveCtx.fillStyle = inkColor(act.c);
+    const paper = onPaperAt(paperRects(), act.pts[0], act.pts[1]);
+    liveCtx.globalAlpha = act.hl ? (darkMQ.matches && !paper ? 0.34 : 0.4) : 1;
+    liveCtx.fillStyle = inkColor(act.c, false, paper);
     liveCtx.fill(strokePath({t: 's', c: act.c, w: act.w, hl: act.hl, p: act.pts}, false));
     liveCtx.globalAlpha = 1;
   } else if(act.kind === 'lasso'){
@@ -1538,7 +1559,7 @@ function placeAt(a){
       nt = {t: 'x', id: nt.id, x: sn.x1 - 6, y: sn.y - 2 - baselineOf(F, lh) - F * 0.2, w: Math.max(60, sn.x2 - sn.x1 + 12), fs: F / 17, lh, html: ''};
     }
     cur.items.set(nt.id, nt); cur.lastId = nt.id;
-    itemEl(nt);
+    itemEl(nt); refreshPaper();
     startEditing(nt.id, null, null, true);
   } else if(a.tool === 'math'){
     if(it && it.t === 'm'){ openMath(it); return; }
@@ -1841,6 +1862,7 @@ async function openPage(id, opts = {}){
   $('stageEmpty').hidden = true;
   worldBack.innerHTML = ''; worldFront.innerHTML = ''; elMap.clear(); geo.clear();
   for(const it of cur.items.values()) if(it.t !== 's') itemEl(it);
+  refreshPaper();
   const saved = LSget('inkwell.cam.' + id, null);
   if(saved && isFinite(saved.z)) Object.assign(cam, saved);
   else { cam.z = 1; cam.ox = W > 900 ? 56 : 20; cam.oy = 28; }

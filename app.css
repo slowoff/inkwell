@@ -355,6 +355,9 @@ select.pf-ls option:checked{background:#9fbbe8}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
 /* ---------- PDF export ---------- */
+.pdf-render{--fg:#18212B;--muted:#5D6B79;--mark:#FBE58A;color:#18212B;color-scheme:light;background:transparent}
+.pdf-render .it-text,.pdf-render .it-math{color:#18212B}
+.pdf-render .it-text a.pl{color:#1F4FCF}
 .export-parts{display:flex;flex-direction:column;gap:8px}
 .export-parts .btn{justify-content:space-between;display:flex;align-items:center;width:100%}
 .export-parts .btn .hint{margin:0}
@@ -366,7 +369,7 @@ select.pf-ls option:checked{background:#9fbbe8}
   #printRoot{display:block}
   .print-sheet{position:relative;width:210mm;height:297mm;overflow:hidden;contain:size layout paint;page-break-after:always;break-after:page;background:#fff}
   .print-sheet:last-child{page-break-after:auto;break-after:auto}
-  .print-inner{position:absolute;left:0;top:0;transform-origin:0 0}
+  .print-inner{position:absolute;left:0;top:0;transform-origin:0 0;--mark:#FBE58A;--fg:#18212B}
   .print-inner .it-text,.print-inner .it-math{color:#18212B}
   .print-inner .it-text a.pl{color:#1F4FCF}
   .print-inner .it-tape{display:none}

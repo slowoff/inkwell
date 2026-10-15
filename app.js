@@ -3039,7 +3039,7 @@ $('tmplSave').addEventListener('click', async () => {
   await newDoc('tmpl', {name, bg: Object.assign({}, cur.bg), items: [...cur.items.values()].map(ser)});
   hideModal('tmplDlg'); renderTemplates(); toast(`Template “${name}” saved`);
 });
-$('mExport').addEventListener('click', () => { closePops(); exportPdf(); });
+$('mExport').addEventListener('click', () => { closePops(); exportPdfFile(); });
 
 /* =====================================================================
    Popovers and dialogs
@@ -3065,6 +3065,7 @@ document.addEventListener('pointerdown', e => {
 function showModal(id){ closePops(); $(id).hidden = false; }
 function hideModal(id){
   $(id).hidden = true;
+  if(id === 'exportDlg' && typeof Pdf !== 'undefined') Pdf.abort = true;
   if(id === 'linkDlg' && keepEditing){ keepEditing = false; if(editing){ const el = elMap.get(editing.id); if(el) el.focus({preventScroll: true}); } }
 }
 document.querySelectorAll('.modal').forEach(m => {
@@ -3299,6 +3300,45 @@ $('impGo').addEventListener('click', async () => {
 /* =====================================================================
    Export as PDF (system print dialog -> Save as PDF / Share)
    ===================================================================== */
+// filled-in values of a PDF form, as HTML placed at origin (ox, oy) in world units; box = world rows they cover
+function fieldParts(it, ox, oy){
+  const out = [];
+    for(const f of it.f || []){
+      let txt = '', mark = false;
+      const fbox = [0, it.y + f.y * it.h, 0, it.y + (f.y + f.h) * it.h];
+      if(f.k === 'ls'){
+        // list box: show all options with the chosen ones highlighted, like on screen
+        const vs = Array.isArray(f.v) ? f.v : f.v ? [f.v] : [], fs = fieldFont(f, it);
+        const rows = (f.o || []).map(([v, l]) => `<div style="padding:0 ${fs * 0.15}px;${vs.includes(v) ? 'background:#9fbbe8;' : ''}white-space:pre;overflow:hidden">${esc(l)}</div>`).join('');
+        out.push({box: fbox, h: `<div style="position:absolute;left:${ox + f.x * it.w}px;top:${oy + f.y * it.h}px;width:${f.w * it.w}px;height:${f.h * it.h}px;overflow:hidden;box-sizing:border-box;background:#fff;box-shadow:inset 0 0 0 1px #888;font:${fs}px/1.2 Helvetica,Arial,sans-serif;color:#111">${rows}</div>`});
+        continue;
+      }
+      if(f.k === 'tx') txt = f.v || '';
+      else if(f.k === 'cb'){ txt = f.v ? '✓' : ''; mark = true; }
+      else if(f.k === 'rb'){ txt = f.v && f.v === f.ev ? '●' : ''; mark = true; }
+      else txt = fieldText({f: [f]}).trim();
+      if(!txt) continue;
+      const fx = ox + f.x * it.w, fy = oy + f.y * it.h, fw = f.w * it.w, fh = f.h * it.h;
+      const fs = mark ? fh * 0.8 : fieldFont(f, it);
+      const align = mark ? 'center' : f.al === 1 ? 'center' : f.al === 2 ? 'right' : 'left';
+      const lay = mark || !(f.ml || f.k === 'ls') ? `display:flex;align-items:center;justify-content:${mark ? 'center' : align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start'};white-space:pre` : `white-space:pre-wrap;text-align:${align}`;
+      out.push({box: fbox, h: `<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:#111;${lay}">${esc(txt)}</div>`});
+    }
+  return out;
+}
+// paper lines, grid or dots for a world rectangle, as one SVG path (world units)
+function paperPath(bg, ya, yb, xa, xb){
+  if(!bg || bg.type === 'blank') return '';
+  let d = '';
+  const gx0 = Math.floor(xa / bg.sx) * bg.sx, gy0 = Math.floor(ya / bg.sy) * bg.sy;
+  if(bg.type === 'dots'){
+    for(let y = gy0; y <= yb; y += bg.sy) for(let x = gx0; x <= xb; x += bg.sx) d += `M${r1(x - .8)} ${r1(y)}h1.6`;
+    return d;
+  }
+  for(let y = gy0; y <= yb; y += bg.sy) d += `M${r1(xa)} ${r1(y)}H${r1(xb)}`;
+  if(bg.type === 'grid') for(let x = gx0; x <= xb; x += bg.sx) d += `M${r1(x)} ${r1(ya)}V${r1(yb)}`;
+  return d;
+}
 // Long pages are printed in parts so the iPad never holds too many page pictures at once
 const EXPORT_MAX_SHEETS = 100, EXPORT_MAX_IMGS = 25;
 let exportJob = null;
@@ -3317,27 +3357,7 @@ async function exportPdf(){
   for(const it of cur.items.values()){
     if(it.t !== 'i') continue;
     parts.push({a: it.y, b: it.y + it.h, img: it});
-    for(const f of it.f || []){
-      let txt = '', mark = false;
-      const fbox = [0, it.y + f.y * it.h, 0, it.y + (f.y + f.h) * it.h];
-      if(f.k === 'ls'){
-        // list box: show all options with the chosen ones highlighted, like on screen
-        const vs = Array.isArray(f.v) ? f.v : f.v ? [f.v] : [], fs = fieldFont(f, it);
-        const rows = (f.o || []).map(([v, l]) => `<div style="padding:0 ${fs * 0.15}px;${vs.includes(v) ? 'background:#9fbbe8;' : ''}white-space:pre;overflow:hidden">${esc(l)}</div>`).join('');
-        add(fbox, `<div style="position:absolute;left:${it.x + f.x * it.w}px;top:${it.y + f.y * it.h}px;width:${f.w * it.w}px;height:${f.h * it.h}px;overflow:hidden;box-sizing:border-box;background:#fff;box-shadow:inset 0 0 0 1px #888;font:${fs}px/1.2 Helvetica,Arial,sans-serif;color:#111">${rows}</div>`);
-        continue;
-      }
-      if(f.k === 'tx') txt = f.v || '';
-      else if(f.k === 'cb'){ txt = f.v ? '✓' : ''; mark = true; }
-      else if(f.k === 'rb'){ txt = f.v && f.v === f.ev ? '●' : ''; mark = true; }
-      else txt = fieldText({f: [f]}).trim();
-      if(!txt) continue;
-      const fx = it.x + f.x * it.w, fy = it.y + f.y * it.h, fw = f.w * it.w, fh = f.h * it.h;
-      const fs = mark ? fh * 0.8 : fieldFont(f, it);
-      const align = mark ? 'center' : f.al === 1 ? 'center' : f.al === 2 ? 'right' : 'left';
-      const lay = mark || !(f.ml || f.k === 'ls') ? `display:flex;align-items:center;justify-content:${mark ? 'center' : align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start'};white-space:pre` : `white-space:pre-wrap;text-align:${align}`;
-      add(fbox, `<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:#111;${lay}">${esc(txt)}</div>`);
-    }
+    for(const fp of fieldParts(it, it.x, it.y)) add(fp.box, fp.h);
   }
   const inks = [];   // highlighter first, so pen ink sits on top
   for(const pass of [1, 0]) for(const it of cur.items.values()){
@@ -3369,7 +3389,8 @@ async function exportPdf(){
   }
   exportJob = {cur, title: $('title').value || 'Inkwell page', margin, pw, ph, s, x0, y0, cw, slice, bg: cur.bg, parts, inks, tops, hit, groups};
   if(groups.length === 1){ printSheets(0); return; }
-  $('exportInfo').textContent = `This page makes ${n} A4 sheets. It is too long to print in one go, so it is split into ${groups.length} parts. Export each part as its own PDF.`;
+  $('exportTitle').textContent = 'Print in parts'; $('exportActs').hidden = true;
+  $('exportInfo').textContent = `This page makes ${n} A4 sheets. It is too long to print in one go, so it is split into ${groups.length} parts. Print each part on its own.`;
   $('exportParts').innerHTML = groups.map((g, i) => `<button class="btn ghost" data-part="${i}">Part ${i + 1} <span class="hint">sheets ${g.from + 1}–${g.to + 1}</span></button>`).join('');
   showModal('exportDlg');
 }
@@ -3382,16 +3403,9 @@ async function printSheets(gi){
   const J = exportJob; if(!J || J.cur !== cur) return;
   const grp = J.groups[gi], bg = J.bg;
   const paper = (ya, yb, xa, xb) => {
-    if(bg.type === 'blank') return '';
-    let d = '';
-    const gx0 = Math.floor(xa / bg.sx) * bg.sx, gy0 = Math.floor(ya / bg.sy) * bg.sy;
-    if(bg.type === 'dots'){
-      for(let y = gy0; y <= yb; y += bg.sy) for(let x = gx0; x <= xb; x += bg.sx) d += `M${r1(x - .8)} ${r1(y)}h1.6`;
-      return `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#AEBBC9" stroke-width="1.6" stroke-linecap="round"/></svg>`;
-    }
-    for(let y = gy0; y <= yb; y += bg.sy) d += `M${r1(xa)} ${r1(y)}H${r1(xb)}`;
-    if(bg.type === 'grid') for(let x = gx0; x <= xb; x += bg.sx) d += `M${r1(x)} ${r1(ya)}V${r1(yb)}`;
-    return `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#D5DFEA" stroke-width="0.8" fill="none"/></svg>`;
+    const d = paperPath(bg, ya, yb, xa, xb); if(!d) return '';
+    return bg.type === 'dots' ? `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#AEBBC9" stroke-width="1.6" stroke-linecap="round"/></svg>`
+      : `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#D5DFEA" stroke-width="0.8" fill="none"/></svg>`;
   };
   let html = '';
   for(let k = grp.from; k <= grp.to; k++){
@@ -3415,6 +3429,149 @@ async function printSheets(gi){
   addEventListener('afterprint', done);
   setTimeout(() => { try { window.print(); } catch(e){ toast('Printing is not available here'); } setTimeout(done, 60000); }, 50);
 }
+
+/* =====================================================================
+   Export as one PDF file, built in the app with pdf-lib (lib/pdf-lib.min.js, loaded on first use).
+   Same layout as printing: content scaled to A4 width (never up), cut into A4 sheets with 40 px margins.
+   Ink and paper are vector; imported pages are embedded as they are stored (JPEG, never decoded);
+   text boxes and formulas are rendered at about 240 dpi with html2canvas. Any length gives one file.
+   ===================================================================== */
+async function pdfLibs(){
+  if(!window.PDFLib) await loadScript('lib/pdf-lib.min.js');
+  if(!window.html2canvas) await loadScript('lib/docx/html2canvas.min.js');
+}
+const hexRgb = c => { const m = /^#?([0-9a-f]{6})$/i.exec(c || ''); const v = m ? parseInt(m[1], 16) : 0x18212B; return PDFLib.rgb((v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255); };
+// one element (text box, formula or form overlay) as a PNG, light colours, no zoom transform
+async function renderPng(el, w, h, scale){
+  const box = document.createElement('div');
+  box.className = 'pdf-render';
+  box.style.cssText = `position:fixed;left:-30000px;top:0;width:${Math.ceil(w) + 2}px;height:${Math.ceil(h) + 2}px;overflow:hidden`;
+  el.style.left = '0px'; el.style.top = '0px'; el.style.transform = '';
+  box.appendChild(el); document.body.appendChild(box);
+  try {
+    const c = await html2canvas(box, {scale, backgroundColor: null, logging: false, useCORS: true});
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    c.width = c.height = 1;
+    return new Uint8Array(await blob.arrayBuffer());
+  } finally { box.remove(); }
+}
+const Pdf = {abort: false, file: null};
+async function exportPdfFile(){
+  if(!cur) return;
+  finishEditing();
+  const b = contentBox();
+  if(!b){ toast('This page is empty'); return; }
+  const page0 = cur, title = ($('title').value || 'Inkwell page').trim();
+  Pdf.abort = false; Pdf.file = null;
+  $('exportTitle').textContent = 'Export as PDF'; $('exportParts').innerHTML = ''; $('exportActs').hidden = false;
+  $('exportSave').disabled = true; $('exportInfo').textContent = 'Making the PDF…';
+  showModal('exportDlg');
+  const say = t => { $('exportInfo').textContent = t; };
+  const tick = () => new Promise(r => setTimeout(r, 0));
+  try {
+    await pdfLibs();
+    const {PDFDocument, LineCapStyle, pushGraphicsState, popGraphicsState, rectangle, clip, endPath} = PDFLib;
+    const margin = 40, pw = A4W - 2 * margin, ph = A4H - 2 * margin;
+    const x0 = b[0] - 12, y0 = b[1] - 12, cw = b[2] - b[0] + 24, ch = b[3] - b[1] + 24;
+    const s = Math.min(1, pw / cw), slice = ph / s, n = Math.max(1, Math.ceil(ch / slice));
+    const PW = 595.28, PH = 841.89, k = PW / A4W;
+    const doc = await PDFDocument.create();
+    doc.setTitle(title); doc.setCreator('Inkwell'); doc.setProducer('Inkwell');
+    const items = [...page0.items.values()];
+    const box = it => itemBox(it);
+    // text boxes and formulas: rendered once each, placed on every sheet they reach
+    const tops = [];
+    const texts = items.filter(it => (it.t === 'x' || it.t === 'm') && elMap.get(it.id));
+    for(let i = 0; i < texts.length; i++){
+      if(Pdf.abort) return;
+      if(i % 4 === 0){ say(`Preparing text ${i + 1} of ${texts.length}…`); await tick(); }
+      const it = texts[i], el = elMap.get(it.id), w = el.offsetWidth, h = el.offsetHeight;
+      if(!w || !h) continue;
+      const c = el.cloneNode(true); c.removeAttribute('contenteditable');
+      if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
+      const sc = Math.max(1, Math.min(s * 2.5, Math.sqrt(12e6 / (w * h))));
+      const png = await doc.embedPng(await renderPng(c, w, h, sc));
+      tops.push({it, png, x: it.x, y: it.y, w: w + 2, h: h + 2, b: [it.x, it.y, it.x + w, it.y + h]});
+    }
+    // form values on imported pages: one transparent overlay per page picture
+    const overlays = new Map();
+    for(const it of items.filter(i => i.t === 'i' && i.f && i.f.length)){
+      if(Pdf.abort) return;
+      const html = fieldParts(it, 0, 0).map(p => p.h).join(''); if(!html) continue;
+      const d = document.createElement('div'); d.style.cssText = `position:absolute;width:${it.w}px;height:${it.h}px`; d.innerHTML = html;
+      const sc = Math.max(1, Math.min(s * 2.5, Math.sqrt(12e6 / (it.w * it.h))));
+      overlays.set(it.id, await doc.embedPng(await renderPng(d, it.w, it.h, sc)));
+    }
+    const pics = items.filter(it => it.t === 'i' && it.a), embedded = new Map();
+    const inks = [1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && (it.hl ? 1 : 0) === pass));
+    const inkBoxes = new Map(inks.map(it => [it.id, box(it)]));
+    const X = wx => (margin + (wx - x0) * s) * k;
+    for(let sh = 0; sh < n; sh++){
+      if(Pdf.abort) return;
+      say(`Making page ${sh + 1} of ${n}…`); await tick();
+      const ya = y0 + sh * slice, yb = ya + slice;
+      const Y = wy => PH - (margin + (wy - ya) * s) * k;
+      const reach = (top, bottom) => bottom >= ya - 4 && top <= yb + 4;
+      const page = doc.addPage([PW, PH]);
+      page.pushOperators(pushGraphicsState(), rectangle(margin * k, PH - (margin + ph) * k, pw * k, ph * k), clip(), endPath());
+      const at = {x: X(0), y: Y(0), scale: s * k};
+      const d = paperPath(page0.bg, ya, yb, x0, x0 + cw);
+      if(d) page.drawSvgPath(d, page0.bg.type === 'dots' ? {...at, borderColor: hexRgb('#AEBBC9'), borderWidth: 1.6, borderLineCap: LineCapStyle.Round} : {...at, borderColor: hexRgb('#D5DFEA'), borderWidth: 0.8});
+      for(const it of pics){
+        if(!reach(it.y, it.y + it.h)) continue;
+        let img = embedded.get(it.a);
+        if(img === undefined){
+          img = null;
+          try {
+            let rec = await IDB.get('assets', it.a);
+            if(!rec) rec = await Sync.fetchAsset(it.a);
+            if(rec){
+              const bytes = new Uint8Array(await rec.blob.arrayBuffer());
+              img = bytes[0] === 0x89 && bytes[1] === 0x50 ? await doc.embedPng(bytes) : await doc.embedJpg(bytes);
+            }
+          } catch(e){ console.warn('pdf image', e); }
+          embedded.set(it.a, img);
+        }
+        const r = {x: X(it.x), y: Y(it.y + it.h), width: it.w * s * k, height: it.h * s * k};
+        if(img) page.drawImage(img, r);
+        const ov = overlays.get(it.id); if(ov) page.drawImage(ov, r);
+      }
+      for(const it of inks){
+        const q = inkBoxes.get(it.id); if(!reach(q[1], q[3])) continue;
+        page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true)), opacity: it.hl ? 0.4 : 1});
+      }
+      for(const t of tops){
+        if(!reach(t.b[1], t.b[3])) continue;
+        page.drawImage(t.png, {x: X(t.x), y: Y(t.y + t.h), width: t.w * s * k, height: t.h * s * k});
+      }
+      page.pushOperators(popGraphicsState());
+    }
+    say('Saving…'); await tick();
+    const bytes = await doc.save();
+    if(Pdf.abort) return;
+    const name = (title.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Inkwell page') + '.pdf';
+    Pdf.file = new File([bytes], name, {type: 'application/pdf'});
+    const mb = bytes.length / 1048576;
+    say(`Ready: ${n} page${n === 1 ? '' : 's'}, ${mb < 0.1 ? '< 0.1' : mb.toFixed(1)} MB.`);
+    $('exportSave').disabled = false;
+  } catch(e){
+    console.warn('pdf export', e);
+    say('The PDF could not be made: ' + (e.message || e) + '. Try Print instead.');
+  }
+}
+async function savePdfFile(){
+  const f = Pdf.file; if(!f) return;
+  // iPad / phone: the share sheet (Save to Files, Mail, …); computer: a normal download
+  if(matchMedia('(pointer: coarse)').matches && navigator.canShare && navigator.canShare({files: [f]})){
+    try { await navigator.share({files: [f], title: f.name}); return; }
+    catch(e){ if(e.name === 'AbortError') return; console.warn('share', e); }
+  }
+  const u = URL.createObjectURL(f), a = document.createElement('a');
+  a.href = u; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
+$('exportSave').addEventListener('click', savePdfFile);
+$('exportPrint').addEventListener('click', () => { Pdf.abort = true; hideModal('exportDlg'); exportPdf(); });
 
 /* =====================================================================
    Settings: sign in, backup, restore
@@ -5667,6 +5824,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

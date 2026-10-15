@@ -398,9 +398,10 @@
 
 <div class="modal" id="exportDlg" hidden>
   <div class="dlg">
-    <div class="dlg-head"><h3>Export in parts</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="dlg-head"><h3 id="exportTitle">Export as PDF</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint" id="exportInfo"></p>
     <div class="export-parts" id="exportParts"></div>
+    <div class="dlg-actions" id="exportActs"><button class="btn ghost" id="exportPrint">Print instead</button><button class="btn primary" id="exportSave" disabled>Save PDF</button></div>
   </div>
 </div>
 

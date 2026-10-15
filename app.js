@@ -3998,7 +3998,7 @@ const Ask = {
     this.showChat();
   },
   renderMode(){ $('askMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askMode || 'tutor'))); },
-  reset(){ if(this.ctrl) this.ctrl.abort(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
+  reset(){ if(this.ctrl) this.ctrl.abort(); this.pending = null; this.renderPending(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
   bubble(cls, html){
     const log = $('askLog');
     const em = log.querySelector('.ask-empty'); if(em) em.remove();
@@ -4057,9 +4057,28 @@ const Ask = {
     let url;
     try { url = await this.capture(x0, y0, x1, y1); } catch(e){ this.bubble('err', 'Could not read that part of the page: ' + esc(e.message || e)); return; }
     const typed = this.pageText([x0, y0, x1, y1]);
-    const q = $('askIn').value.trim();
-    $('askIn').value = '';
-    this.send(q || (prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), url, typed, [x0, y0, x1, y1]);
+    // attach the scan to the message box; it goes out when Send is tapped, with whatever is typed
+    this.pending = {url, typed, box: [x0, y0, x1, y1]};
+    this.renderPending();
+    if(this.histOpen) this.showChat();
+    try { $('askIn').focus({preventScroll: true}); } catch {}
+  },
+  renderPending(){
+    const a = $('askAtt'), p = this.pending;
+    a.hidden = !p;
+    if(p) a.querySelector('img').src = p.url;
+    $('askIn').placeholder = p ? 'Ask about the scan, or just Send' : 'Ask about your notes…';
+    $('askSend').disabled = this.busy;
+  },
+  // Send button / Enter: typed text, plus the attached scan if there is one
+  submit(){
+    const t = $('askIn').value.trim(), p = this.pending;
+    if(!t && !p) return;
+    if(this.busy) return;
+    $('askIn').value = ''; autoGrow();
+    this.pending = null; this.renderPending();
+    if(p) this.send(t || (prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), p.url, p.typed, p.box);
+    else this.send(t);
   },
   // API form of the chat: scans stored as assets go back in as base64
   async apiMsgs(){
@@ -4222,7 +4241,8 @@ $('askLog').addEventListener('click', async e => {
   if(e.target.closest('.ah-open')) Ask.load(id);
 });
 $('askMode').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(!b) return; prefs.askMode = b.dataset.v; savePrefs(); Ask.renderMode(); });
-$('askSend').addEventListener('click', () => { const t = $('askIn').value.trim(); if(!t) return; $('askIn').value = ''; autoGrow(); Ask.send(t); });
+$('askSend').addEventListener('click', () => Ask.submit());
+$('askAttX').addEventListener('click', () => { Ask.pending = null; Ask.renderPending(); });
 function autoGrow(){ const t = $('askIn'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
 $('askIn').addEventListener('input', autoGrow);
 $('askIn').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); $('askSend').click(); } });

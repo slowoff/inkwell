@@ -1715,24 +1715,48 @@ async function detectLines(aId){
   let bg = 0; for(let acc = 0; bg < 255 && (acc += hist[bg]) < w * h / 2; bg++);   // median = paper colour (light or dark)
   const ink = new Uint8Array(w * h); for(let i = 0; i < w * h; i++) ink[i] = Math.abs(lum[i] - bg) > 60 ? 1 : 0;
   const gap = Math.max(2, Math.round(w * 0.004)), minLen = w * 0.1;
+  // dotted and dashed lines: a row of short marks with regular gaps
+  const maxMark = Math.max(4, w * 0.045), maxGapD = Math.max(6, w * 0.03);
   const segs = [];
   for(let y = 0; y < h; y++){
     const row = y * w; let s = -1, last = -1, n = 0;
     const flush = () => { if(s >= 0 && last - s + 1 >= minLen && n / (last - s + 1) >= 0.6) segs.push({y, x1: s, x2: last}); };
-    for(let x = 0; x < w; x++) if(ink[row + x]){ if(s < 0 || x - last > gap){ flush(); s = x; n = 0; } last = x; n++; }
+    const runs = []; let rs = -1;
+    for(let x = 0; x < w; x++){
+      if(ink[row + x]){ if(s < 0 || x - last > gap){ flush(); s = x; n = 0; } last = x; n++; if(rs < 0) rs = x; }
+      else if(rs >= 0){ runs.push(rs, x - 1); rs = -1; }
+    }
+    if(rs >= 0) runs.push(rs, w - 1);
     flush();
+    for(let i = 0; i < runs.length;){
+      let j = i;
+      while(j + 2 < runs.length && runs[j + 1] - runs[j] + 1 <= maxMark && runs[j + 3] - runs[j + 2] + 1 <= maxMark && runs[j + 2] - runs[j + 1] - 1 <= maxGapD) j += 2;
+      const cnt = (j - i) / 2 + 1, x1 = runs[i], x2 = runs[j + 1];
+      if(cnt >= 6 && x2 - x1 + 1 >= minLen){
+        let on = 0; const gaps = [], lens = [];
+        for(let k = i; k <= j; k += 2){ lens.push(runs[k + 1] - runs[k] + 1); on += lens[lens.length - 1]; if(k > i) gaps.push(runs[k] - runs[k - 1] - 1); }
+        const cv = a => { const m = a.reduce((x, y) => x + y, 0) / a.length; return [m, Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / a.length)]; };
+        const [gm, gs] = cv(gaps), [lm, ls] = cv(lens);
+        const fill = on / (x2 - x1 + 1);
+        // evenly spaced marks of about the same size; letters in a text row never are
+        if(gs <= 0.35 * gm + 1 && ls <= 0.35 * lm + 1 && fill >= 0.12 && fill < 0.95) segs.push({y, x1, x2, d: 1});
+      }
+      i = j + 2;
+    }
   }
   // join touching rows into lines; keep only thin ones with clear paper above and below (not text, not filled boxes)
   const bands = [];
   for(const g of segs){
     const b = bands.find(b => g.y - b.y2 <= 1 && Math.min(b.x2, g.x2) - Math.max(b.x1, g.x1) > 0.5 * Math.min(b.x2 - b.x1, g.x2 - g.x1));
-    if(b){ b.y2 = g.y; b.x1 = Math.min(b.x1, g.x1); b.x2 = Math.max(b.x2, g.x2); } else bands.push({y1: g.y, y2: g.y, x1: g.x1, x2: g.x2});
+    if(b){ b.y2 = g.y; b.x1 = Math.min(b.x1, g.x1); b.x2 = Math.max(b.x2, g.x2); if(!g.d) b.d = 0; } else bands.push({y1: g.y, y2: g.y, x1: g.x1, x2: g.x2, d: g.d ? 1 : 0});
   }
-  const clear = (y, x1, x2) => { if(y < 0 || y >= h) return true; let n = 0; for(let x = x1; x <= x2; x++) n += ink[y * w + x]; return n / (x2 - x1 + 1) < 0.3; };
+  const clear = (y, x1, x2, lim = 0.3) => { if(y < 0 || y >= h) return true; let n = 0; for(let x = x1; x <= x2; x++) n += ink[y * w + x]; return n / (x2 - x1 + 1) < lim; };
   const maxT = Math.max(3, Math.round(h * 0.004)), out = [];
   for(const b of bands){
     if(b.y2 - b.y1 + 1 > maxT) continue;
     if(!clear(b.y1 - 3, b.x1, b.x2) || !clear(b.y2 + 3, b.x1, b.x2)) continue;
+    // a dotted/dashed line needs empty paper just above and below it (text around it has letters there)
+    if(b.d){ const m = Math.max(4, Math.round(h * 0.003)); let ok = true; for(let k = 2; k <= m && ok; k++) ok = clear(b.y1 - k, b.x1, b.x2, 0.04) && clear(b.y2 + k, b.x1, b.x2, 0.04); if(!ok) continue; }
     out.push({y: (b.y1 + b.y2 + 1) / 2 / h, x1: b.x1 / w, x2: (b.x2 + 1) / w});
   }
   return out.sort((a, b) => a.y - b.y);
@@ -4219,6 +4243,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, cam, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, cam, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

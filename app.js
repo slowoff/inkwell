@@ -875,7 +875,7 @@ function onDown(e){
     touches.set(e.pointerId, {x: sx, y: sy, sx, sy, t: performance.now(), target: e.target});
     try { stage.setPointerCapture(e.pointerId); } catch {}
     if(touches.size === 1){
-      if(pick){ startTool(e, sx, sy, 0.55); if(act) act.touch = true; return; }
+      if(pick || prefs.tool === 'space'){ startTool(e, sx, sy, 0.55); if(act) act.touch = true; return; }
       if(prefs.ruler.on && onRuler(sx, sy)){ gesture = startRulerGesture(); return; }
       if(prefs.finger){ startTool(e, sx, sy, 0.55); if(act) act.touch = true; return; }
       gesture = {kind: 'pending', start: {...cam}};
@@ -978,6 +978,7 @@ function onCancel(e){
 function cancelAct(){
   if(!act) return;
   clearTimeout(act.hold);
+  if(act.kind === 'space' && act.orig.length) setItems(act.orig.map(it => [it.id, it]));
   if(act.kind === 'erase'){
     const back = [...act.added.keys()].map(id => [id, null]).concat(act.removed.map(it => [it.id, it]));
     if(back.length) setItems(back);
@@ -1036,6 +1037,10 @@ function startTool(e, sx, sy, pr){
     act.pts = [...toWorld(X, Y), pr];
     act.last = [X, Y];
     armHold();
+  } else if(tool === 'space'){
+    // insert or remove vertical space: everything that starts below the line moves with the pen
+    clearSel(); act.kind = 'space'; act.y0 = wy; act.dy = 0;
+    act.orig = [...cur.items.values()].filter(it => itemBox(it)[1] >= wy - 0.5);
   } else if(tool === 'eraser'){
     clearSel(); act.kind = 'erase'; act.mode = prefs.eraser.mode === 'area' ? 'area' : 'stroke';
     act.removed = []; act.added = new Map(); act.cursor = [sx, sy]; act.lastW = null; eraseAt(sx, sy);
@@ -1074,6 +1079,7 @@ function toolMove(e){
       act.pts.push(...toWorld(X, Y), pr);
       if(Math.hypot(sx - act.anchor[0], sy - act.anchor[1]) > 3){ act.anchor = [sx, sy]; armHold(); }
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
+    else if(act.kind === 'space'){ moveSpace(toWorld(sx, sy)[1] - act.y0); }
     else if(act.kind === 'lasso'){ act.poly.push(sx, sy); }
     else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){ act.w1 = toWorld(sx, sy); }
   }
@@ -1102,6 +1108,9 @@ function endTool(e){
     placeAt(a);
   } else if(a.kind === 'pick'){
     finishPick(a);
+  } else if(a.kind === 'space'){
+    if(a.orig.length && Math.abs(a.dy) > 0.5) commit(a.orig.map(it => [it.id, it]), a.orig.map(it => [it.id, cur.items.get(it.id)]));
+    else if(a.orig.length) setItems(a.orig.map(it => [it.id, it]));
   }
 }
 
@@ -1130,6 +1139,12 @@ function drawLive(){
     liveCtx.globalAlpha = 0.6; liveCtx.fillStyle = tokens.tape;
     liveCtx.fillRect(Math.min(act.w0[0], act.w1[0]), Math.min(act.w0[1], act.w1[1]), Math.abs(act.w1[0] - act.w0[0]), Math.abs(act.w1[1] - act.w0[1]));
     liveCtx.globalAlpha = 1;
+  } else if(act.kind === 'space'){
+    liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const y0 = act.y0 * cam.z + cam.oy, y1 = (act.y0 + act.dy) * cam.z + cam.oy;
+    liveCtx.globalAlpha = 0.1; liveCtx.fillStyle = tokens.accent; liveCtx.fillRect(0, Math.min(y0, y1), W, Math.abs(y1 - y0)); liveCtx.globalAlpha = 1;
+    liveCtx.strokeStyle = tokens.accent; liveCtx.lineWidth = 1.5; liveCtx.setLineDash([8, 6]);
+    liveCtx.beginPath(); liveCtx.moveTo(0, y0); liveCtx.lineTo(W, y0); liveCtx.moveTo(0, y1); liveCtx.lineTo(W, y1); liveCtx.stroke(); liveCtx.setLineDash([]);
   } else if(act.kind === 'pick' && act.w1){
     drawPickPreview(act);
   } else if(act.kind === 'erase' && act.cursor){
@@ -1151,7 +1166,19 @@ function eraseAt(sx, sy){
   }
   eraseWorld(wx, wy, R);
 }
+// Formulas (graph numbers and labels too) are erased whole by both eraser modes.
+function eraseFormulas(wx, wy, R){
+  let hit = false;
+  for(const it of [...cur.items.values()]){
+    if(it.t !== 'm') continue;
+    const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
+    if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
+    act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); hit = true;
+  }
+  if(hit) changed();
+}
 function eraseWorld(wx, wy, R){
+  eraseFormulas(wx, wy, R);
   if(act.mode === 'area'){ eraseArea(wx, wy, R); return; }
   let hit = false;
   for(const it of [...cur.items.values()]){
@@ -3050,6 +3077,10 @@ function pickBox(a){
   const [x0, y0] = a.w0, [x1, y1] = a.w1 || a.w0;
   return {x0, y0, x1, y1, tap: Math.abs(x1 - x0) * cam.z < 10 && Math.abs(y1 - y0) * cam.z < 10};
 }
+function moveSpace(dy){
+  act.dy = dy;
+  if(act.orig.length) setItems(act.orig.map(it => [it.id, dy ? transformItem(it, {ax: 0, ay: 0, s: 1, dx: 0, dy}) : it]));
+}
 function finishPick(a){
   const p = pick; endPick();
   if(!p) return;
@@ -3259,12 +3290,12 @@ function buildGraph(o, gx, gy){
   tx.forEach((v, i) => {
     if(Math.abs(X(v) - ax) < 0.5) return;
     stroke([[X(v), ay - 4], [X(v), ay + 4]]);
-    if(o.nums && i % ex === 0){ const t = fmtNum(v); formula(t, X(v) - t.length * 3.6, ay + 7, 12); }
+    if(o.nums && i % ex === 0){ const t = fmtNum(v); formula(t, X(v) - t.length * 4.3, ay + 7, 12); }
   });
   ty.forEach((v, i) => {
     if(Math.abs(Y(v) - ay) < 0.5) return;
     stroke([[ax - 4, Y(v)], [ax + 4, Y(v)]]);
-    if(o.nums && i % ey === 0){ const t = fmtNum(v); formula(t, ax - 10 - t.length * 7.2, Y(v) - 9, 12); }
+    if(o.nums && i % ey === 0){ const t = fmtNum(v); formula(t, ax - 14 - t.length * 8.5, Y(v) - 9, 12); }
   });
   if(o.nums && x0 <= 0 && x1 >= 0 && y0 <= 0 && y1 >= 0) formula('0', ax - 14, ay + 5, 12);
   formula(labelTex(o.lx), xe[0] - 4, ay + 10, 18);
@@ -3617,7 +3648,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if(e.altKey) return;
-  const map = {p: 'pen', h: 'hl', e: 'eraser', l: 'lasso', t: 'text', m: 'math'};
+  const map = {p: 'pen', h: 'hl', e: 'eraser', l: 'lasso', t: 'text', m: 'math', s: 'space'};
   const t = map[e.key.toLowerCase()];
   if(t){ setTool(t); return; }
   if((e.key === 'Delete' || e.key === 'Backspace') && sel){ const ids = sel.ids.slice(); clearSel(); removeItems(ids); return; }

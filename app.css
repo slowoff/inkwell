@@ -409,3 +409,5 @@ select.pf-ls option:checked{background:#9fbbe8}
 .bar1{container-type:inline-size;container-name:bar1}
 @container bar1 (max-width: 980px){ .bar1 .tb .lbl{display:none} }
 @container bar1 (max-width: 560px){ .bar1 #continueBtn,.bar1 .sep{display:none} .bar1 .tb{min-width:32px;padding:0 3px} .bar1{gap:1px} }
+
+.stage.tool-space{cursor:row-resize}

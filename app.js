@@ -915,7 +915,7 @@ async function flushSaves(){
 let act = null;            // current tool action
 let gesture = null;        // finger or mouse gesture
 const touches = new Map();
-let penDown = false, spaceDown = false, selDrag = null;
+let penDown = false, spaceDown = false, selDrag = null, penAt = -1e9;
 
 const penWidth = () => 0.6 * Math.pow(25, prefs.pen.s / 100);
 const hlWidth = () => 6 + prefs.hl.s * 0.44;
@@ -956,7 +956,7 @@ function onDown(e){
   if(e.pointerType === 'mouse'){
     if(e.button === 1 || (e.button === 0 && spaceDown)){
       e.preventDefault();
-      gesture = {kind: 'mousepan', x: sx, y: sy, id: e.pointerId};
+      gesture = {kind: 'mousepan', x: sx, y: sy, id: e.pointerId, oy0: cam.oy};
       stage.setPointerCapture(e.pointerId); stage.classList.add('panning');
       return;
     }
@@ -970,7 +970,7 @@ function onDown(e){
   }
   if(e.pointerType === 'pen'){
     if(inEdit && !['pen', 'hl', 'eraser'].includes(prefs.tool)) return;
-    penDown = true;
+    penDown = true; penAt = performance.now(); sleepSlider();
     if(gesture && gesture.start){ Object.assign(cam, gesture.start); invalidate(); }  // a resting palm had started to move the page
     gesture = null; touches.clear(); stage.classList.remove('panning');
   }
@@ -988,16 +988,19 @@ function onMove(e){
     if(!gesture) return;
     if(gesture.kind === 'pending'){
       if(Math.hypot(sx - t.sx, sy - t.sy) < 7) return;
-      gesture = {kind: 'pan', start: gesture.start, lx: t.sx, ly: t.sy};
+      gesture = {kind: 'pan', start: gesture.start, lx: t.sx, ly: t.sy, x0: t.sx, y0: t.sy};
       stage.classList.add('panning');
     }
-    if(gesture.kind === 'pan'){ cam.ox += sx - gesture.lx; cam.oy += sy - gesture.ly; gesture.lx = sx; gesture.ly = sy; invalidate(); }
+    if(gesture.kind === 'pan'){
+      cam.ox += sx - gesture.lx; cam.oy += sy - gesture.ly; gesture.lx = sx; gesture.ly = sy; invalidate();
+      if(gesture.x0 != null && panWakes(gesture.x0, sy - gesture.y0, sx - gesture.x0)) wakeSlider();
+    }
     else if(gesture.kind === 'pinch') pinchMove();
     else if(gesture.kind === 'ruler') rulerMove();
     return;
   }
   if(gesture && gesture.kind === 'mousepan' && e.pointerId === gesture.id){
-    cam.ox += sx - gesture.x; cam.oy += sy - gesture.y; gesture.x = sx; gesture.y = sy; invalidate(); return;
+    cam.ox += sx - gesture.x; cam.oy += sy - gesture.y; gesture.x = sx; gesture.y = sy; invalidate(); if(Math.abs(cam.oy - gesture.oy0) > 40) wakeSlider(); return;
   }
   if(gesture && gesture.kind === 'mouseruler' && e.pointerId === gesture.id){
     prefs.ruler.cx = gesture.r.cx + sx - gesture.x; prefs.ruler.cy = gesture.r.cy + sy - gesture.y; renderRuler(); return;
@@ -1030,7 +1033,7 @@ function onUp(e){
   if(gesture && (gesture.kind === 'mousepan' || gesture.kind === 'mouseruler') && e.pointerId === gesture.id){
     gesture = null; stage.classList.remove('panning'); saveCamSoon(); savePrefs(); return;
   }
-  if(e.pointerType === 'pen') penDown = false;
+  if(e.pointerType === 'pen'){ penDown = false; penAt = performance.now(); }
   if(act && act.id === e.pointerId) endTool(e);
 }
 function onCancel(e){
@@ -1038,7 +1041,7 @@ function onCancel(e){
     touches.delete(e.pointerId);
     if(!touches.size){ gesture = null; stage.classList.remove('panning'); }
   }
-  if(e.pointerType === 'pen') penDown = false;
+  if(e.pointerType === 'pen'){ penDown = false; penAt = performance.now(); }
   if(act && act.id === e.pointerId){
     if(act.kind === 'stroke' && act.pts.length >= 6) endTool(e); else cancelAct();
   }
@@ -1084,7 +1087,7 @@ stage.addEventListener('wheel', e => {
   // trackpad drivers and mice that send sideways scrolling as Shift + wheel
   if(e.shiftKey && !dx){ dx = dy; dy = 0; }
   if(e.ctrlKey || e.metaKey) zoomAt(sx, sy, cam.z * Math.exp(-dy * 0.0085));
-  else { cam.ox -= dx; cam.oy -= dy; invalidate(); saveCamSoon(); }
+  else { cam.ox -= dx; cam.oy -= dy; invalidate(); saveCamSoon(); if(Math.abs(dy) > Math.abs(dx)) wakeSlider(); }
 }, {passive: false});
 let gz0 = 1;
 stage.addEventListener('gesturestart', e => { gz0 = cam.z; e.preventDefault(); });
@@ -4794,8 +4797,20 @@ async function strokesToFormula(){
 /* =====================================================================
    Page slider on the right: jump through imported pages
    ===================================================================== */
-let slPages = null, slDrag = null, slCam = null, slHideT = 0;
-// the slider stays hidden (and untouchable, so a resting palm can't grab it) until the page moves
+let slPages = null, slDrag = null, slHideT = 0;
+// The slider stays hidden and untouchable, so a resting palm can't grab it. It only shows up
+// for a deliberate scroll: one finger dragged up or down at least 40 px, starting away from the
+// right edge (where the palm rests), not right after the Pencil was used; or a wheel / trackpad scroll.
+const SLIDER_EDGE = 160, SLIDER_PEN_QUIET = 900;
+function panWakes(x0, dy, dx){
+  if(x0 > W - SLIDER_EDGE) return false;
+  if(penDown || performance.now() - penAt < SLIDER_PEN_QUIET) return false;
+  return Math.abs(dy) >= 40 && Math.abs(dy) > Math.abs(dx);
+}
+function sleepSlider(){
+  const el = $('pgSlider'); if(!el || slDrag) return;
+  clearTimeout(slHideT); el.classList.remove('awake');
+}
 function wakeSlider(){
   const el = $('pgSlider'); if(!el) return;
   el.classList.add('awake');
@@ -4819,9 +4834,6 @@ function renderSlider(){
   const pages = sliderPages();
   if(!cur || pages.length < 2){ el.hidden = true; return; }
   el.hidden = false;
-  const ck = cur.id + ':' + Math.round(cam.oy) + ':' + cam.z;
-  if(slCam && ck !== slCam && slCam.split(':')[0] === cur.id && !slDrag) wakeSlider();
-  slCam = ck;
   const i = slDrag ? slDrag.i : sliderIndexAt(), n = pages.length;
   const track = $('pgTrack'), th = track.clientHeight;
   const y = n > 1 ? i / (n - 1) * th : 0;
@@ -4850,7 +4862,8 @@ function sliderJump(i){
   const at = e => { const r = $('pgTrack').getBoundingClientRect(), n = sliderPages().length; return clamp(Math.round((e.clientY - r.top) / Math.max(1, r.height) * (n - 1)), 0, n - 1); };
   el.addEventListener('pointerdown', e => {
     e.stopPropagation(); e.preventDefault();
-    if(!sliderPages().length) return;
+    if(!sliderPages().length || !el.classList.contains('awake')) return;
+    if(e.pointerType === 'touch' && Math.max(e.width || 0, e.height || 0) > 44) return;   // palm, not a fingertip
     slDrag = {id: e.pointerId, i: at(e)};
     try { el.setPointerCapture(e.pointerId); } catch {}
     el.classList.add('on'); sliderJump(slDrag.i); renderSlider();

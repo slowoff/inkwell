@@ -172,7 +172,7 @@ async function assetURL(id){
    Sync (Supabase). Local-first: edits save locally and upload later.
    ===================================================================== */
 const Sync = {
-  sb: null, user: null, state: 'local', msg: '', running: false, again: false, timer: null, lastOk: 0,
+  sb: null, user: null, fresh: null, signingOut: false, state: 'local', msg: '', running: false, again: false, timer: null, lastOk: 0,
   configured(){ return !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY); },
   async init(){
     if(!this.configured()){ this.state = 'local'; setStatus(); return; }
@@ -185,6 +185,13 @@ const Sync = {
       const {data} = await this.sb.auth.getSession();
       this.user = data && data.session ? data.session.user : null;
       this.sb.auth.onAuthStateChange((ev, session) => {
+        // A stale stored session (e.g. iOS closed the app while it was renewing its token) can make the library
+        // wipe a sign-in that just succeeded. Put the new session back instead of signing out.
+        if(ev === 'SIGNED_OUT' && !this.signingOut && this.fresh && Date.now() - this.fresh.at < 20000 && this.fresh.tries < 3){
+          const f = this.fresh; f.tries++;
+          setTimeout(() => this.sb.auth.setSession({access_token: f.s.access_token, refresh_token: f.s.refresh_token}).catch(e => console.warn('restore session', e)), 0);
+          return;
+        }
         if(ev === 'PASSWORD_RECOVERY') startRecovery();
         const was = this.user && this.user.id;
         this.user = session ? session.user : null;
@@ -3372,7 +3379,9 @@ async function renderSettings(){
 $('authForm').addEventListener('submit', async e => {
   e.preventDefault();
   const msg = $('authMsg'); msg.textContent = 'Signing in';
-  const {error} = await Sync.sb.auth.signInWithPassword({email: $('authEmail').value.trim(), password: $('authPass').value});
+  await clearStaleSession();
+  const {data, error} = await Sync.sb.auth.signInWithPassword({email: $('authEmail').value.trim(), password: $('authPass').value});
+  if(!error && data && data.session) Sync.fresh = {s: data.session, at: Date.now(), tries: 0};
   msg.textContent = error ? (/Email not confirmed/i.test(error.message) ? 'Confirm your email first: open the link Supabase sent you, then sign in.' : /Invalid login/i.test(error.message) ? 'Wrong email or password.' : error.message) : '';
   if(!error){ $('authPass').value = ''; renderSettings(); }
 });
@@ -3385,7 +3394,22 @@ $('authSignup').addEventListener('click', async () => {
   msg.textContent = data.session ? '' : 'Account created. Open the confirmation email, then come back and sign in.';
   renderSettings();
 });
-$('signOut').addEventListener('click', async () => { await Sync.sb.auth.signOut(); Sync.user = null; setStatus(); renderSettings(); });
+$('signOut').addEventListener('click', async () => {
+  Sync.signingOut = true; Sync.fresh = null;
+  try { await Sync.sb.auth.signOut(); } finally { Sync.signingOut = false; }
+  Sync.user = null; setStatus(); renderSettings();
+});
+// Before signing in: if an old session is still stored on this device, let its pending token renewal finish
+// and remove it, so it cannot fail later and sign the new session out (seen on the iPad 2026-10-15).
+async function clearStaleSession(){
+  if(Sync.user) return;
+  let raw = null; try { raw = localStorage.getItem('inkwell-auth'); } catch {}
+  if(!raw) return;
+  Sync.signingOut = true;
+  try { await Sync.sb.auth.signOut({scope: 'local'}); } catch(e){ console.warn('clear old session', e); }
+  finally { Sync.signingOut = false; }
+  try { localStorage.removeItem('inkwell-auth'); } catch {}
+}
 
 /* Forgot / change password.
    The reset email links back to this page (if the address is allowed in Supabase Auth → URL Configuration);
@@ -3449,6 +3473,7 @@ async function useResetLink(text){
   const msg = $('resetLinkMsg');
   text = (text || '').trim();
   let r;
+  if(text) await clearStaleSession();
   try {
     if(/^\d{6,10}$/.test(text)){
       r = await Sync.sb.auth.verifyOtp({email: $('resetEmail').value.trim(), token: text, type: 'recovery'});
@@ -3472,6 +3497,7 @@ async function useResetLink(text){
     return;
   }
   Sync.user = r.data.session.user;
+  Sync.fresh = {s: r.data.session, at: Date.now(), tries: 0};
   $('resetLink').value = ''; msg.textContent = '';
   setRecovering(true);
   authView = 'newpass';

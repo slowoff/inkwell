@@ -2,7 +2,9 @@
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):
 //   ANTHROPIC_API_KEY   key from console.anthropic.com
 //   ASK_ALLOWED_EMAILS  comma-separated emails of Inkwell accounts that may use Claude
-//   ASK_MODEL           optional, defaults to claude-sonnet-5-5
+//   ASK_MODEL           optional, the strong model, defaults to claude-sonnet-5-5
+//   ASK_FAST_MODEL      optional, the cheap model, defaults to claude-haiku-5-5
+// Body: {mode: 'tutor'|'solve', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const ORIGINS = ["https://slowoff.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
@@ -12,6 +14,7 @@ const cors = (req: Request) => {
     "Access-Control-Allow-Origin": ORIGINS.includes(o) ? o : ORIGINS[0],
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Expose-Headers": "x-ask-model",
     "Vary": "Origin",
   };
 };
@@ -39,6 +42,27 @@ Mode: TUTOR. Teach, don't solve:
 Mode: SOLVE. Give a complete worked solution: given values, formula, steps with units, result (bold), and one line on the idea behind it.`,
 };
 
+const ROUTER = `You decide which AI model should answer a student's question. Reply with exactly one word.
+HARD: reading handwriting or a scanned worksheet with diagrams, graphs or tables; multi-step maths, physics or chemistry calculations; derivations or proofs; checking the student's own work; essay feedback; anything ambiguous or unclear.
+EASY: definitions, vocabulary, translations, short factual questions, one-step arithmetic, rephrasing or summarising a short text, simple follow-ups like "thanks" or "explain that again shorter".
+When unsure, answer HARD.`;
+
+async function pickModel(key: string, messages: any[], fast: string, smart: string): Promise<string> {
+  try {
+    // only the latest question matters for the choice; images in it are cheap for the small model
+    const last = messages[messages.length - 1];
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: fast, max_tokens: 5, system: ROUTER, messages: [last] }),
+    });
+    if (!res.ok) return smart;
+    const j = await res.json();
+    const word = String(j?.content?.[0]?.text || "").trim().toUpperCase();
+    return word.startsWith("EASY") ? fast : smart;
+  } catch { return smart; }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   if (req.method !== "POST") return fail(req, 405, "method");
@@ -54,16 +78,19 @@ Deno.serve(async (req) => {
 
   const raw = await req.text();
   if (raw.length > 9_000_000) return fail(req, 413, "too_big");
-  let body: { mode?: string; messages?: unknown[] };
+  let body: { mode?: string; model?: string; messages?: any[] };
   try { body = JSON.parse(raw); } catch { return fail(req, 400, "bad_json"); }
   const messages = Array.isArray(body.messages) ? body.messages.slice(-40) : [];
   if (!messages.length) return fail(req, 400, "no_messages");
+
+  const smart = Deno.env.get("ASK_MODEL") || "claude-sonnet-5-5", fast = Deno.env.get("ASK_FAST_MODEL") || "claude-haiku-5-5";
+  const model = body.model === "fast" ? fast : body.model === "smart" ? smart : await pickModel(key, messages, fast, smart);
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
-      model: Deno.env.get("ASK_MODEL") || "claude-sonnet-5-5",
+      model,
       max_tokens: 2500,
       stream: true,
       system: MODES[body.mode || "tutor"] || MODES.tutor,
@@ -75,5 +102,5 @@ Deno.serve(async (req) => {
     try { const j = await r.json(); msg = j?.error?.message || ""; } catch { /* ignore */ }
     return fail(req, 502, "anthropic_" + r.status, msg || `Claude API error ${r.status}`);
   }
-  return new Response(r.body, { headers: { ...cors(req), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
+  return new Response(r.body, { headers: { ...cors(req), "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-ask-model": model } });
 });

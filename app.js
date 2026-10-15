@@ -58,6 +58,7 @@ const DEFAULT_PREFS = {
   snapHold: 550,   // ms the pen must rest before a stroke is straightened; 0 = off
   leftEdge: false, // true: the page stops at its left edge (endless only up, down and right)
   askMode: 'tutor',
+  askModel: 'auto', // 'auto' (cheap model decides), 'fast' (Haiku) or 'smart' (Sonnet)
   focus: false, open: {}
 };
 const prefs = Object.assign({}, DEFAULT_PREFS, LSget('inkwell.prefs', {}));
@@ -2911,6 +2912,8 @@ function renderPrefSettings(){
   $('setHold').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === hold));
   $('setLeft').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === (prefs.leftEdge ? 1 : 0)));
   $('setLeftHint').textContent = prefs.leftEdge ? 'Pages stop at the left edge and only grow up, down and to the right.' : 'Pages go on forever in every direction.';
+  $('setModel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askModel || 'auto')));
+  $('setModelHint').textContent = {auto: 'A quick check picks the cheap model for easy questions and the smart one for worksheets, handwriting and calculations.', fast: 'Always Haiku: cheapest and fastest, weaker at handwriting and long calculations.', smart: 'Always Sonnet: best answers, about 20 times the price of Haiku.'}[prefs.askModel || 'auto'];
   $('setHoldHint').textContent = hold ? `Hold the pen still for ${(hold / 1000).toFixed(2).replace(/0$/, '')} s at the end of a stroke to turn it into a straight line or shape.` : 'Strokes are never straightened.';
 }
 $('setTheme').addEventListener('click', e => {
@@ -2920,6 +2923,10 @@ $('setTheme').addEventListener('click', e => {
 $('setLeft').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
   prefs.leftEdge = b.dataset.v === '1'; savePrefs(); renderPrefSettings(); invalidate();
+});
+$('setModel').addEventListener('click', e => {
+  const b = e.target.closest('button[data-v]'); if(!b) return;
+  prefs.askModel = b.dataset.v; savePrefs(); renderPrefSettings();
 });
 $('setHold').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
@@ -3592,13 +3599,15 @@ const Ask = {
       const res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/ask', {
         method: 'POST', signal: this.ctrl.signal,
         headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token, apikey: CFG.SUPABASE_ANON_KEY},
-        body: JSON.stringify({mode: prefs.askMode || 'tutor', messages: this.msgs})
+        body: JSON.stringify({mode: prefs.askMode || 'tutor', model: prefs.askModel || 'auto', messages: this.msgs})
       });
       if(!res.ok){
         let j = {}; try { j = await res.json(); } catch {}
         const why = {not_allowed: 'This account is not allowed to use Claude yet. Your email has to be added to ASK_ALLOWED_EMAILS in Supabase (Edge Functions → Secrets).', no_key: 'Claude is not set up yet: the Anthropic API key is missing in Supabase (Edge Functions → Secrets → ANTHROPIC_API_KEY).', too_big: 'That was too much at once. Start a new chat (+) and scan a smaller part.'}[j.error];
         throw new Error(why || (res.status === 404 ? 'The Claude helper is not installed on the server yet.' : (j.message || j.error || 'Server error ' + res.status)));
       }
+      const used = res.headers.get('x-ask-model') || '';
+      const usedName = /haiku/i.test(used) ? 'Haiku (fast)' : /sonnet/i.test(used) ? 'Sonnet (smart)' : used;
       const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
       for(;;){
         const {value, done} = await reader.read(); if(done) break;
@@ -3616,6 +3625,7 @@ const Ask = {
       }
       paint(true);
       if(!acc) throw new Error('No answer came back');
+      if(usedName) out.insertAdjacentHTML('beforeend', `<div class="am-model">${esc(usedName)}${(prefs.askModel || 'auto') === 'auto' ? ', picked automatically' : ''}</div>`);
       this.msgs.push({role: 'assistant', content: [{type: 'text', text: acc}]});
     } catch(e){
       this.msgs.pop();   // let the question be asked again

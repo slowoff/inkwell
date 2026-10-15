@@ -3608,7 +3608,7 @@ $('exportPrint').addEventListener('click', () => { Pdf.abort = true; hideModal('
    ===================================================================== */
 $('status').addEventListener('click', openSettings);
 $('settingsBtn').addEventListener('click', openSettings);
-function openSettings(){ renderSettings(); showModal('settingsDlg'); }
+function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(); showModal('settingsDlg'); }
 async function renderSettings(){
   renderPrefSettings(); updTrashInfo(); renderVersion();
   const ready = !!Sync.sb;
@@ -3636,6 +3636,78 @@ async function renderSettings(){
     $('storageInfo').textContent = est && est.usage != null ? `Using ${(est.usage / 1048576).toFixed(1)} MB on this device` : '';
   } catch {}
 }
+/* ---------- Free up space: images nothing uses any more ----------
+   Used = referenced (key "a") by any page, template or chat, including Recently deleted, the open page and the
+   current Claude chat, or still waiting to upload. Online copies younger than a day are kept, so an import that
+   another device is still uploading is never touched. Nothing is removed before you confirm. */
+const Clean = {plan: null};
+async function cleanScan(){
+  await flushSaves();
+  if(Sync.user){
+    await Sync.run();
+    if(Sync.state !== 'synced') throw new Error('Sync first (' + (Sync.msg || 'not synced') + ')');
+  }
+  const used = new Set();
+  const walk = v => {
+    if(!v || typeof v !== 'object') return;
+    if(Array.isArray(v)){ for(const x of v) walk(x); return; }
+    for(const k in v){ const x = v[k]; if(k === 'a' && typeof x === 'string') used.add(x); else if(x && typeof x === 'object') walk(x); }
+  };
+  for(const d of await IDB.all('docs')) if(d.kind !== 'ptxt' && d.data) walk(d.data);
+  if(cur) for(const it of cur.items.values()) walk(it);
+  walk(Ask.msgs);
+  for(const id of (await IDB.get('meta', 'pendingAssets')) || []) used.add(id);
+  const local = (await IDB.all('assets')).filter(r => r && r.id && !used.has(r.id)).map(r => ({id: r.id, size: r.blob ? r.blob.size : 0}));
+  const server = [];
+  if(Sync.user){
+    const dayAgo = Date.now() - 864e5;
+    for(let off = 0; off < 200000; off += 1000){
+      const {data, error} = await Sync.sb.storage.from('assets').list(Sync.user.id, {limit: 1000, offset: off});
+      if(error) throw error;
+      for(const o of data || []){
+        if(!o || !o.name || !/^a-/.test(o.name) || used.has(o.name)) continue;
+        const t = Date.parse(o.created_at || o.updated_at || '');
+        if(isFinite(t) && t < dayAgo) server.push({id: o.name, size: (o.metadata && +o.metadata.size) || 0});
+      }
+      if(!data || data.length < 1000) break;
+    }
+  }
+  return {local, server};
+}
+const planSize = p => { const ids = new Set(p.local.concat(p.server).map(r => r.id)); return {n: ids.size, mb: p.local.concat(p.server).reduce((a, r) => a + r.size, 0) / 1048576}; };
+async function cleanRun(plan){
+  for(const r of plan.local){
+    await IDB.del('assets', r.id);
+    const u = assetURLs.get(r.id); if(u){ URL.revokeObjectURL(u); assetURLs.delete(r.id); }
+  }
+  for(let i = 0; i < plan.server.length; i += 100){
+    const {error} = await Sync.sb.storage.from('assets').remove(plan.server.slice(i, i + 100).map(r => Sync.user.id + '/' + r.id));
+    if(error) throw error;
+  }
+  // their searchable text goes too
+  for(const id of new Set(plan.local.concat(plan.server).map(r => r.id))){ const d = docs.get('pt_' + id); if(d && live(d)) await removeDoc(d.id, 'ptxt', null, true); }
+}
+$('cleanBtn').addEventListener('click', async () => {
+  const btn = $('cleanBtn'), info = $('cleanInfo');
+  const done = () => { btn.disabled = false; btn.textContent = 'Free up space'; btn.classList.remove('danger'); };
+  if(Clean.plan){
+    const plan = Clean.plan, {n, mb} = planSize(plan); Clean.plan = null;
+    btn.disabled = true; info.textContent = 'Removing…';
+    try { await cleanRun(plan); info.textContent = `Removed ${n} unused image${n === 1 ? '' : 's'}, ${mb.toFixed(1)} MB freed.`; }
+    catch(e){ console.warn('clean', e); info.textContent = 'Not everything could be removed: ' + (e.message || e); }
+    done(); renderSettings(); return;
+  }
+  btn.disabled = true; info.textContent = 'Checking…';
+  try {
+    const plan = await cleanScan(), {n, mb} = planSize(plan);
+    if(!n){ info.textContent = 'No unused images. Nothing to free.'; done(); return; }
+    Clean.plan = plan;
+    const lmb = plan.local.reduce((a, r) => a + r.size, 0) / 1048576, smb = plan.server.reduce((a, r) => a + r.size, 0) / 1048576;
+    info.textContent = `${n} image${n === 1 ? '' : 's'} (${mb.toFixed(1)} MB) that no page, template, chat or Recently deleted item uses` + (Sync.user ? `: ${lmb.toFixed(1)} MB on this device, ${smb.toFixed(1)} MB online.` : '.') + ' Tap Remove to delete them for good.';
+    btn.disabled = false; btn.textContent = 'Remove'; btn.classList.add('danger');
+  } catch(e){ console.warn('clean scan', e); info.textContent = 'Could not check: ' + (e.message || e); done(); }
+});
+
 $('authForm').addEventListener('submit', async e => {
   e.preventDefault();
   const msg = $('authMsg'); msg.textContent = 'Signing in';
@@ -5859,6 +5931,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

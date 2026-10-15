@@ -588,3 +588,7 @@ select.pf-ls option:checked{background:#9fbbe8}
   .list-head .icon-btn{width:34px}
   .new-page{padding:0 9px 0 7px}
 }
+
+.clean-row{align-items:center;gap:12px}
+.clean-row .hint{white-space:normal;flex:1;min-width:0}
+.clean-row .btn{flex:none}

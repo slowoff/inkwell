@@ -4388,47 +4388,42 @@ async function putAnswer(md, src){
   if(!cur){ toast('Open a page first'); return; }
   const blocks = answerBlocks(md);
   if(!blocks.length) return;
-  const W0 = 440;
-  let x, y;
-  if(src && src.page === cur.id && src.box){
-    // beside the question; if it was on an imported worksheet, beside the worksheet, not over it
-    const bx = src.box;
-    let right = bx[2];
-    for(const it of cur.items.values()) if(it.t === 'i' && bx[0] < it.x + it.w && bx[2] > it.x && bx[1] < it.y + it.h && bx[3] > it.y) right = Math.max(right, it.x + it.w);
-    x = right + 28; y = bx[1];
-  } else {
-    // below what is in view, or below the page's content
-    const v = viewRect(), cb = contentBox();
-    x = cb ? cb[0] : v[0] + 40; y = cb ? cb[3] + 40 : v[1] + 40;
+  // laid out first, then centred in the middle of what is on screen, selected so it can be dragged right away
+  // the visible part of the page that the Claude panel does not cover (screen px, stage coordinates)
+  let fx0 = 0, fy0 = 0, fx1 = W, fy1 = H;
+  const ap = $('askPanel');
+  if(!ap.hidden){
+    const r = ap.getBoundingClientRect(), L = r.left - SR.left, T = r.top - SR.top, R = r.right - SR.left, B = r.bottom - SR.top;
+    if(R > 0 && L < W && B > 0 && T < H){
+      // the biggest free strip beside, above or below the panel (if it is at least 160 px wide/high)
+      const opts = [[L, H, () => { fx1 = L - 10; }], [W - R, H, () => { fx0 = R + 10; }], [W, T, () => { fy1 = T - 10; }], [W, H - B, () => { fy0 = B + 10; }]]
+        .filter(([w, h]) => w >= 160 && h >= 160).sort((a, b) => b[0] * b[1] - a[0] * a[1]);
+      if(opts.length) opts[0][2]();
+    }
   }
+  const W0 = Math.min(440, Math.max(150, (fx1 - fx0 - 24) / cam.z));
+  let x = 0, y = 0;
   const g = 'g' + newId(), added = [];
   for(const b of blocks){
     const id = (b.t === 'm' ? 'm' : 'x') + newId() + Math.random().toString(36).slice(2, 5);
     const it = b.t === 'm' ? {t: 'm', id, x, y, tex: b.tex, fs: 22, c: 'auto', g} : {t: 'x', id, x, y, w: W0, fs: 1, html: cleanHTML(b.html), g};
-    setItems([[id, it]]);   // laid out one by one so each box can be measured
+    setItems([[id, it]]);   // one by one so each box can be measured
     added.push(it);
     const el = elMap.get(id);
     y += (el ? el.offsetHeight : 40) + 6;
   }
-  // move down until it covers nothing that is already on the page
   {
-    const mine = new Set(added.map(it => it.id)), bb = added.map(itemBox).reduce(boxUnion);
-    const others = [...cur.items.values()].filter(it => !mine.has(it.id)).map(itemBox);
-    let dy = 0;
-    for(let k = 0; k < 400; k++){
-      const hit = others.find(o => o[0] < bb[2] + 8 && o[2] > bb[0] - 8 && o[1] < bb[3] + dy + 8 && o[3] > bb[1] + dy - 8);
-      if(!hit) break;
-      dy = hit[3] - bb[1] + 16;
-    }
-    if(dy){ for(let k = 0; k < added.length; k++){ added[k] = Object.assign({}, added[k], {y: added[k].y + dy}); } setItems(added.map(it => [it.id, it])); }
+    const bb = added.map(itemBox).reduce(boxUnion);
+    const [vx0, vy0] = toWorld(fx0, fy0), [vx1, vy1] = toWorld(fx1, fy1);
+    const bw = bb[2] - bb[0], bh = bb[3] - bb[1];
+    const dx = (vx0 + vx1) / 2 - bw / 2 - bb[0];
+    const dy = (bh < (vy1 - vy0) * 0.8 ? (vy0 + vy1) / 2 - bh / 2 : vy0 + (vy1 - vy0) * 0.08) - bb[1];
+    for(let k = 0; k < added.length; k++) added[k] = Object.assign({}, added[k], {x: added[k].x + dx, y: added[k].y + dy});
+    setItems(added.map(it => [it.id, it]));
   }
   commit(added.map(it => [it.id, null]), added.map(it => [it.id, it]));
-  // show where it went
-  const b = added.map(itemBox).reduce(boxUnion);
-  const sx0 = b[0] * cam.z + cam.ox, sx1 = b[2] * cam.z + cam.ox, sy0 = b[1] * cam.z + cam.oy, sy1 = b[3] * cam.z + cam.oy;
-  if(sx1 > W || sx0 < 0 || sy0 < 0 || sy1 > H){ cam.ox = W * 0.55 - (b[0] + b[2]) / 2 * cam.z; cam.oy = H * 0.4 - b[1] * cam.z; if(sx1 - sx0 > W) cam.ox = 20 - b[0] * cam.z; invalidate(); saveCamSoon(); }
   setTool('lasso'); selectIds(added.map(it => it.id));
-  toast('Put on the page. Drag it where you want it.');
+  toast('Placed in the middle and selected: drag it where you want it.');
 }
 
 /* =====================================================================

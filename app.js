@@ -1010,8 +1010,13 @@ stage.addEventListener('wheel', e => {
   if(!cur) return;
   const [sx, sy] = pt(e);
   if(prefs.ruler.on && onRuler(sx, sy) && e.shiftKey){ prefs.ruler.a += (e.deltaY > 0 ? 1 : -1) * Math.PI / 180; renderRuler(); savePrefs(); return; }
-  if(e.ctrlKey || e.metaKey) zoomAt(sx, sy, cam.z * Math.exp(-e.deltaY * 0.0085));
-  else { cam.ox -= e.deltaX; cam.oy -= e.deltaY; invalidate(); saveCamSoon(); }
+  // line/page based wheels (some mice and trackpad drivers) report small units
+  const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1;
+  let dx = e.deltaX * k, dy = e.deltaY * k;
+  // trackpad drivers and mice that send sideways scrolling as Shift + wheel
+  if(e.shiftKey && !dx){ dx = dy; dy = 0; }
+  if(e.ctrlKey || e.metaKey) zoomAt(sx, sy, cam.z * Math.exp(-dy * 0.0085));
+  else { cam.ox -= dx; cam.oy -= dy; invalidate(); saveCamSoon(); }
 }, {passive: false});
 let gz0 = 1;
 stage.addEventListener('gesturestart', e => { gz0 = cam.z; e.preventDefault(); });
@@ -1411,7 +1416,7 @@ function hitItem(sx, sy, target){
     const it = e2.closest && e2.closest('.it');
     if(it && cur.items.has(it.dataset.id)) return it.dataset.id;
   }
-  const [wx, wy] = toWorld(sx, sy), tol = 10 / cam.z;
+  const [wx, wy] = toWorld(sx, sy), tol = 14 / cam.z;
   const list = [...cur.items.values()].reverse();
   for(const it of list){
     if(it.t !== 's') continue;
@@ -1428,7 +1433,7 @@ function hitItem(sx, sy, target){
 function finishLasso(a){
   const poly = a.poly;
   if(!a.moved || poly.length < 12){
-    const id = hitItem(a.sx, a.sy, a.target);
+    const id = hitItem(a.sx, a.sy, a.target) || groupAt(a.sx, a.sy);
     if(id) selectIds([id]); else { clearSel(); tapAt(a.target, a.sx, a.sy); }
     return;
   }
@@ -1440,15 +1445,41 @@ function finishLasso(a){
       const p = it.p, n = p.length / 3, step = Math.max(1, Math.floor(n / 40)) * 3;
       let inside = 0, tot = 0;
       for(let i = 0; i < p.length; i += step){ tot++; if(pip(p[i], p[i+1], wp)) inside++; }
-      if(tot && inside / tot >= 0.5) ids.push(it.id);
+      if(tot && inside / tot >= 0.35) ids.push(it.id);
     } else {
+      // boxes: the centre, or at least 4 of 9 sample points, inside the loop
       const b = itemBox(it);
-      if(pip((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, wp)) ids.push(it.id);
+      let n = 0;
+      for(const fx of [0.1, 0.5, 0.9]) for(const fy of [0.1, 0.5, 0.9]) if(pip(b[0] + (b[2] - b[0]) * fx, b[1] + (b[3] - b[1]) * fy, wp)) n++;
+      if(n >= 4 || pip((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, wp)) ids.push(it.id);
     }
   }
   if(ids.length) selectIds(ids); else clearSel();
 }
+/* Groups: items with the same optional field g move, select and resize as one piece */
+function withGroups(ids){
+  const gs = new Set(ids.map(id => cur.items.get(id)).filter(it => it && it.g).map(it => it.g));
+  if(!gs.size) return ids;
+  const out = new Set(ids);
+  for(const it of cur.items.values()) if(it.g && gs.has(it.g)) out.add(it.id);
+  return [...out];
+}
+// tapping empty space inside a group (e.g. between the axes of a graph) selects that group
+function groupAt(sx, sy){
+  const [wx, wy] = toWorld(sx, sy), boxes = new Map();
+  for(const it of cur.items.values()){
+    if(!it.g) continue;
+    const b = itemBox(it), q = boxes.get(it.g);
+    boxes.set(it.g, q ? [Math.min(q[0], b[0]), Math.min(q[1], b[1]), Math.max(q[2], b[2]), Math.max(q[3], b[3])] : b.slice());
+  }
+  let best = null, area = Infinity;
+  for(const [g, b] of boxes){ if(wx >= b[0] && wx <= b[2] && wy >= b[1] && wy <= b[3]){ const a = (b[2] - b[0]) * (b[3] - b[1]); if(a < area){ area = a; best = g; } } }
+  if(!best) return null;
+  for(const it of cur.items.values()) if(it.g === best) return it.id;
+  return null;
+}
 function selectIds(ids){
+  ids = withGroups(ids);
   sel = {ids};
   computeSel();
   if(!sel) return;
@@ -1514,7 +1545,15 @@ const endSelDrag = e => {
 };
 selRect.addEventListener('pointerup', endSelDrag);
 selRect.addEventListener('pointercancel', endSelDrag);
+function renderGroupBtns(){
+  const its = sel ? sel.ids.map(id => cur.items.get(id)).filter(Boolean) : [];
+  const gs = new Set(its.map(it => it.g || ''));
+  const oneGroup = gs.size === 1 && !gs.has('');
+  $('selGroup').hidden = its.length < 2 || oneGroup;
+  $('selUngroup').hidden = !its.some(it => it.g);
+}
 function renderSelColors(){
+  renderGroupBtns();
   const box = $('selColors');
   const anyInk = sel && sel.ids.some(id => { const it = cur.items.get(id); return it && (it.t === 's' || it.t === 'm'); });
   box.hidden = !anyInk;
@@ -1528,12 +1567,24 @@ $('selColors').addEventListener('click', e => {
   if(list.length) replaceItems(list);
 });
 $('selDel').addEventListener('click', () => { if(!sel) return; const ids = sel.ids.slice(); clearSel(); removeItems(ids); });
+$('selGroup').addEventListener('click', () => {
+  if(!sel) return;
+  const g = 'g' + newId();
+  replaceItems(sel.ids.map(id => cur.items.get(id)).filter(Boolean).map(it => Object.assign({}, it, {g})));
+  selectIds(sel.ids); toast('Grouped: it now moves as one piece');
+});
+$('selUngroup').addEventListener('click', () => {
+  if(!sel) return;
+  replaceItems(sel.ids.map(id => cur.items.get(id)).filter(it => it && it.g).map(it => { const o = Object.assign({}, it); delete o.g; return o; }));
+  const ids = sel.ids; sel = null; selectIds(ids); toast('Ungrouped: tap a part to select it alone');
+});
 $('selDup').addEventListener('click', () => {
   if(!sel) return;
-  const off = 24 / cam.z;
+  const off = 24 / cam.z, gmap = new Map();
   const copies = sel.ids.map(id => cur.items.get(id)).filter(Boolean).map(it => {
     const o = transformItem(it, {dx: off, dy: off, s: 1, ax: 0, ay: 0});
-    o.id = it.id[0] + newId();
+    o.id = it.id[0] + newId() + Math.random().toString(36).slice(2, 5);
+    if(it.g){ if(!gmap.has(it.g)) gmap.set(it.g, 'g' + newId()); o.g = gmap.get(it.g); }
     return o;
   });
   addItems(copies);
@@ -3168,8 +3219,8 @@ function shapePolys(shape, b, w){
   return [];
 }
 function shapeItems(shape, b){
-  const w = penWidth();
-  return shapePolys(shape, b, w).map(([V, closed]) => ({t: 's', id: 's' + newId(), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}));
+  const w = penWidth(), polys = shapePolys(shape, b, w), g = polys.length > 1 ? 'g' + newId() : null;
+  return polys.map(([V, closed]) => { const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}; if(g) it.g = g; return it; });
 }
 function insertShape(shape, b){
   const items = shapeItems(shape, b);
@@ -3253,6 +3304,7 @@ function labelTex(s){
 const fmtNum = v => { const r = Math.round(v * 1e6) / 1e6; return String(r).replace('-', '-'); };
 function buildGraph(o, gx, gy){
   const items = [], w = penWidth(), axisC = 'auto', id = p => p + newId() + Math.random().toString(36).slice(2, 5);
+  const grp = 'g' + newId();
   const stroke = (V, c = axisC, ww = w) => items.push({t: 's', id: id('s'), c, w: ww, hl: 0, p: polyPts(V, false)});
   const formula = (tex, x, y, fs) => { if(tex) items.push({t: 'm', id: id('m'), x, y, tex, fs, c: 'auto'}); };
   const hs = Math.max(10, w * 5);
@@ -3270,6 +3322,7 @@ function buildGraph(o, gx, gy){
     formula(labelTex(o.ly), ends.y[0] + 6, ends.y[1] + 4, 18);
     formula(labelTex(o.lz), ends.z[0] + 10, ends.z[1] - 6, 18);
     formula(labelTex(o.lx), ends.x[0] - 26, ends.x[1] - 6, 18);
+    items.forEach(it => it.g = grp);
     return items;
   }
   const GW = 380, GH = 270;
@@ -3314,6 +3367,7 @@ function buildGraph(o, gx, gy){
       items.push({t: 's', id: id('s'), c: '#1F4FCF', w: w * 1.15, hl: 0, p: polyPts(V, false)});
     }
   }
+  items.forEach(it => it.g = grp);
   return items;
 }
 const GRAPH_DEFAULTS = {q1: {x0: 0, x1: 10, xs: 1, y0: 0, y1: 10, ys: 1}, q4: {x0: -5, x1: 5, xs: 1, y0: -5, y1: 5, ys: 1}};

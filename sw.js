@@ -1,5 +1,5 @@
 // Inkwell offline cache. Bump VERSION whenever app files change.
-const VERSION = 'inkwell-v10';
+const VERSION = 'inkwell-v11';
 const SHELL = [
   './', './index.html', './app.css', './app.js', './config.js', './manifest.webmanifest',
   './lib/pdf.min.js', './lib/pdf.worker.min.js', './lib/supabase.js',
@@ -19,7 +19,10 @@ self.addEventListener('activate', e => {
   );
 });
 
-self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });
+self.addEventListener('message', e => {
+  if (e.data === 'skipWaiting') self.skipWaiting();
+  else if (e.data === 'version' && e.ports && e.ports[0]) e.ports[0].postMessage(VERSION);
+});
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);

@@ -205,7 +205,8 @@
 
 <div class="modal" id="settingsDlg" hidden>
   <div class="dlg">
-    <div class="dlg-head"><h3>Sync</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="dlg-head"><h3>Settings</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="set-h">Sync</p>
     <div id="setNoConfig" hidden>
       <p>Sync is not set up yet. Add your Supabase URL and key to <code>config.js</code>, upload it again, then reopen Inkwell.</p>
       <p class="hint">Until then, notes are saved on this device.</p>
@@ -223,7 +224,25 @@
       <div class="dlg-actions"><button class="btn ghost" id="signOut">Sign out</button><button class="btn primary" id="syncNow">Sync now</button></div>
     </div>
     <hr>
+    <p class="set-h">Appearance</p>
+    <div class="set-row"><span>Theme</span><div class="seg" id="setTheme"><button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
+    <div class="set-row"><span>Straighten shapes</span><div class="seg" id="setHold"><button data-v="0">Off</button><button data-v="350">Fast</button><button data-v="550">Normal</button><button data-v="900">Slow</button></div></div>
+    <p class="hint" id="setHoldHint"></p>
+    <hr>
+    <p class="set-h">Your notes</p>
+    <div class="set-row"><span id="trashInfo">Recently deleted</span><button class="btn ghost" id="trashBtn">Open</button></div>
     <div class="dlg-actions"><span class="hint" id="storageInfo"></span><button class="btn ghost" id="backupBtn">Download backup</button></div>
+    <hr>
+    <div class="set-row"><span class="hint" id="verInfo">Inkwell</span><button class="btn ghost" id="updBtn">Check for update</button></div>
+  </div>
+</div>
+
+<div class="modal" id="trashDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Recently deleted</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="hint">Deleted pages, sections, notebooks and templates stay here for 30 days, then they are removed for good.</p>
+    <div class="trash-list" id="trashList"></div>
+    <div class="dlg-actions"><button class="btn ghost" id="trashBack">Back</button><button class="btn danger" id="trashEmpty">Empty</button></div>
   </div>
 </div>
 

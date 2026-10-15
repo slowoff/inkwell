@@ -12,7 +12,7 @@
   --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px); --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px);
   color-scheme:light;
 }
-@media (prefers-color-scheme: dark){:root{
+@media (prefers-color-scheme: dark){:root:not([data-theme=light]){
   --desk:#0F1215; --panel:#15191E; --panel2:#181C22; --paper:#1B2027; --raise:#222831;
   --line:#2A3139; --rule:#29323C; --rule-strong:#3A4552; --fg:#E5EAF0; --muted:#97A3B0; --faint:#6E7A87;
   --accent:#7DA3FF; --accent-fg:#0E1420; --accent-soft:#1F2C47; --danger:#FF8378; --danger-soft:#3A1F1D; --ok:#5CD18B;
@@ -20,6 +20,14 @@
   --tape:#B58A22; --tape2:#9C7519;
   color-scheme:dark;
 }}
+:root[data-theme=dark]{
+  --desk:#0F1215; --panel:#15191E; --panel2:#181C22; --paper:#1B2027; --raise:#222831;
+  --line:#2A3139; --rule:#29323C; --rule-strong:#3A4552; --fg:#E5EAF0; --muted:#97A3B0; --faint:#6E7A87;
+  --accent:#7DA3FF; --accent-fg:#0E1420; --accent-soft:#1F2C47; --danger:#FF8378; --danger-soft:#3A1F1D; --ok:#5CD18B;
+  --mark:#6A5714; --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 30px rgba(0,0,0,.45);
+  --tape:#B58A22; --tape2:#9C7519;
+  color-scheme:dark;
+}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{color:var(--fg);font-family:var(--f-ui);font-size:15px;overflow:hidden;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;overscroll-behavior:none}
@@ -343,3 +351,16 @@ select.pf-ls option:checked{background:#9fbbe8}
   .print-inner .it-text a.pl{color:#1F4FCF}
   .print-inner .it-tape{display:none}
 }
+
+/* ---------- settings ---------- */
+.set-h{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:0}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.set-row > span{font-size:14.5px}
+.set-row .seg{flex:none;min-width:240px}
+.trash-list{display:flex;flex-direction:column;gap:2px;max-height:60vh;overflow:auto}
+.trash-item{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line)}
+.trash-item:last-child{border-bottom:0}
+.trash-item .ti-text{flex:1;min-width:0}
+.trash-item .ti-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trash-item .btn{height:34px;padding:0 12px;font-size:13.5px}
+@media (max-width:700px){.set-row{flex-direction:column;align-items:stretch}.set-row .seg{min-width:0}}

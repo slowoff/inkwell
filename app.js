@@ -54,6 +54,8 @@ const DEFAULT_PREFS = {
   snapLines: true,
   ruler: {on: false, cx: null, cy: null, a: 0},
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
+  theme: 'auto',   // 'auto' follows the iPad, or 'light' / 'dark'
+  snapHold: 550,   // ms the pen must rest before a stroke is straightened; 0 = off
   focus: false, open: {}
 };
 const prefs = Object.assign({}, DEFAULT_PREFS, LSget('inkwell.prefs', {}));
@@ -129,9 +131,14 @@ async function writeDoc(rec){
 }
 const newDoc = (kind, data, id) => writeDoc({id: id || kind + '-' + newId(), kind, data, deleted: false});
 const patchDoc = (rec, patch) => { rec.data = Object.assign({}, rec.data, patch); return writeDoc(rec); };
-async function removeDoc(id, kind){
+// Deleting keeps the data for 30 days (Recently deleted in the settings), marked with data._del = {at, g}.
+// g = id of the thing the user deleted, so a section comes back together with its pages.
+// purge: true wipes the data for good (old behaviour, and what happens after 30 days).
+const TRASH_DAYS = 30;
+async function removeDoc(id, kind, group, purge){
   const rec = docs.get(id) || await IDB.get('docs', id) || {id, kind};
-  rec.kind = rec.kind || kind; rec.deleted = true; rec.data = null;
+  rec.kind = rec.kind || kind; rec.deleted = true;
+  rec.data = purge || !rec.data ? null : Object.assign({}, rec.data, {_del: {at: Date.now(), g: group || id}});
   return writeDoc(rec);
 }
 
@@ -222,7 +229,7 @@ const Sync = {
     let batch = [], size = 0;
     const flush = async () => {
       if(!batch.length) return;
-      const rows = batch.map(d => ({user_id: this.user.id, id: d.id, kind: d.kind, data: d.deleted ? null : (d.data ?? null), deleted: !!d.deleted, updated_at: d.updated}));
+      const rows = batch.map(d => ({user_id: this.user.id, id: d.id, kind: d.kind, data: d.data ?? null, deleted: !!d.deleted, updated_at: d.updated}));
       const {error} = await this.sb.from('docs').upsert(rows, {onConflict: 'user_id,id'});
       if(error) throw error;
       for(const d of batch){
@@ -278,7 +285,7 @@ let pendingCurrentReload = false, lastLocalEdit = 0;
 async function applyRemote(row){
   const local = await IDB.get('docs', row.id);
   if(local && local.updated >= row.updated_at) return false;
-  const rec = {id: row.id, kind: row.kind, data: row.deleted ? null : row.data, deleted: !!row.deleted, updated: row.updated_at, dirty: 0};
+  const rec = {id: row.id, kind: row.kind, data: row.data ?? null, deleted: !!row.deleted, updated: row.updated_at, dirty: 0};
   await IDB.put('docs', rec);
   if(rec.kind !== 'content') docs.set(rec.id, rec);
   else if(cur && rec.id === 'c_' + cur.id) pendingCurrentReload = true;
@@ -427,6 +434,17 @@ function geoOf(it){
 /* Colours: 'auto' ink is black on light paper and white on dark paper */
 let tokens = {};
 const darkMQ = matchMedia('(prefers-color-scheme: dark)');
+const isDark = () => prefs.theme === 'dark' || (prefs.theme !== 'light' && darkMQ.matches);
+function setThemeAttr(){
+  const r = document.documentElement;
+  if(prefs.theme === 'light' || prefs.theme === 'dark') r.dataset.theme = prefs.theme; else delete r.dataset.theme;
+  const metas = document.querySelectorAll('meta[name="theme-color"]');
+  metas.forEach((m, i) => {
+    if(prefs.theme === 'auto'){ m.media = i ? '(prefers-color-scheme: dark)' : '(prefers-color-scheme: light)'; m.content = i ? '#15191E' : '#F4F6F8'; }
+    else { m.media = ''; m.content = prefs.theme === 'dark' ? '#15191E' : '#F4F6F8'; }
+  });
+}
+setThemeAttr();
 function readTokens(){
   const cs = getComputedStyle(document.documentElement);
   const g = n => cs.getPropertyValue(n).trim();
@@ -441,7 +459,7 @@ function lum(hex){
 // onPaper: drawn over an imported page/picture, which always stays light, so use light-mode ink there
 function inkColor(c, print, onPaper){
   if(onPaper) print = true;
-  const dark = !print && darkMQ.matches;
+  const dark = !print && isDark();
   if(!c || c === 'auto') return print ? '#18212B' : tokens.fg;
   const l = lum(c);
   if(dark && l < 0.07) return tokens.fg;
@@ -538,7 +556,7 @@ function drawInk(){
       const g = geoOf(it);
       if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
       const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
-      inkCtx.globalAlpha = pass ? (darkMQ.matches && !paper ? 0.34 : 0.4) : 1;
+      inkCtx.globalAlpha = pass ? (isDark() && !paper ? 0.34 : 0.4) : 1;
       inkCtx.fillStyle = inkColor(it.c, false, paper);
       inkCtx.fill(g.path);
     }
@@ -1027,7 +1045,9 @@ function startTool(e, sx, sy, pr){
 function armHold(){
   clearTimeout(act.hold);
   const a = act;
-  a.hold = setTimeout(() => { if(act === a && a.kind === 'stroke' && !a.edge && !a.snapped) trySnap(a); }, 550);
+  const ms = +prefs.snapHold;
+  if(!(ms > 0)) return;   // straightening switched off in the settings
+  a.hold = setTimeout(() => { if(act === a && a.kind === 'stroke' && !a.edge && !a.snapped) trySnap(a); }, ms);
 }
 function toolMove(e){
   const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
@@ -1087,7 +1107,7 @@ function drawLive(){
   if(act.kind === 'stroke'){
     liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
     const paper = onPaperAt(paperRects(), act.pts[0], act.pts[1]);
-    liveCtx.globalAlpha = act.hl ? (darkMQ.matches && !paper ? 0.34 : 0.4) : 1;
+    liveCtx.globalAlpha = act.hl ? (isDark() && !paper ? 0.34 : 0.4) : 1;
     liveCtx.fillStyle = inkColor(act.c, false, paper);
     liveCtx.fill(strokePath({t: 's', c: act.c, w: act.w, hl: act.hl, p: act.pts}, false));
     liveCtx.globalAlpha = 1;
@@ -1964,7 +1984,7 @@ async function deletePage(id){
   await closeCurrent();
   const page = getDoc(id); if(!page) return;
   const secId = page.data.sec, list = pagesOf(secId), idx = list.findIndex(p => p.id === id);
-  await removeDoc(id, 'page'); await removeDoc('c_' + id, 'content');
+  await removeDoc(id, 'page'); await removeDoc('c_' + id, 'content', id);
   localStorage.removeItem('inkwell.cam.' + id);
   renderNav(); renderList();
   const rest = pagesOf(secId), next = rest[Math.min(idx, rest.length - 1)];
@@ -2044,11 +2064,11 @@ async function deleteContainer(){
   for(const s of secs){
     for(const p of pagesOf(s.id)){
       if(cur && cur.id === p.id){ await closeCurrent(); showEmpty(); }
-      await removeDoc(p.id, 'page'); await removeDoc('c_' + p.id, 'content');
+      await removeDoc(p.id, 'page', st.id); await removeDoc('c_' + p.id, 'content', st.id);
     }
-    await removeDoc(s.id, 'sec');
+    await removeDoc(s.id, 'sec', st.id);
   }
-  if(st.kind === 'nb') await removeDoc(st.id, 'nb');
+  if(st.kind === 'nb') await removeDoc(st.id, 'nb', st.id);
   ensureUi(); renderNav(); renderList();
   toast(st.kind === 'nb' ? 'Notebook deleted' : 'Section deleted');
 }
@@ -2742,6 +2762,7 @@ $('status').addEventListener('click', openSettings);
 $('settingsBtn').addEventListener('click', openSettings);
 function openSettings(){ renderSettings(); showModal('settingsDlg'); }
 async function renderSettings(){
+  renderPrefSettings(); updTrashInfo(); renderVersion();
   const ready = !!Sync.sb;
   $('setNoConfig').hidden = ready;
   $('authForm').hidden = !ready || !!Sync.user;
@@ -2774,6 +2795,157 @@ $('authSignup').addEventListener('click', async () => {
 });
 $('signOut').addEventListener('click', async () => { await Sync.sb.auth.signOut(); Sync.user = null; setStatus(); renderSettings(); });
 $('syncNow').addEventListener('click', async () => { $('syncInfo').textContent = 'Syncing'; await Sync.run(); renderSettings(); });
+
+/* Settings: theme and shape straightening (per device) */
+function renderPrefSettings(){
+  $('setTheme').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.theme || 'auto')));
+  const hold = +prefs.snapHold || 0;
+  $('setHold').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === hold));
+  $('setHoldHint').textContent = hold ? `Hold the pen still for ${(hold / 1000).toFixed(2).replace(/0$/, '')} s at the end of a stroke to turn it into a straight line or shape.` : 'Strokes are never straightened.';
+}
+$('setTheme').addEventListener('click', e => {
+  const b = e.target.closest('button[data-v]'); if(!b) return;
+  prefs.theme = b.dataset.v; savePrefs(); setThemeAttr(); themeChanged(); renderPrefSettings();
+});
+$('setHold').addEventListener('click', e => {
+  const b = e.target.closest('button[data-v]'); if(!b) return;
+  prefs.snapHold = +b.dataset.v; savePrefs(); renderPrefSettings();
+});
+
+/* Recently deleted */
+const inTrash = d => !!(d && d.deleted && d.data && d.data._del);
+async function trashGroups(){
+  const all = await IDB.all('docs'), groups = new Map();
+  for(const d of all){
+    if(!inTrash(d)) continue;
+    const g = d.data._del.g;
+    if(!groups.has(g)) groups.set(g, {g, at: d.data._del.at, members: [], top: null});
+    const gr = groups.get(g);
+    gr.members.push(d);
+    if(d.id === g) gr.top = d;
+    gr.at = Math.max(gr.at, d.data._del.at);
+  }
+  return [...groups.values()];
+}
+async function purgeTrash(){
+  const limit = Date.now() - TRASH_DAYS * 864e5;
+  for(const gr of await trashGroups()) if(gr.at < limit) for(const d of gr.members) await removeDoc(d.id, d.kind, null, true);
+}
+function trashLabel(gr){
+  const t = gr.top, d = t && t.data, any = id => docs.get(id);
+  const nameOf = x => x && x.data ? (x.data.name || x.data.title || '') : '';
+  if(!t) return {name: 'Deleted items', sub: gr.members.length + ' item' + (gr.members.length === 1 ? '' : 's')};
+  const count = k => gr.members.filter(m => m.kind === k).length, pl = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  if(t.kind === 'page') { const sec = nameOf(any(d.sec)); return {name: d.title || 'Untitled page', sub: 'Page' + (sec ? ' in ' + sec : '')}; }
+  if(t.kind === 'sec') return {name: d.name || 'Section', sub: 'Section, ' + pl(count('page'), 'page')};
+  if(t.kind === 'nb') return {name: d.name || 'Notebook', sub: 'Notebook, ' + pl(count('sec'), 'section') + ', ' + pl(count('page'), 'page')};
+  if(t.kind === 'tmpl') return {name: d.name || 'Template', sub: 'Template'};
+  return {name: nameOf(t) || t.kind, sub: t.kind};
+}
+async function updTrashInfo(){
+  const n = (await trashGroups()).length;
+  $('trashInfo').textContent = 'Recently deleted' + (n ? ` (${n})` : '');
+}
+async function renderTrash(){
+  const groups = (await trashGroups()).sort((a, b) => b.at - a.at), list = $('trashList');
+  $('trashEmpty').disabled = !groups.length;
+  if(!groups.length){ list.innerHTML = '<p class="hint">Nothing here. Things you delete from now on show up here.</p>'; return; }
+  list.innerHTML = groups.map(gr => {
+    const l = trashLabel(gr), when = new Date(gr.at).toLocaleDateString('en-GB', {day: 'numeric', month: 'short'});
+    return `<div class="trash-item" data-g="${esc(gr.g)}"><div class="ti-text"><div class="ti-name">${esc(l.name)}</div><div class="hint">${esc(l.sub)}, deleted ${esc(when)}</div></div>` +
+      `<button class="btn ghost" data-act="restore">Restore</button><button class="btn danger" data-act="purge">Delete</button></div>`;
+  }).join('');
+}
+async function undelete(d){
+  const data = Object.assign({}, d.data); delete data._del;
+  d.deleted = false; d.data = data;
+  await writeDoc(d);
+}
+async function fallbackNb(){
+  const nbs = notebooks(); if(nbs.length) return (getDoc(ui.nb) || nbs[0]).id;
+  return (await newDoc('nb', {name: 'Restored', color: 0, order: 0})).id;
+}
+async function fallbackSec(){
+  const nb = await fallbackNb(), secs = sectionsOf(nb);
+  if(secs.length) return (getDoc(ui.sec) && getDoc(ui.sec).data.nb === nb ? getDoc(ui.sec) : secs[0]).id;
+  return (await newDoc('sec', {nb, name: 'Restored', color: 0, order: 0})).id;
+}
+// Brings back everything deleted together with g. If its notebook/section is also deleted, that comes back too;
+// if that is gone for good, it lands in the current notebook/section.
+async function restoreGroup(g, depth = 0){
+  const gr = (await trashGroups()).find(x => x.g === g); if(!gr) return '';
+  for(const d of gr.members) await undelete(d);
+  const top = docs.get(g);
+  let note = '';
+  if(top && top.kind === 'page' || top && top.kind === 'sec'){
+    const pk = top.kind === 'page' ? 'sec' : 'nb', pid = top.data[pk], parent = docs.get(pid);
+    if(!live(parent)){
+      if(inTrash(parent) && depth < 3){ await restoreGroup(parent.data._del.g, depth + 1); note = top.kind === 'page' ? ' with its section' : ' with its notebook'; }
+      if(!live(docs.get(pid))){ await patchDoc(top, {[pk]: pk === 'sec' ? await fallbackSec() : await fallbackNb()}); note = ' into ' + (pk === 'sec' ? 'the current section' : 'the current notebook'); }
+    }
+  }
+  return note;
+}
+$('trashBtn').addEventListener('click', async () => { hideModal('settingsDlg'); await purgeTrash(); await renderTrash(); showModal('trashDlg'); });
+$('trashBack').addEventListener('click', () => { hideModal('trashDlg'); openSettings(); });
+$('trashList').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-act]'); if(!b) return;
+  const row = b.closest('.trash-item'), g = row.dataset.g;
+  if(b.dataset.act === 'purge'){
+    if(!b.classList.contains('armed')){ b.classList.add('armed'); b.textContent = 'Tap again'; setTimeout(() => { b.classList.remove('armed'); b.textContent = 'Delete'; }, 3500); return; }
+    const gr = (await trashGroups()).find(x => x.g === g);
+    if(gr) for(const d of gr.members) await removeDoc(d.id, d.kind, null, true);
+    await renderTrash(); toast('Deleted for good');
+    return;
+  }
+  b.disabled = true;
+  const name = row.querySelector('.ti-name').textContent;
+  const note = await restoreGroup(g);
+  const top = docs.get(g);
+  if(top && top.kind === 'page'){ const sec = getDoc(top.data.sec); ui.sec = top.data.sec; if(sec) ui.nb = sec.data.nb; saveUi(); }
+  else if(top && top.kind === 'sec'){ ui.nb = top.data.nb; ui.sec = top.id; saveUi(); }
+  else if(top && top.kind === 'nb'){ ui.nb = top.id; ui.sec = null; saveUi(); }
+  ensureUi(); renderNav(); renderList(); renderTemplates();
+  await renderTrash();
+  toast(`Restored "${name}"${note}`);
+});
+$('trashEmpty').addEventListener('click', async () => {
+  const b = $('trashEmpty');
+  if(!b.classList.contains('armed')){ b.classList.add('armed'); b.textContent = 'Tap again to empty'; setTimeout(() => { b.classList.remove('armed'); b.textContent = 'Empty'; }, 3500); return; }
+  b.classList.remove('armed'); b.textContent = 'Empty';
+  for(const gr of await trashGroups()) for(const d of gr.members) await removeDoc(d.id, d.kind, null, true);
+  await renderTrash(); toast('Recently deleted emptied');
+});
+
+/* Version and updates */
+let swReg = null;
+async function appVersion(){
+  const c = navigator.serviceWorker && navigator.serviceWorker.controller;
+  if(!c) return '';
+  return new Promise(res => {
+    const ch = new MessageChannel(), t = setTimeout(() => res(''), 1500);
+    ch.port1.onmessage = e => { clearTimeout(t); res(String(e.data || '')); };
+    try { c.postMessage('version', [ch.port2]); } catch { clearTimeout(t); res(''); }
+  });
+}
+async function renderVersion(){
+  const v = await appVersion();
+  $('verInfo').textContent = 'Inkwell' + (v ? ' ' + v.replace(/^inkwell-/, '') : '');
+}
+$('updBtn').addEventListener('click', async () => {
+  const b = $('updBtn');
+  if(b.dataset.ready && swReg && swReg.waiting){ b.textContent = 'Updating'; b.disabled = true; swReg.waiting.postMessage('skipWaiting'); return; }
+  if(!swReg){ toast('Updates only work in the installed app'); return; }
+  if(!navigator.onLine){ toast('You are offline'); return; }
+  b.disabled = true; b.textContent = 'Checking';
+  try {
+    await swReg.update();
+    if(swReg.installing) await new Promise(res => { const w = swReg.installing; w.addEventListener('statechange', () => { if(w.state !== 'installing') res(); }); setTimeout(res, 20000); });
+  } catch {}
+  b.disabled = false;
+  if(swReg.waiting){ b.dataset.ready = '1'; b.textContent = 'Install update'; }
+  else { b.textContent = 'Check for update'; toast('You have the latest version'); }
+});
 
 function blobToDataURL(b){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); }); }
 $('backupBtn').addEventListener('click', async () => {
@@ -2896,12 +3068,15 @@ async function boot(){
   setStatus();
   Sync.init();
   if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  purgeTrash().catch(() => {});
 }
-darkMQ.addEventListener && darkMQ.addEventListener('change', () => {
+function themeChanged(){
   readTokens();
   for(const [id, el] of elMap){ const it = cur && cur.items.get(id); if(it && it.t === 'm') el.style.color = it.c && it.c !== 'auto' ? inkColor(it.c) : ''; }
+  if(prefs.ruler.on) renderRulerTicks();
   invalidate();
-});
+}
+darkMQ.addEventListener && darkMQ.addEventListener('change', themeChanged);
 document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') flushSaves(); else Sync.run(); });
 addEventListener('pagehide', () => { flushSaves(); });
 
@@ -2909,6 +3084,7 @@ addEventListener('pagehide', () => { flushSaves(); });
 if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')){
   const offerUpdate = w => { if(w && navigator.serviceWorker.controller) toast('A new version of Inkwell is ready', 'Reload', () => w.postMessage('skipWaiting')); };
   navigator.serviceWorker.register('sw.js').then(reg => {
+    swReg = reg;
     // an update that finished downloading while the app was in the background
     if(reg.waiting) offerUpdate(reg.waiting);
     reg.addEventListener('updatefound', () => {
@@ -2929,6 +3105,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, cam, docs, prefs, recognize, setTool, openPage, newPage, IDB};
+window.__inkwell = {get cur(){ return cur; }, cam, docs, prefs, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

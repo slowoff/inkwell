@@ -1221,9 +1221,11 @@ function endTool(e){
     addItems([it]);
     if(a.tool === 'pen' && !a.snapped && !a.hl && !a.mk) Scribe.add(it);
   } else if(a.kind === 'erase'){
+    finishTextErase(a);
     // one undo step: originals that were cut back in, pieces left over out
-    const before = a.removed.map(it => [it.id, it]).concat([...a.added.keys()].map(id => [id, null]));
-    const after = a.removed.map(it => [it.id, null]).concat([...a.added.values()].map(it => [it.id, it]));
+    const was = new Set(a.removed.map(it => it.id));
+    const before = a.removed.map(it => [it.id, it]).concat([...a.added.keys()].filter(id => !was.has(id)).map(id => [id, null]));
+    const after = a.removed.filter(it => !a.added.has(it.id)).map(it => [it.id, null]).concat([...a.added.values()].map(it => [it.id, it]));
     if(before.length) commit(before, after);
   } else if(a.kind === 'lasso'){
     finishLasso(a);
@@ -1305,8 +1307,77 @@ function eraseFormulas(wx, wy, R){
   }
   if(hit) changed();
 }
+// Text boxes (typed or made by Write to text): the Stroke eraser removes the whole box it touches,
+// the Partial eraser removes only the words it passes over.
+function eraseTexts(wx, wy, R){
+  let hit = false;
+  for(const it of [...cur.items.values()]){
+    if(it.t !== 'x' || (editing && editing.id === it.id)) continue;
+    const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
+    if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
+    const el = elMap.get(it.id); if(!el) continue;
+    if(act.mode !== 'area'){
+      act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); act.added.delete(it.id); hit = true; continue;
+    }
+    // words under the eraser circle (centre and a ring of sample points), found from screen positions
+    const sx0 = SR.left + cam.ox, sy0 = SR.top + cam.oy, rs = R * cam.z, cut = new Map();
+    for(const [dx, dy] of [[0, 0]]){   // the word under the eraser's centre; fast moves are filled in by eraseAt
+      const x = sx0 + (wx + dx * R) * cam.z, y = sy0 + (wy + dy * R) * cam.z;
+      const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+      const node = r && r.startContainer;
+      if(!node || node.nodeType !== 3 || !el.contains(node) || (node.parentElement && node.parentElement.closest('[data-er]'))) continue;
+      const t = node.data, k = Math.min(r.startOffset, t.length);
+      // the caret lands between letters: take the word around it, only if a letter is really under the point
+      let a = k, z = k;
+      while(a > 0 && !/\s/.test(t[a - 1])) a--;
+      while(z < t.length && !/\s/.test(t[z])) z++;
+      if(z <= a) continue;
+      const rr = document.createRange(); rr.setStart(node, a); rr.setEnd(node, z);
+      const box = rr.getBoundingClientRect();
+      const tol = Math.min(rs * 0.35, 6);
+      if(x < box.left - tol || x > box.right + tol || y < box.top - tol || y > box.bottom + tol) continue;
+      if(!cut.has(node)) cut.set(node, []);
+      cut.get(node).push([a, z]);
+    }
+    if(!cut.size) continue;
+    // erased words are only hidden while the pen is down, so the rest of the line does not slide under it;
+    // finishTextErase() removes them when the pen lifts
+    for(const [node, spans] of cut){
+      spans.sort((p, q) => q[0] - p[0]);
+      let last = Infinity;
+      for(const [a, z] of spans){
+        if(z > last) continue;
+        const rr = document.createRange(); rr.setStart(node, a); rr.setEnd(node, z);
+        const sp = document.createElement('span'); sp.dataset.er = '1'; sp.style.visibility = 'hidden';
+        try { rr.surroundContents(sp); } catch { continue; }
+        last = a;
+      }
+    }
+    const orig = act.removed.find(r => r.id === it.id) || it;
+    if(!act.removed.includes(orig)) act.removed.push(orig);
+    (act.texts || (act.texts = new Set())).add(it.id);
+  }
+  if(hit) changed();
+}
+function finishTextErase(a){
+  if(!a.texts) return;
+  for(const id of a.texts){
+    const it = cur.items.get(id), el = elMap.get(id); if(!it || !el) continue;
+    el.querySelectorAll('[data-er]').forEach(n => n.remove());
+    el.normalize();
+    // tidy the spaces the removed words leave behind
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for(let n = w.nextNode(); n; n = w.nextNode()) n.data = n.data.replace(/ {2,}/g, ' ');
+    const html = cleanHTML(el.innerHTML).replace(/<p> /g, '<p>').replace(/ <\/p>/g, '</p>');
+    if(!htmlText(html).trim()){ a.added.delete(id); cur.items.delete(id); dropEl(id); continue; }   // last word gone: the box goes
+    const nx = Object.assign({}, it, {html});
+    cur.items.set(id, nx); a.added.set(id, nx); el._html = null; itemEl(nx);
+  }
+  changed();
+}
 function eraseWorld(wx, wy, R){
   eraseFormulas(wx, wy, R);
+  eraseTexts(wx, wy, R);
   if(act.mode === 'area'){ eraseArea(wx, wy, R); return; }
   let hit = false;
   for(const it of [...cur.items.values()]){

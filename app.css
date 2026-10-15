@@ -413,7 +413,11 @@ select.pf-ls option:checked{background:#9fbbe8}
 .ask-head .icon-btn{width:32px;height:32px}
 .ask-log{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px;min-height:80px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .ask-empty{color:var(--muted);font-size:14px;line-height:1.5}
-.ask-chip{flex:none;height:28px;display:inline-flex;align-items:center;padding:0 10px;border-radius:8px;background:var(--well-on);color:var(--accent);font-size:12.5px;font-weight:600}
+.ask-mode{position:relative;flex:none;display:inline-flex}
+.ask-mode select{-webkit-appearance:none;appearance:none;height:30px;border:0;border-radius:8px;background:var(--well);color:var(--fg);font:600 13px var(--f-ui);padding:0 28px 0 11px;cursor:pointer;outline:none}
+.ask-mode select:focus-visible{box-shadow:0 0 0 2px var(--accent)}
+.ask-mode::after{content:"";position:absolute;right:11px;top:50%;width:6px;height:6px;margin-top:-5px;border:solid var(--muted);border-width:0 1.6px 1.6px 0;transform:rotate(45deg);pointer-events:none}
+.ask-mode select:active{background:var(--well-on)}
 .prac-list{display:flex;flex-direction:column;max-height:38vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 0}
 .prac-sec,.prac-page{display:flex;align-items:center;gap:9px;padding:7px 12px;font-size:14.5px;cursor:pointer}
 .prac-sec{font-weight:600;padding-top:10px}

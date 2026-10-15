@@ -4487,7 +4487,7 @@ const Ask = {
   },
   close(){ $('askPanel').hidden = true; if(this.ctrl) this.ctrl.abort(); },
   empty(){
-    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.<br><br><b>Practice</b> (the target icon): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
+    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.<br><br><b>Practice</b> (same menu): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
   },
   chats(){ return [...docs.values()].filter(d => d.kind === 'chat' && live(d)).sort((a, b) => (b.data.at || 0) - (a.data.at || 0)); },
   showHistory(){
@@ -4522,9 +4522,10 @@ const Ask = {
     this.showChat();
   },
   renderMode(){
-    $('askMode').hidden = this.mode === 'practice'; $('askPracChip').hidden = this.mode !== 'practice';
+    const sel = $('askModeSel');
+    sel.value = this.mode === 'practice' ? 'practice' : (prefs.askMode === 'solve' ? 'solve' : 'tutor');
+    sel.title = {tutor: 'Tutor: explains and gives hints, you solve it', solve: 'Solve: shows the full worked solution', practice: 'Practice: Claude quizzes you on pages you pick'}[sel.value];
     this.renderPending && this.renderPending();
-    $('askMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askMode || 'tutor')));
   },
   reset(){ if(this.ctrl) this.ctrl.abort(); this.mode = null; this.renderMode(); this.pending = null; this.renderPending(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
   bubble(cls, html){
@@ -4770,7 +4771,18 @@ $('askLog').addEventListener('click', async e => {
   }
   if(e.target.closest('.ah-open')) Ask.load(id);
 });
-$('askMode').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(!b) return; prefs.askMode = b.dataset.v; savePrefs(); Ask.renderMode(); });
+// one dropdown: Tutor / Solve change how Claude answers; Practice opens the practice setup.
+// Leaving a practice chat for Tutor or Solve starts a new chat (the practice stays in the history).
+$('askModeSel').addEventListener('change', () => {
+  const v = $('askModeSel').value;
+  if(v === 'practice'){
+    if(Ask.mode !== 'practice') Prac.open();
+    Ask.renderMode();   // switches to Practice only when a practice actually starts
+    return;
+  }
+  prefs.askMode = v; savePrefs();
+  if(Ask.mode === 'practice') Ask.reset(); else Ask.renderMode();
+});
 $('askSend').addEventListener('click', () => Ask.submit());
 $('askAttX').addEventListener('click', () => { Ask.pending = null; Ask.renderPending(); });
 function autoGrow(){ const t = $('askIn'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
@@ -4929,7 +4941,6 @@ $('pracFiles').addEventListener('click', e => { const b = e.target.closest('[dat
 $('pracAdd').addEventListener('click', () => $('pracFile').click());
 $('pracFile').addEventListener('change', () => { const fs = [...$('pracFile').files]; $('pracFile').value = ''; if(fs.length) Prac.addFiles(fs); });
 $('pracGo').addEventListener('click', () => Prac.start());
-$('askPractice').addEventListener('click', () => Prac.open());
 $('mPractice').addEventListener('click', () => { closePops(); Prac.open(); });
 
 /* =====================================================================

@@ -2526,6 +2526,7 @@ $('tmplList').addEventListener('click', async e => {
 $('sideBtn').addEventListener('click', () => {
   if(width() === 'narrow'){ app.dataset.view = 'list'; return; }
   prefs.focus = !prefs.focus; savePrefs();
+  if(!prefs.focus && !$('calc').hidden) Calc.close();
   app.classList.toggle('focus', prefs.focus);
 });
 addEventListener('resize', () => {
@@ -5806,6 +5807,185 @@ $('scanView').querySelectorAll('.scan-h').forEach((hd, i) => {
 addEventListener('resize', () => { if(!$('scanDlg').hidden && Scan.src) Scan.draw(); });
 
 /* =====================================================================
+   Calculator (top bar button): a strip on the left, about a fifth of the screen. Opening it hides the
+   notebooks/pages panel; closing it leaves the page full width. Scientific keys, DEG/RAD, Ans, history.
+   The expression is kept as tokens (internal form) and shown with maths symbols.
+   ===================================================================== */
+const CALC_SHOW = {'*': '×', '/': '÷', '-': '−', 'pi': 'π', 'sqrt(': '√(', 'cbrt(': '∛(', 'asin(': 'sin⁻¹(', 'acos(': 'cos⁻¹(', 'atan(': 'tan⁻¹(', '^2': '²', 'E': '×10^', 'Ans': 'Ans', 'exp(': 'e^('};
+const Calc = {
+  toks: [], hist: [], ans: 0, inv: false, fresh: false,
+  load(){
+    const d = LSget('inkwell.calc', null);
+    if(d){ this.hist = Array.isArray(d.hist) ? d.hist.slice(-30) : []; this.ans = isFinite(d.ans) ? d.ans : 0; }
+  },
+  save(){ LSset('inkwell.calc', {hist: this.hist.slice(-30), ans: this.ans}); },
+  open(){
+    $('calc').hidden = false; $('calcBtn').classList.add('on');
+    if(width() !== 'narrow' && !prefs.focus){ prefs.focus = true; app.classList.add('focus'); }
+    prefs.calc = true; savePrefs(); this.render();
+  },
+  close(){ $('calc').hidden = true; $('calcBtn').classList.remove('on'); prefs.calc = false; savePrefs(); },
+  // a result reused in a new calculation is one token '#<number>'
+  show(t){ return t[0] === '#' ? fmtCalc(+t.slice(1)) : CALC_SHOW[t] || t; },
+  src(){ return this.toks.map(t => t[0] === '#' ? '(' + t.slice(1).replace(/e\+?/, 'E') + ')' : t).join(''); },
+  key(k){
+    const isOp = /^[+\-*/^]$/.test(k) || k === '^2' || k === '%' || k === '!' || k === 'E';
+    if(this.fresh){ this.toks = isOp ? ['Ans'] : []; this.fresh = false; }
+    if(k === 'AC'){ this.toks = []; }
+    else if(k === 'del'){ this.toks.pop(); }
+    else if(k === '='){ this.equals(); return; }
+    else if(k === 'neg'){ this.toks.push('-'); }
+    else this.toks.push(k);
+    this.inv = false;
+    this.render();
+  },
+  equals(){
+    if(!this.toks.length) return;
+    const src = this.src();
+    try {
+      const v = calcEval(src, this.ans, prefs.calcDeg !== false);
+      if(!isFinite(v)) throw new Error(isNaN(v) ? 'Not defined' : 'Too big');
+      const shown = this.toks.map(t => this.show(t)).join(''), open = (src.match(/\(/g) || []).length - (src.match(/\)/g) || []).length;
+      this.hist.push({e: shown + ')'.repeat(Math.max(0, open)), v});
+      if(this.hist.length > 30) this.hist.shift();
+      this.ans = v; this.toks = ['#' + v]; this.fresh = true; this.save();
+      this.render(true);
+    } catch(e){ $('calcRes').textContent = e.message || 'Error'; $('calcRes').classList.add('err'); }
+  },
+  render(scroll){
+    const disp = this.toks.map(t => this.show(t)).join('');
+    $('calcExpr').textContent = disp || '0';
+    $('calcExpr').classList.toggle('empty', !disp);
+    const r = $('calcRes'); r.classList.remove('err');
+    if(this.fresh || !this.toks.length){ r.textContent = ''; }
+    else { try { const v = calcEval(this.src(), this.ans, prefs.calcDeg !== false); r.textContent = isFinite(v) ? '= ' + fmtCalc(v) : ''; } catch { r.textContent = ''; } }
+    const h = $('calcHist');
+    h.innerHTML = this.hist.map((x, i) => `<button class="ch-row" data-i="${i}" title="Use this result"><span class="ch-e">${esc(x.e)}</span><span class="ch-v">= ${esc(fmtCalc(x.v))}</span></button>`).join('');
+    if(scroll !== false) h.scrollTop = h.scrollHeight;
+    $('calcDeg').textContent = prefs.calcDeg === false ? 'RAD' : 'DEG';
+    $('calc').classList.toggle('inv', this.inv);
+    $('calcInv').classList.toggle('on', this.inv);
+  }
+};
+// numbers: up to 10 significant digits, exponent form when very big or small
+function fmtCalc(v){
+  if(v === 0) return '0';
+  const a = Math.abs(v);
+  let s = a >= 1e12 || a < 1e-9 ? v.toExponential(8).replace(/\.?0+e/, 'e') : String(parseFloat(v.toPrecision(10)));
+  return s.replace(/e\+?/, ' × 10^').replace(/^-/, '−');
+}
+// Safe evaluator: + − × ÷ ^ ( ) % ! E, implicit multiplication, functions, π, e, Ans; missing ")" are added.
+function calcEval(src, ans, deg){
+  const s = String(src).replace(/×10\^/g, 'E');
+  const toks = []; let i = 0;
+  while(i < s.length){
+    const c = s[i];
+    if(/\s/.test(c)){ i++; continue; }
+    const num = /^(\d+\.?\d*|\.\d+)/.exec(s.slice(i));
+    if(num){ toks.push({t: 'n', v: parseFloat(num[0])}); i += num[0].length; continue; }
+    const id = /^(asin|acos|atan|sin|cos|tan|sqrt|cbrt|ln|log|exp|abs|pi|Ans|e)/.exec(s.slice(i));
+    if(id){ toks.push({t: 'i', v: id[0]}); i += id[0].length; continue; }
+    if('+-*/^()%!E'.includes(c)){ toks.push({t: c}); i++; continue; }
+    throw new Error('Unknown sign ' + c);
+  }
+  const open = toks.filter(t => t.t === '(').length - toks.filter(t => t.t === ')').length;
+  for(let k = 0; k < open; k++) toks.push({t: ')'});
+  const D = deg ? Math.PI / 180 : 1;
+  const F = {sin: x => Math.sin(x * D), cos: x => Math.cos(x * D), tan: x => { const r = Math.tan(x * D); return deg && Math.abs(((x % 180) + 180) % 180 - 90) < 1e-12 ? NaN : r; },
+    asin: x => Math.asin(x) / D, acos: x => Math.acos(x) / D, atan: x => Math.atan(x) / D,
+    sqrt: Math.sqrt, cbrt: Math.cbrt, ln: Math.log, log: Math.log10, exp: Math.exp, abs: Math.abs};
+  let p = 0;
+  const peek = () => toks[p], next = () => toks[p++];
+  const starts = t => t && (t.t === 'n' || t.t === 'i' || t.t === '(');
+  const fact = n => { if(n < 0 || n !== Math.floor(n) || n > 170) return NaN; let r = 1; for(let k = 2; k <= n; k++) r *= k; return r; };
+  function expr(){ let a = term(); while(peek() && (peek().t === '+' || peek().t === '-')){ const op = next().t, b = term(); a = op === '+' ? a + b : a - b; } return a; }
+  function term(){
+    let a = unary();
+    for(;;){
+      const t = peek();
+      if(t && (t.t === '*' || t.t === '/')){ next(); const b = unary(); a = t.t === '*' ? a * b : a / b; }
+      else if(starts(t)){ a *= power(); }
+      else return a;
+    }
+  }
+  function unary(){ const t = peek(); if(t && (t.t === '-' || t.t === '+')){ next(); const a = unary(); return t.t === '-' ? -a : a; } return power(); }
+  function power(){ const b = postfix(); if(peek() && peek().t === '^'){ next(); return Math.pow(b, unary()); } return b; }
+  function postfix(){
+    let a = primary();
+    for(;;){
+      const t = peek();
+      if(t && t.t === '%'){ next(); a /= 100; }
+      else if(t && t.t === '!'){ next(); a = fact(a); }
+      else if(t && t.t === 'E'){ next(); a *= Math.pow(10, unary()); }
+      else return a;
+    }
+  }
+  function primary(){
+    const t = next();
+    if(!t) throw new Error('Incomplete');
+    if(t.t === 'n') return t.v;
+    if(t.t === '('){ const a = expr(); if(!peek() || peek().t !== ')') throw new Error('Missing )'); next(); return a; }
+    if(t.t === 'i'){
+      if(t.v === 'pi') return Math.PI;
+      if(t.v === 'e') return Math.E;
+      if(t.v === 'Ans') return ans;
+      const f = F[t.v];
+      if(peek() && peek().t === '('){ next(); const a = expr(); if(peek() && peek().t === ')') next(); return f(a); }
+      return f(power());
+    }
+    throw new Error('Incomplete');
+  }
+  const v = expr();
+  if(p < toks.length) throw new Error('Check the expression');
+  return v;
+}
+{
+  // keys: [label, inverse label, token, inverse token, class]
+  const K = [
+    ['inv', '', 'inv', '', 'fn'], ['sin', 'sin⁻¹', 'sin(', 'asin(', 'fn'], ['cos', 'cos⁻¹', 'cos(', 'acos(', 'fn'], ['tan', 'tan⁻¹', 'tan(', 'atan(', 'fn'], ['π', 'e', 'pi', 'e', 'fn'],
+    ['ln', 'eˣ', 'ln(', 'exp(', 'fn'], ['log', '10ˣ', 'log(', '10^', 'fn'], ['√', '∛', 'sqrt(', 'cbrt(', 'fn'], ['x²', 'x!', '^2', '!', 'fn'], ['xʸ', '', '^', '', 'fn'],
+    ['(', '', '(', '', 'op'], [')', '', ')', '', 'op'], ['Ans', '', 'Ans', '', 'op'], ['⌫', '', 'del', '', 'op'], ['AC', '', 'AC', '', 'op ac'],
+    ['7', '', '7', '', 'num'], ['8', '', '8', '', 'num'], ['9', '', '9', '', 'num'], ['÷', '', '/', '', 'op'], ['EE', '', 'E', '', 'op'],
+    ['4', '', '4', '', 'num'], ['5', '', '5', '', 'num'], ['6', '', '6', '', 'num'], ['×', '', '*', '', 'op'], ['%', '', '%', '', 'op'],
+    ['1', '', '1', '', 'num'], ['2', '', '2', '', 'num'], ['3', '', '3', '', 'num'], ['−', '', '-', '', 'op'], ['=', '', '=', '', 'eq'],
+    ['0', '', '0', '', 'num zero'], ['.', '', '.', '', 'num'], ['+', '', '+', '', 'op']
+  ];
+  $('calcKeys').innerHTML = K.map(([l, il, t, it, c]) => `<button class="ck ${c}" data-k="${esc(t)}"${it ? ` data-ik="${esc(it)}"` : ''}${t === 'inv' ? ' id="calcInv"' : ''}><span class="kl">${esc(l)}</span>${il ? `<span class="ki">${esc(il)}</span>` : ''}</button>`).join('');
+  $('calcKeys').addEventListener('click', e => {
+    const b = e.target.closest('.ck'); if(!b) return;
+    let k = b.dataset.k;
+    if(k === 'inv'){ Calc.inv = !Calc.inv; Calc.render(false); return; }
+    if(Calc.inv && b.dataset.ik) k = b.dataset.ik;
+    Calc.key(k);
+  });
+  $('calcHist').addEventListener('click', e => {
+    const r = e.target.closest('.ch-row'); if(!r) return;
+    const x = Calc.hist[+r.dataset.i]; if(!x) return;
+    if(Calc.fresh){ Calc.toks = []; Calc.fresh = false; }
+    Calc.toks.push('#' + x.v);
+    Calc.render(false);
+  });
+  $('calcDeg').addEventListener('click', () => { prefs.calcDeg = prefs.calcDeg === false; savePrefs(); Calc.render(false); });
+  $('calcClose').addEventListener('click', () => Calc.close());
+  $('calcClear').addEventListener('click', () => { Calc.hist = []; Calc.save(); Calc.render(); });
+  $('calcBtn').addEventListener('click', () => { if($('calc').hidden) Calc.open(); else Calc.close(); });
+  // hardware keyboard while the calculator is open and nothing else is being typed into
+  document.addEventListener('keydown', e => {
+    if($('calc').hidden || e.metaKey || e.ctrlKey || e.altKey) return;
+    const a = document.activeElement;
+    if(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return;
+    if(!$('settingsDlg').hidden || document.querySelector('.modal:not([hidden])')) return;
+    const map = {'Enter': '=', '=': '=', 'Backspace': 'del', 'Delete': 'AC', 'Escape': 'AC', '*': '*', '/': '/', ':': '/', '+': '+', '-': '-', '^': '^', '(': '(', ')': ')', '.': '.', ',': '.', '%': '%', '!': '!'};
+    if(sel && /^(Backspace|Delete|Escape)$/.test(e.key)) return;   // those still act on a lasso selection
+    let k = /^[0-9]$/.test(e.key) ? e.key : map[e.key];
+    if(!k) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    Calc.key(k);
+  }, true);
+  Calc.load();
+}
+
+/* =====================================================================
    Keyboard (hardware keyboard / PC)
    ===================================================================== */
 document.addEventListener('keydown', e => {
@@ -5865,6 +6045,7 @@ async function boot(){
   $('fingerBtn').classList.toggle('on', prefs.finger); renderScribe();
   $('mSnap').classList.toggle('on', prefs.snapLines);
   if(prefs.focus && width() !== 'narrow') app.classList.add('focus');
+  if(prefs.calc) Calc.open();
   setTool(prefs.tool);
   renderNav(); renderList();
   resize();
@@ -5942,6 +6123,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

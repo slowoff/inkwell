@@ -2744,7 +2744,7 @@ $('laterList').addEventListener('click', async ev => {
    ===================================================================== */
 const WHEEL_HOLD = 480;
 const WHEEL_SIZES = [15, 40, 75];
-let wheelDrag = null;
+let wheelDrag = null, wheelPress = null;
 function wheelIcon(tool){ const s = document.querySelector(`.tool[data-tool="${tool}"] svg`); return s ? s.outerHTML : ''; }
 function buildWheel(){
   const t = prefs.tool, inkT = t === 'hl' ? 'hl' : 'pen';
@@ -2755,20 +2755,20 @@ function buildWheel(){
   const outer = favs.map(c => ({k: 'c', v: c})).concat(WHEEL_SIZES.map(s => ({k: 's', v: s})));
   if(t === 'eraser') outer.push({k: 'em'});
   const at = (r, i, n, off) => { const a = -Math.PI / 2 + off + i * 2 * Math.PI / n; return `left:${(116 + r * Math.cos(a)).toFixed(1)}px;top:${(116 + r * Math.sin(a)).toFixed(1)}px`; };
-  let h = '<div class="wh-ring"></div>';
+  let h = '<div class="wh-ring"></div><div class="wh-label" id="whLabel" hidden></div>';
   h += `<button class="wh-b wh-undo" data-w="undo" style="left:116px;top:116px" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>`;
   inner.forEach((tool, i) => { h += `<button class="wh-b wh-tool ${tool === t ? 'on' : ''}" data-w="tool" data-v="${tool}" style="${at(52, i, inner.length, 0)}" title="${names[tool]}" aria-label="${names[tool]}">${wheelIcon(tool)}</button>`; });
   outer.forEach((o, i) => {
     const pos = at(96, i, outer.length, Math.PI / outer.length);
     if(o.k === 'c'){
       const on = (t === 'pen' || t === 'hl') && prefs[inkT].c === o.v;
-      h += `<button class="wh-b wh-col ${inkT === 'hl' ? 'hl' : ''} ${on ? 'on' : ''}" data-w="c" data-v="${o.v}" style="${pos}" aria-label="Colour"><span style="--c:${o.v === 'auto' ? 'var(--fg)' : o.v}"></span></button>`;
+      h += `<button class="wh-b wh-col ${inkT === 'hl' ? 'hl' : ''} ${on ? 'on' : ''}" data-w="c" data-v="${o.v}" style="${pos}" aria-label="${inkT === 'hl' ? 'Highlighter colour' : 'Pen colour'}"><span style="--c:${o.v === 'auto' ? 'var(--fg)' : o.v}"></span></button>`;
     } else if(o.k === 's'){
       const sv = prefs[sizeT].s, best = WHEEL_SIZES.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);
-      h += `<button class="wh-b wh-size ${best === o.v ? 'on' : ''}" data-w="s" data-v="${o.v}" style="${pos}" title="Thickness" aria-label="Thickness"><span style="--d:${4 + o.v / 7}px"></span></button>`;
+      h += `<button class="wh-b wh-size ${best === o.v ? 'on' : ''}" data-w="s" data-v="${o.v}" style="${pos}" title="Thickness" aria-label="${['Thin', 'Medium', 'Thick'][WHEEL_SIZES.indexOf(o.v)]}"><span style="--d:${4 + o.v / 7}px"></span></button>`;
     } else {
       const area = prefs.eraser.mode === 'area';
-      h += `<button class="wh-b wh-em" data-w="em" style="${pos}" title="Switch eraser mode">${area ? 'Partial' : 'Stroke'}</button>`;
+      h += `<button class="wh-b wh-em" data-w="em" style="${pos}" title="Switch eraser mode" aria-label="Eraser: switch to ${area ? 'Stroke' : 'Partial'}">${area ? 'Partial' : 'Stroke'}</button>`;
     }
   });
   $('wheel').innerHTML = h;
@@ -2785,10 +2785,22 @@ function openWheel(x, y, pointerId){
   let c = cands.find(([cx, cy]) => fits(cx, cy)) || cands[0];
   c = [clamp(c[0], R, Math.max(R, innerWidth - R)), clamp(c[1], R, Math.max(R, innerHeight - R))];
   w.style.left = c[0] + 'px'; w.style.top = c[1] + 'px';
+  w.classList.toggle('lab-below', c[1] - 116 < 52);
   w.hidden = false; w.classList.remove('in'); void w.offsetWidth; w.classList.add('in');
   wheelDrag = pointerId != null ? {id: pointerId, x, y, far: false} : null;
 }
-function closeWheel(){ const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; } wheelDrag = null; }
+// the option under the Pencil grows, fills in and is named above the menu
+function wheelHover(b){
+  const w = $('wheel');
+  w.querySelectorAll('.wh-b.hover').forEach(x => { if(x !== b) x.classList.remove('hover'); });
+  const L = $('whLabel'); if(!L) return;
+  if(!b){ L.hidden = true; w.classList.remove('picking'); return; }
+  b.classList.add('hover'); w.classList.add('picking');
+  const c = b.dataset.w === 'c' ? b.dataset.v : null;
+  L.innerHTML = (c ? `<span class="wh-dot" style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>` : '') + esc(b.getAttribute('aria-label') || '');
+  L.hidden = false;
+}
+function closeWheel(){ const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; }
 function wheelPick(b){
   const k = b.dataset.w, v = b.dataset.v;
   if(k === 'undo'){ undo(); closeWheel(); return; }
@@ -2807,19 +2819,38 @@ function wheelPick(b){
 }
 $('wheel').addEventListener('click', e => { const b = e.target.closest('.wh-b'); if(b) wheelPick(b); });
 $('wheel').addEventListener('contextmenu', e => e.preventDefault());
+$('wheel').addEventListener('pointerdown', e => {
+  const b = e.target.closest('.wh-b'); if(!b) return;
+  wheelPress = {id: e.pointerId, b}; wheelHover(b);
+  // touches are captured by the button they started on; release so lifting over another option counts there
+  try { if(e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) e.target.releasePointerCapture(e.pointerId); } catch {}
+});
+$('wheel').addEventListener('pointermove', e => {
+  if(!wheelPress || wheelPress.id !== e.pointerId) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  wheelHover(el && el.closest('#wheel .wh-b'));
+});
+$('wheel').addEventListener('pointerup', e => {
+  if(!wheelPress || wheelPress.id !== e.pointerId) return;
+  const start = wheelPress.b; wheelPress = null;
+  const el = document.elementFromPoint(e.clientX, e.clientY), b = el && el.closest('#wheel .wh-b');
+  wheelHover(null);
+  // slid from one option to another: choose where the Pencil was lifted (a plain tap is handled by click)
+  if(b && b !== start) wheelPick(b);
+});
+$('wheel').addEventListener('pointercancel', () => { wheelPress = null; wheelHover(null); });
 // slide the Pencil onto an option and lift it to choose without tapping again
 addEventListener('pointermove', e => {
   if(!wheelDrag || e.pointerId !== wheelDrag.id) return;
   if(!wheelDrag.far && Math.hypot(e.clientX - wheelDrag.x, e.clientY - wheelDrag.y) > 18) wheelDrag.far = true;
   const el = document.elementFromPoint(e.clientX, e.clientY), b = el && el.closest('#wheel .wh-b');
-  $('wheel').querySelectorAll('.wh-b.hover').forEach(x => { if(x !== b) x.classList.remove('hover'); });
-  if(b) b.classList.add('hover');
+  wheelHover(b);
 }, true);
 addEventListener('pointerup', e => {
   if(!wheelDrag || e.pointerId !== wheelDrag.id) return;
   const d = wheelDrag; wheelDrag = null;
   const el = document.elementFromPoint(e.clientX, e.clientY), b = el && el.closest('#wheel .wh-b');
-  $('wheel').querySelectorAll('.wh-b.hover').forEach(x => x.classList.remove('hover'));
+  wheelHover(null);
   if(d.far && b) wheelPick(b);
 }, true);
 addEventListener('pointercancel', e => { if(wheelDrag && e.pointerId === wheelDrag.id) wheelDrag = null; }, true);

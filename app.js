@@ -4183,23 +4183,36 @@ addEventListener('pagehide', () => { LSset('inkwell.opening', null); flushSaves(
 
 /* offline support */
 if('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')){
-  const offerUpdate = w => { if(w && navigator.serviceWorker.controller) toast('A new version of Inkwell is ready', 'Reload', () => w.postMessage('skipWaiting')); };
-  navigator.serviceWorker.register('sw.js').then(reg => {
+  // An update that arrives right after Inkwell opens (or comes back to the front) is applied by itself:
+  // the page reloads straight away, before any writing starts. Later ones are offered with a Reload button.
+  let quietUntil = Date.now() + 20000;
+  const idle = () => !act && !editing && !selDrag && Date.now() - lastLocalEdit > 3000;
+  const offerUpdate = w => {
+    if(!w || !navigator.serviceWorker.controller) return;
+    if(Date.now() < quietUntil && idle()){ w.postMessage('skipWaiting'); return; }
+    toast('A new version of Inkwell is ready', 'Reload', () => w.postMessage('skipWaiting'));
+  };
+  navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).then(reg => {
     swReg = reg;
     // an update that finished downloading while the app was in the background
     if(reg.waiting) offerUpdate(reg.waiting);
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
-      w && w.addEventListener('statechange', () => { if(w.state === 'installed') offerUpdate(w); });
+      w && w.addEventListener('statechange', () => { if(w.state === 'installed') offerUpdate(w.waiting || reg.waiting || w); });
     });
-    // look for a new version when the app comes back to the front and every 15 minutes
-    let lastCheck = Date.now();
+    // look for a new version on start, when the app comes back to the front, and every 15 minutes
+    let lastCheck = 0;
     const check = () => {
       if(!navigator.onLine) return;
       lastCheck = Date.now();
       reg.update().then(() => { if(reg.waiting) offerUpdate(reg.waiting); }).catch(() => {});
     };
-    document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && Date.now() - lastCheck > 60000) check(); });
+    check();
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState !== 'visible') return;
+      quietUntil = Date.now() + 20000;
+      if(Date.now() - lastCheck > 30000) check(); else if(reg.waiting) offerUpdate(reg.waiting);
+    });
     setInterval(() => { if(document.visibilityState === 'visible') check(); }, 15 * 60000);
   }).catch(() => {});
   let reloaded = false;

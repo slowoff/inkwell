@@ -3265,6 +3265,9 @@ $('impGo').addEventListener('click', async () => {
 /* =====================================================================
    Export as PDF (system print dialog -> Save as PDF / Share)
    ===================================================================== */
+// Long pages are printed in parts so the iPad never holds too many page pictures at once
+const EXPORT_MAX_SHEETS = 100, EXPORT_MAX_IMGS = 25;
+let exportJob = null;
 async function exportPdf(){
   if(!cur) return;
   finishEditing();
@@ -3274,71 +3277,107 @@ async function exportPdf(){
   const x0 = b[0] - 12, y0 = b[1] - 12, cw = b[2] - b[0] + 24, ch = b[3] - b[1] + 24;
   const s = Math.min(1, pw / cw), slice = ph / s;
   const n = Math.max(1, Math.ceil(ch / slice));
-  if(n > 60){ toast('This page is too long to export (more than 60 A4 sheets)'); return; }
-  const parts = [];
-  // paper
-  const bg = cur.bg;
-  if(bg.type !== 'blank'){
-    let d = '';
-    const gx0 = Math.floor(x0 / bg.sx) * bg.sx, gy0 = Math.floor(y0 / bg.sy) * bg.sy;
-    if(bg.type === 'dots'){
-      for(let y = gy0; y <= y0 + ch; y += bg.sy) for(let x = gx0; x <= x0 + cw; x += bg.sx) d += `M${r1(x - .8)} ${r1(y)}h1.6`;
-      parts.push(`<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#AEBBC9" stroke-width="1.6" stroke-linecap="round"/></svg>`);
-    } else {
-      for(let y = gy0; y <= y0 + ch; y += bg.sy) d += `M${r1(x0)} ${r1(y)}H${r1(x0 + cw)}`;
-      if(bg.type === 'grid') for(let x = gx0; x <= x0 + cw; x += bg.sx) d += `M${r1(x)} ${r1(y0)}V${r1(y0 + ch)}`;
-      parts.push(`<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#D5DFEA" stroke-width="0.8" fill="none"/></svg>`);
-    }
-  }
+  // every sheet only gets the things that reach into it
+  const parts = [];   // {a, b, h} or {a, b, img}: world top, world bottom, html or image item
+  const add = (box, h) => parts.push({a: box[1], b: box[3], h});
   for(const it of cur.items.values()){
     if(it.t !== 'i') continue;
-    const u = await assetURL(it.a);
-    if(u) parts.push(`<img src="${u}" style="position:absolute;left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px">`);
+    parts.push({a: it.y, b: it.y + it.h, img: it});
     for(const f of it.f || []){
       let txt = '', mark = false;
+      const fbox = [0, it.y + f.y * it.h, 0, it.y + (f.y + f.h) * it.h];
       if(f.k === 'ls'){
         // list box: show all options with the chosen ones highlighted, like on screen
         const vs = Array.isArray(f.v) ? f.v : f.v ? [f.v] : [], fs = fieldFont(f, it);
         const rows = (f.o || []).map(([v, l]) => `<div style="padding:0 ${fs * 0.15}px;${vs.includes(v) ? 'background:#9fbbe8;' : ''}white-space:pre;overflow:hidden">${esc(l)}</div>`).join('');
-        parts.push(`<div style="position:absolute;left:${it.x + f.x * it.w}px;top:${it.y + f.y * it.h}px;width:${f.w * it.w}px;height:${f.h * it.h}px;overflow:hidden;box-sizing:border-box;background:#fff;box-shadow:inset 0 0 0 1px #888;font:${fs}px/1.2 Helvetica,Arial,sans-serif;color:#111">${rows}</div>`);
+        add(fbox, `<div style="position:absolute;left:${it.x + f.x * it.w}px;top:${it.y + f.y * it.h}px;width:${f.w * it.w}px;height:${f.h * it.h}px;overflow:hidden;box-sizing:border-box;background:#fff;box-shadow:inset 0 0 0 1px #888;font:${fs}px/1.2 Helvetica,Arial,sans-serif;color:#111">${rows}</div>`);
         continue;
       }
       if(f.k === 'tx') txt = f.v || '';
-      else if(f.k === 'cb'){ txt = f.v ? '\u2713' : ''; mark = true; }
-      else if(f.k === 'rb'){ txt = f.v && f.v === f.ev ? '\u25CF' : ''; mark = true; }
+      else if(f.k === 'cb'){ txt = f.v ? '✓' : ''; mark = true; }
+      else if(f.k === 'rb'){ txt = f.v && f.v === f.ev ? '●' : ''; mark = true; }
       else txt = fieldText({f: [f]}).trim();
       if(!txt) continue;
       const fx = it.x + f.x * it.w, fy = it.y + f.y * it.h, fw = f.w * it.w, fh = f.h * it.h;
       const fs = mark ? fh * 0.8 : fieldFont(f, it);
       const align = mark ? 'center' : f.al === 1 ? 'center' : f.al === 2 ? 'right' : 'left';
       const lay = mark || !(f.ml || f.k === 'ls') ? `display:flex;align-items:center;justify-content:${mark ? 'center' : align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start'};white-space:pre` : `white-space:pre-wrap;text-align:${align}`;
-      parts.push(`<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:#111;${lay}">${esc(txt)}</div>`);
+      add(fbox, `<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:#111;${lay}">${esc(txt)}</div>`);
     }
   }
-  let ink = '';
+  const inks = [];   // highlighter first, so pen ink sits on top
   for(const pass of [1, 0]) for(const it of cur.items.values()){
     if(it.t !== 's' || it.mk || (it.hl ? 1 : 0) !== pass) continue;
-    ink += `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${pass ? ' fill-opacity="0.4"' : ''}/>`;
+    const q = itemBox(it);
+    inks.push({a: q[1], b: q[3], h: `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${pass ? ' fill-opacity="0.4"' : ''}/>`});
   }
-  parts.push(`<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1">${ink}</svg>`);
+  const tops = [];
   for(const it of cur.items.values()){
     if(it.t !== 'x' && it.t !== 'm') continue;
     const el = elMap.get(it.id); if(!el) continue;
     const c = el.cloneNode(true); c.removeAttribute('contenteditable');
     if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
-    parts.push(c.outerHTML);
+    const q = itemBox(it);
+    tops.push({a: q[1], b: q[3], h: c.outerHTML});
   }
-  const content = parts.join('');
-  let html = '';
+  const hit = (list, k) => { const ya = y0 + k * slice, yb = ya + slice; return list.filter(p => p.b >= ya - 4 && p.a <= yb + 4); };
+  // split into parts: at most EXPORT_MAX_SHEETS sheets and EXPORT_MAX_IMGS page pictures each
+  const groups = [];
+  let g = null;
   for(let k = 0; k < n; k++){
-    html += `<div class="print-sheet"><div style="position:absolute;left:${margin}px;top:${margin}px;width:${pw}px;height:${ph}px;overflow:hidden"><div class="print-inner" style="transform:scale(${s}) translate(${-x0}px,${-(y0 + k * slice)}px)">${content}</div></div></div>`;
+    const ids = hit(parts, k).filter(p => p.img).map(p => p.img.id);
+    if(g){
+      const more = ids.filter(id => !g.imgs.has(id)).length;
+      if(k - g.from >= EXPORT_MAX_SHEETS || (g.imgs.size + more > EXPORT_MAX_IMGS && g.imgs.size)) g = null;
+    }
+    if(!g){ g = {from: k, to: k, imgs: new Set()}; groups.push(g); }
+    g.to = k; ids.forEach(id => g.imgs.add(id));
+  }
+  exportJob = {cur, title: $('title').value || 'Inkwell page', margin, pw, ph, s, x0, y0, cw, slice, bg: cur.bg, parts, inks, tops, hit, groups};
+  if(groups.length === 1){ printSheets(0); return; }
+  $('exportInfo').textContent = `This page makes ${n} A4 sheets. It is too long to print in one go, so it is split into ${groups.length} parts. Export each part as its own PDF.`;
+  $('exportParts').innerHTML = groups.map((g, i) => `<button class="btn ghost" data-part="${i}">Part ${i + 1} <span class="hint">sheets ${g.from + 1}–${g.to + 1}</span></button>`).join('');
+  showModal('exportDlg');
+}
+$('exportParts').addEventListener('click', e => {
+  const btn = e.target.closest('[data-part]'); if(!btn) return;
+  btn.classList.add('done');
+  printSheets(+btn.dataset.part);
+});
+async function printSheets(gi){
+  const J = exportJob; if(!J || J.cur !== cur) return;
+  const grp = J.groups[gi], bg = J.bg;
+  const paper = (ya, yb, xa, xb) => {
+    if(bg.type === 'blank') return '';
+    let d = '';
+    const gx0 = Math.floor(xa / bg.sx) * bg.sx, gy0 = Math.floor(ya / bg.sy) * bg.sy;
+    if(bg.type === 'dots'){
+      for(let y = gy0; y <= yb; y += bg.sy) for(let x = gx0; x <= xb; x += bg.sx) d += `M${r1(x - .8)} ${r1(y)}h1.6`;
+      return `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#AEBBC9" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+    }
+    for(let y = gy0; y <= yb; y += bg.sy) d += `M${r1(xa)} ${r1(y)}H${r1(xb)}`;
+    if(bg.type === 'grid') for(let x = gx0; x <= xb; x += bg.sx) d += `M${r1(x)} ${r1(ya)}V${r1(yb)}`;
+    return `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#D5DFEA" stroke-width="0.8" fill="none"/></svg>`;
+  };
+  let html = '';
+  for(let k = grp.from; k <= grp.to; k++){
+    const ya = J.y0 + k * J.slice, yb = ya + J.slice, xb = J.x0 + J.cw;
+    let body = paper(ya, yb, J.x0, xb);
+    for(const p of J.hit(J.parts, k)){
+      if(!p.img){ body += p.h; continue; }
+      const it = p.img, u = await assetURL(it.a);
+      if(u) body += `<img src="${u}" style="position:absolute;left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px">`;
+    }
+    body += `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1">${J.hit(J.inks, k).map(p => p.h).join('')}</svg>` + J.hit(J.tops, k).map(p => p.h).join('');
+    html += `<div class="print-sheet"><div style="position:absolute;left:${J.margin}px;top:${J.margin}px;width:${J.pw}px;height:${J.ph}px;overflow:hidden"><div class="print-inner" style="transform:scale(${J.s}) translate(${-J.x0}px,${-ya}px)">${body}</div></div></div>`;
   }
   const root = $('printRoot');
   root.innerHTML = html;
   await Promise.all([...root.querySelectorAll('img')].map(i => i.decode().catch(() => {})));
   const oldTitle = document.title;
-  document.title = $('title').value || 'Inkwell page';
-  const done = () => { root.innerHTML = ''; document.title = oldTitle; removeEventListener('afterprint', done); };
+  document.title = J.title + (J.groups.length > 1 ? ` (part ${gi + 1} of ${J.groups.length})` : '');
+  let over = false;
+  const done = () => { if(over) return; over = true; root.innerHTML = ''; document.title = oldTitle; removeEventListener('afterprint', done); };
   addEventListener('afterprint', done);
   setTimeout(() => { try { window.print(); } catch(e){ toast('Printing is not available here'); } setTimeout(done, 60000); }, 50);
 }
@@ -4755,7 +4794,14 @@ async function strokesToFormula(){
 /* =====================================================================
    Page slider on the right: jump through imported pages
    ===================================================================== */
-let slPages = null, slDrag = null;
+let slPages = null, slDrag = null, slCam = null, slHideT = 0;
+// the slider stays hidden (and untouchable, so a resting palm can't grab it) until the page moves
+function wakeSlider(){
+  const el = $('pgSlider'); if(!el) return;
+  el.classList.add('awake');
+  clearTimeout(slHideT);
+  slHideT = setTimeout(() => { if(!slDrag) el.classList.remove('awake'); }, 1500);
+}
 function sliderPages(){
   if(slPages) return slPages;
   slPages = cur ? [...cur.items.values()].filter(it => it.t === 'i' && it.h > 150).sort((a, b) => a.y - b.y || a.x - b.x) : [];
@@ -4773,6 +4819,9 @@ function renderSlider(){
   const pages = sliderPages();
   if(!cur || pages.length < 2){ el.hidden = true; return; }
   el.hidden = false;
+  const ck = cur.id + ':' + Math.round(cam.oy) + ':' + cam.z;
+  if(slCam && ck !== slCam && slCam.split(':')[0] === cur.id && !slDrag) wakeSlider();
+  slCam = ck;
   const i = slDrag ? slDrag.i : sliderIndexAt(), n = pages.length;
   const track = $('pgTrack'), th = track.clientHeight;
   const y = n > 1 ? i / (n - 1) * th : 0;
@@ -4811,7 +4860,7 @@ function sliderJump(i){
     if(!slDrag || e.pointerId !== slDrag.id) return;
     const i = at(e); if(i !== slDrag.i){ slDrag.i = i; sliderJump(i); renderSlider(); }
   });
-  const end = e => { e.stopPropagation(); if(!slDrag || e.pointerId !== slDrag.id) return; slDrag = null; el.classList.remove('on'); renderSlider(); };
+  const end = e => { e.stopPropagation(); if(!slDrag || e.pointerId !== slDrag.id) return; slDrag = null; el.classList.remove('on'); wakeSlider(); renderSlider(); };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
 }
 
@@ -5157,6 +5206,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

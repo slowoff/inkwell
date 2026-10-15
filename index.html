@@ -378,6 +378,14 @@
   </div>
 </div>
 
+<div class="modal" id="exportDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Export in parts</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="hint" id="exportInfo"></p>
+    <div class="export-parts" id="exportParts"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden><span id="toastText"></span><button id="toastBtn" hidden></button></div>
 <input type="file" id="restoreFile" accept="application/json" hidden>
 <div id="printRoot" aria-hidden="true"></div>

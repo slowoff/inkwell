@@ -516,7 +516,7 @@ function frame(){
   $('zoomBtn').textContent = Math.round(cam.z * 100) + '%';
   if(need.bg) drawBg();
   if(need.ink) drawInk();
-  if(need.over) positionOverlays();
+  if(need.over){ positionOverlays(); imgSoon(); }
   need = {bg: 0, ink: 0, over: 0};
   if(act) drawLive();
 }
@@ -568,6 +568,50 @@ function drawInk(){
   inkCtx.globalAlpha = 1;
 }
 
+/* Imported pages/photos: only the ones on or near the screen hold a decoded picture.
+   A long imported book (100+ pages) would otherwise need several GB and crash the iPad. */
+const MAX_IMGS = 8;
+let imgTimer = 0;
+function imgSoon(){ if(!imgTimer) imgTimer = setTimeout(() => { imgTimer = 0; updateImages(); }, 120); }
+function updateImages(){
+  if(!cur) return;
+  const v = viewRect(), mw = (v[2] - v[0]) * 0.25, mh = (v[3] - v[1]) * 0.75, cx = (v[0] + v[2]) / 2, cy = (v[1] + v[3]) / 2;
+  const cand = [];
+  for(const it of cur.items.values()){
+    if(it.t !== 'i') continue;
+    const el = elMap.get(it.id); if(!el) continue;
+    const near = !(it.x + it.w < v[0] - mw || it.x > v[2] + mw || it.y + it.h < v[1] - mh || it.y > v[3] + mh);
+    cand.push([near ? Math.hypot(Math.max(it.x - cx, 0, cx - it.x - it.w), Math.max(it.y - cy, 0, cy - it.y - it.h)) : Infinity, el]);
+  }
+  cand.sort((a, b) => a[0] - b[0]);
+  cand.forEach(([d, el], i) => {
+    el._want = d < Infinity && i < MAX_IMGS;
+    if(el._want) loadImg(el);
+    else if(el._loaded || el._img) unloadImg(el, d < Infinity);
+  });
+}
+function loadImg(el){
+  if(el._loaded || el._loading) return;
+  const a = el._a; el._loading = true;
+  if(el._msg){ el._msg.hidden = false; el._msg.textContent = 'Loading'; }
+  assetURL(a).then(u => {
+    el._loading = false;
+    if(el._a !== a || !el._want || !el.isConnected) return;
+    if(!u){ el._msg.textContent = 'Not downloaded yet'; return; }
+    const img = new Image(); img.decoding = 'async'; img.src = u; img.draggable = false; img.alt = '';
+    img.style.cssText = 'width:100%;height:100%;display:block;border-radius:2px';
+    el.insertBefore(img, el.firstChild); el._img = img; el._loaded = true;
+    if(el._msg) el._msg.hidden = true;
+    el.classList.remove('missing');
+    if(!lineReady.has(a)) setTimeout(() => { if(el._loaded) pageLines(a); }, 400);
+  }, () => { el._loading = false; });
+}
+function unloadImg(el, visible){
+  if(el._img){ el._img.removeAttribute('src'); el._img.remove(); el._img = null; }
+  el._loaded = false; el.classList.add('missing');
+  if(el._msg){ el._msg.hidden = false; el._msg.textContent = visible ? 'Zoom in to show this page' : 'Loading'; }
+}
+
 /* DOM items: text boxes, formulas, imported pages/photos, tape */
 function cleanHTML(html){
   const t = document.createElement('template');
@@ -603,18 +647,12 @@ function itemEl(it){
     el.classList.toggle('doc', !!it.doc);
     el.style.width = it.w + 'px'; el.style.height = it.h + 'px';
     if(el._a !== it.a){
-      el._a = it.a; el.classList.add('missing');
+      // the picture itself is only loaded while it is near the screen (see updateImages)
+      if(el._img){ el._img.remove(); el._img = null; }
+      el._a = it.a; el._loaded = false; el.classList.add('missing');
       for(const n of [...el.childNodes]) if(n !== el._pf) n.remove();
-      const msg = document.createElement('span'); msg.textContent = 'Loading'; el.insertBefore(msg, el.firstChild);
-      assetURL(it.a).then(u => {
-        if(el._a !== it.a) return;
-        if(!u){ msg.textContent = 'Not downloaded yet'; return; }
-        msg.remove();
-        const img = new Image(); img.src = u; img.draggable = false; img.alt = '';
-        img.style.cssText = 'width:100%;height:100%;display:block;border-radius:2px';
-        el.insertBefore(img, el.firstChild); el.classList.remove('missing');
-        if(!lineReady.has(it.a)) setTimeout(() => pageLines(it.a), 200);
-      });
+      const msg = document.createElement('span'); msg.textContent = 'Loading'; el.insertBefore(msg, el.firstChild); el._msg = msg;
+      imgSoon();
     }
     if(it.f && it.f.length) syncFields(el, it);
     else if(el._pf){ el._pf.remove(); el._pf = null; }
@@ -1626,10 +1664,14 @@ function tapAt(target, sx, sy){
    Found by scanning the page image for long thin horizontal lines; works for PDFs and pictures,
    old imports included. Cached per image; nothing is stored. */
 const lineCache = new Map(), lineReady = new Map();   // asset id -> Promise / lines [{y, x1, x2}] as page fractions
+let lineQ = Promise.resolve();
 function pageLines(aId){
   let p = lineCache.get(aId);
   if(!p){
-    p = detectLines(aId).catch(e => { console.warn(e); return null; }).then(r => {
+    // one page at a time: each scan decodes a full page picture
+    const run = lineQ.then(() => detectLines(aId));
+    lineQ = run.catch(() => {});
+    p = run.catch(e => { console.warn(e); return null; }).then(r => {
       if(r) lineReady.set(aId, r); else lineCache.delete(aId);
       return r || [];
     });
@@ -2739,7 +2781,7 @@ $('impGo').addEventListener('click', async () => {
         const page = await imp.pdf.getPage(pages[k]); const v1 = page.getViewport({scale: 1});
         const pf = await pdfFields(page); page.cleanup();
         const wWorld = v1.width / 595.28 * A4W * size, hWorld = wWorld * v1.height / v1.width;
-        const px = Math.round(clamp(wWorld * 2.4, 900, 2400));
+        const px = Math.round(clamp(wWorld * 2.4, 900, 2000));
         const r = await renderPdfPage(imp.pdf, pages[k], px, pf.f.length ? pf.blank : null);
         const a = await saveAsset(await canvasBlob(r.canvas));
         r.canvas.width = r.canvas.height = 1;
@@ -3760,8 +3802,17 @@ async function boot(){
   setTool(prefs.tool);
   renderNav(); renderList();
   resize();
-  if(ui.page && getDoc(ui.page)){
+  // if Inkwell closed unexpectedly while opening this page last time (e.g. out of memory), don't open it again by itself
+  const crashedOn = LSget('inkwell.opening', null);
+  if(crashedOn){
+    LSset('inkwell.opening', null);
+    showEmpty();
+    const pg = getDoc(crashedOn);
+    toast(`Inkwell closed unexpectedly while "${pg ? (pg.data.title || 'Untitled page') : 'a page'}" was open, so it was not reopened. Tap it in the list to open it.`);
+  } else if(ui.page && getDoc(ui.page)){
+    LSset('inkwell.opening', ui.page);
     await openPage(ui.page);
+    setTimeout(() => LSset('inkwell.opening', null), 12000);
     if(width() === 'narrow') app.dataset.view = 'list';
   } else {
     const first = ui.sec && pagesOf(ui.sec)[0];

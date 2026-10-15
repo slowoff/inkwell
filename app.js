@@ -53,6 +53,7 @@ const DEFAULT_PREFS = {
   penFavs: ['auto', '#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF'],
   hlFavs: ['#F5C400', '#4CC26B', '#FF6FA3', '#3BA5F0'],
   finger: false,
+  autoText: false,   // Write to text: pen writing becomes a typed text box (needs sign-in)
   snapLines: true,
   ruler: {on: false, cx: null, cy: null, a: 0},
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
@@ -980,7 +981,7 @@ function onDown(e){
   }
   if(e.pointerType === 'pen'){
     if(inEdit && !['pen', 'hl', 'eraser'].includes(prefs.tool)) return;
-    penDown = true; penAt = performance.now(); sleepSlider();
+    penDown = true; penAt = performance.now(); sleepSlider(); Scribe.hold();
     if(gesture && gesture.start){ Object.assign(cam, gesture.start); invalidate(); }  // a resting palm had started to move the page
     gesture = null; touches.clear(); stage.classList.remove('panning');
   }
@@ -1183,10 +1184,12 @@ function endTool(e){
   clearTimeout(a.hold); clearTimeout(a.wheelT);
   clearLive();
   if(a.kind === 'stroke'){
+    Scribe.release();
     if(a.pts.length < 3) return;
     const it = {t: 's', id: 's' + newId(), c: a.c, w: a.w, hl: a.hl, p: a.pts};
     if(a.mk){ it.mk = 1; it.at = Date.now(); }
     addItems([it]);
+    if(a.tool === 'pen' && !a.snapped && !a.hl && !a.mk) Scribe.add(it);
   } else if(a.kind === 'erase'){
     // one undo step: originals that were cut back in, pieces left over out
     const before = a.removed.map(it => [it.id, it]).concat([...a.added.keys()].map(id => [id, null]));
@@ -4952,6 +4955,109 @@ function jumpToLine(itemId, y){
 }
 
 /* =====================================================================
+   Write to text (toolbar toggle, prefs.autoText): what you write with the pen turns into a typed text box
+   a moment after you stop. Claude's fast model reads it (job 'scribe'). One undo step brings the ink back.
+   A word written right after a converted one on the same line is added to that text box.
+   ===================================================================== */
+const SCRIBE_WAIT = 1100;
+const Scribe = {
+  pending: [], timer: 0, busy: false, again: false, warned: false, recent: new Map(),
+  on(){ return !!prefs.autoText; },
+  add(it){ if(!this.on() || !cur) return; this.pending.push({id: it.id, page: cur.id}); this.arm(); },
+  arm(){ clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), SCRIBE_WAIT); },
+  hold(){ clearTimeout(this.timer); },              // the pen is down again: wait for the whole word
+  release(){ if(this.pending.length) this.arm(); },
+  async run(){
+    if(this.busy){ this.again = true; return; }
+    if(act && act.kind === 'stroke'){ this.arm(); return; }
+    if(!cur || !this.pending.length) return;
+    const pid = cur.id;
+    const strokes = this.pending.filter(p => p.page === pid).map(p => cur.items.get(p.id)).filter(s => s && s.t === 's');
+    this.pending = [];
+    if(!strokes.length) return;
+    this.busy = true; renderScribe();
+    try {
+      const img = inkImage(strokes, 1000);
+      let text = (await claudeJob('scribe', img.url, 'Convert this handwriting to text.')).replace(/^```\w*\n?|\n?```$/g, '').trim();
+      if(!text || /^NOT_TEXT\b/i.test(text)) return;
+      if(!cur || cur.id !== pid || strokes.some(s => cur.items.get(s.id) !== s)) return;   // page left or ink changed meanwhile: keep the ink
+      this.place(strokes, text, img.box);
+    } catch(e){
+      if(!this.warned){ this.warned = true; toast('Write to text: ' + jobWhy(e.code || e.message) + ' Your ink stays as it is.'); }
+    } finally {
+      this.busy = false; renderScribe();
+      if(this.again){ this.again = false; if(this.pending.length) this.arm(); }
+    }
+  },
+  font(){ return getComputedStyle(worldFront).fontFamily || 'system-ui, sans-serif'; },
+  measure(lines, px){
+    const c = this.cv || (this.cv = document.createElement('canvas')), ctx = c.getContext('2d');
+    ctx.font = `${px}px ${this.font()}`;
+    return Math.max(...lines.map(l => ctx.measureText(l).width));
+  },
+  place(strokes, text, b){
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if(!lines.length) return;
+    const n = lines.length, bh = b[3] - b[1];
+    const px = Math.round(clamp(bh / n * 0.62, 10, 90) * 10) / 10;
+    // the ink colour carries over (black/auto stays the default text colour)
+    const cols = {}; for(const s of strokes) cols[s.c] = (cols[s.c] || 0) + 1;
+    const c = Object.keys(cols).sort((x, y) => cols[y] - cols[x])[0] || 'auto';
+    const col = c && c !== 'auto' && /^#[0-9a-f]{6}$/i.test(c) && lum(c) > 0.07 && lum(c) < 0.93 ? c : '';
+    const wrap = t => col ? `<span style="color:${col}">${esc(t)}</span>` : esc(t);
+    const g = strokes[0].g && strokes.every(s => s.g === strokes[0].g) ? strokes[0].g : null;
+    const gone = strokes.map(s => [s.id, null]), back = strokes.map(s => [s.id, s]);
+    const prev = n === 1 ? this.joinTarget(b, px) : null;
+    let out;
+    if(prev){
+      const html = /<\/p>\s*$/.test(prev.html) ? prev.html.replace(/<\/p>\s*$/, ' ' + wrap(lines[0]) + '</p>') : prev.html + ' ' + wrap(lines[0]);
+      const el = elMap.get(prev.id), oldPx = 17 * (prev.fs || 1);
+      const w = Math.max(prev.w, this.measure([htmlText(html)], oldPx) + 16, b[2] + 8 - prev.x);
+      out = Object.assign({}, prev, {html: cleanHTML(html), w});
+      apply(gone.concat([[prev.id, out]]), back.concat([[prev.id, prev]]));
+      if(!el) return;
+    } else {
+      const w = Math.max(40, this.measure(lines, px) + 16);
+      const hh = n * px * 1.55 + 4;
+      out = {t: 'x', id: 'x' + newId(), x: b[0] - 6, y: (b[1] + b[3]) / 2 - hh / 2, w, fs: Math.round(px / 17 * 1000) / 1000, html: cleanHTML(lines.map(l => '<p>' + wrap(l) + '</p>').join(''))};
+      if(g) out.g = g;
+      apply(gone.concat([[out.id, out]]), back.concat([[out.id, null]]));
+    }
+    this.recent.set(out.id, {at: Date.now(), it: out});
+  },
+  // a text box made by this feature a moment ago, one line, ending just left of the new word
+  joinTarget(b, px){
+    const now = Date.now();
+    for(const [id, r] of this.recent){
+      if(now - r.at > 120000){ this.recent.delete(id); continue; }
+      const it = cur.items.get(id);
+      if(!it || it !== r.it){ this.recent.delete(id); continue; }
+      if((it.html.match(/<p>/g) || []).length > 1) continue;
+      const el = elMap.get(id); if(!el) continue;
+      const fpx = 17 * (it.fs || 1), top = it.y, bottom = it.y + el.offsetHeight, mid = (b[1] + b[3]) / 2;
+      if(mid < top || mid > bottom) continue;
+      if(Math.abs(fpx - px) > Math.max(fpx, px) * 0.6) continue;
+      const end = it.x + 8 + this.measure([htmlText(it.html)], fpx);
+      const gap = b[0] - end;
+      if(gap > -fpx && gap < fpx * 3.5) return it;
+    }
+    return null;
+  }
+};
+function renderScribe(){
+  const btn = $('scribeBtn'); if(!btn) return;
+  btn.classList.toggle('on', !!prefs.autoText);
+  btn.classList.toggle('busy', Scribe.busy);
+}
+$('scribeBtn').addEventListener('click', () => {
+  prefs.autoText = !prefs.autoText; savePrefs(); renderScribe();
+  if(prefs.autoText){
+    Scribe.warned = false;
+    toast(Sync.user ? 'Write to text is on: what you write with the pen becomes typed text when you pause. Undo brings the ink back.' : 'Write to text needs sync sign-in and internet (Claude reads the handwriting).');
+  } else { Scribe.pending = []; clearTimeout(Scribe.timer); }
+});
+
+/* =====================================================================
    Handwritten formula -> typed formula (lasso menu)
    ===================================================================== */
 function measureMath(tex, fs){
@@ -5334,7 +5440,7 @@ async function boot(){
   await loadDocs();
   if(!docs.size){ await seed(); await loadDocs(); if(!ui.page){ ui.nb = 'nb-school'; ui.sec = 'sec-general'; ui.page = 'pg-welcome'; } }
   ensureUi();
-  $('fingerBtn').classList.toggle('on', prefs.finger);
+  $('fingerBtn').classList.toggle('on', prefs.finger); renderScribe();
   $('mSnap').classList.toggle('on', prefs.snapLines);
   if(prefs.focus && width() !== 'narrow') app.classList.add('focus');
   setTool(prefs.tool);

@@ -882,7 +882,10 @@ async function saveContent(){
   if(page){
     let snip = '';
     for(const it of items){ if(it.t === 'x') snip += ' ' + htmlText(it.html); else if(it.t === 'm') snip += ' ' + it.tex; if(snip.length > 200) break; }
-    await patchDoc(page, {snippet: snip.trim().slice(0, 160)});
+    snip = snip.trim();
+    const ttl = (page.data.title || '').trim();
+    if(ttl && snip.toLowerCase().startsWith(ttl.toLowerCase())) snip = snip.slice(ttl.length).replace(/^[\s:.,\-–—]+/, '');
+    await patchDoc(page, {snippet: snip.slice(0, 160)});
     refreshPageItem(c.id);
   }
 }
@@ -1641,6 +1644,8 @@ function renderGroupBtns(){
   $('selGroup').hidden = its.length < 2 || oneGroup;
   $('selUngroup').hidden = !its.some(it => it.g);
   $('selMath').hidden = !its.some(it => it.t === 's' && !it.hl) || its.some(it => it.t !== 's');
+  const noRot = its.length === 1 && its[0].t !== 's';
+  $('selRot90').hidden = noRot; $('selRot').hidden = noRot;
 }
 function renderSelColors(){
   renderGroupBtns();
@@ -1893,6 +1898,7 @@ function finishEditing(){
   if(document.activeElement === el) el.blur();
   const it = cur.items.get(ed.id);
   if(!it) return;
+  if(!ed.isNew && it === ed.before){ invalidate(0, 0, 1); return; }   // nothing typed, formatted or resized: not an edit
   const empty = !el.textContent.trim() && !el.querySelector('a.pl');
   if(empty){
     cur.items.delete(ed.id); dropEl(ed.id);
@@ -2063,8 +2069,9 @@ function mathPreview(){
   const pv = $('mathPreview'), tex = $('mathIn').value;
   $('mathSizeVal').textContent = $('mathSize').value + ' px';
   pv.style.fontSize = Math.min(+$('mathSize').value, 40) + 'px';
-  if(!tex.trim()){ pv.textContent = 'Preview'; pv.classList.add('err'); return; }
-  try { katex.render(tex, pv, {throwOnError: true, displayMode: true}); pv.classList.remove('err'); }
+  pv.classList.remove('err', 'empty');
+  if(!tex.trim()){ pv.textContent = 'Preview'; pv.classList.add('empty'); return; }
+  try { katex.render(tex, pv, {throwOnError: true, displayMode: true}); }
   catch(e){ pv.textContent = String(e.message || e).replace(/^KaTeX parse error: /, ''); pv.classList.add('err'); }
 }
 $('mathIn').addEventListener('input', mathPreview);
@@ -2529,7 +2536,7 @@ document.querySelectorAll('.side-grip').forEach(g => {
     g.style.pointerEvents = 'none';
     const under = document.elementFromPoint(e.clientX, e.clientY);
     g.style.pointerEvents = '';
-    if(under && under !== g) under.click();
+    if(under && under !== g) under.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY, view: window}));
   };
   g.addEventListener('pointerup', end); g.addEventListener('pointercancel', end);
 });
@@ -2555,13 +2562,28 @@ function renderOpts(){
   if(ink){
     const favs = t === 'pen' ? prefs.penFavs : prefs.hlFavs, c = prefs[t].c;
     $('swatches').innerHTML = favs.map((f, i) => `<button class="swatch ${t === 'hl' ? 'hl' : ''} ${f === c ? 'on' : ''}" data-i="${i}" aria-label="Colour"><span style="--c:${f === 'auto' ? 'var(--fg)' : f}"></span></button>`).join('');
+    const other = !favs.includes(c);
+    $('colorBtn').classList.toggle('cur', other);
+    $('colorBtn').style.setProperty('--c', other ? (c === 'auto' ? 'var(--fg)' : c) : '');
   }
+  barFade();
   if(t === 'pen' || t === 'hl' || t === 'eraser' || t === 'mark'){
     $('size').value = prefs[t].s;
     const d = t === 'pen' ? clamp(2 + penWidth() * 1.4, 2, 22) : t === 'hl' ? clamp(hlWidth() * 0.45, 4, 22) : t === 'mark' ? clamp(markWidth() * 0.45, 4, 22) : clamp(eraserRadius() * 0.8, 4, 24);
     $('sizeDot').style.setProperty('--d', d + 'px');
   }
 }
+// the tool bar scrolls sideways when it doesn't fit; fade the edge that has more behind it
+function barFade(){
+  const b = $('toolbar'), more = b.scrollWidth - b.clientWidth;
+  b.classList.toggle('fade-l', more > 2 && b.scrollLeft > 2);
+  b.classList.toggle('fade-r', more > 2 && b.scrollLeft < more - 2);
+}
+$('toolbar').addEventListener('scroll', barFade, {passive: true});
+addEventListener('resize', barFade);
+if(window.ResizeObserver) new ResizeObserver(barFade).observe($('toolbar'));
+// iOS only shows :active (pressed) styles when the page listens for touches
+document.addEventListener('touchstart', () => {}, {passive: true});
 $('eraseMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.eraser.mode = b.dataset.m; savePrefs(); renderOpts(); });
 document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if(b) setTool(b.dataset.tool); });
 $('size').addEventListener('input', () => { const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
@@ -2987,9 +3009,10 @@ function openPop(id, anchor){
   let y = r.bottom + 8;
   if(y + ph > innerHeight - 8) y = Math.max(8, r.top - ph - 8);
   p.style.left = x + 'px'; p.style.top = y + 'px';
+  p._anchor = anchor; anchor.classList.add('pop-open');
 }
-function closePop(id){ $(id).hidden = true; }
-function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop']) $(id).hidden = true; }
+function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }
+function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop']) closePop(id); }
 document.addEventListener('pointerdown', e => {
   if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,[data-act="tcolor"]')) return;
   closePops();

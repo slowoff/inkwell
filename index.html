@@ -146,6 +146,7 @@
 
 <div class="pop" id="morePop" hidden>
   <button class="menu-item" id="mExport">Export page as PDF</button>
+  <button class="menu-item" id="mPractice">Practice from notes…</button>
   <button class="menu-item" id="mTemplate">Save page as template</button>
   <button class="menu-item toggle menu-toggle" id="mSnap" title="When on, a text box placed near the lines of a worksheet sits on them and every line of text follows the next ruled line"><span>Snap text to lines</span><span class="sw"></span></button>
   <button class="menu-item" id="mFit">Fit everything on screen</button>
@@ -355,7 +356,9 @@
 <div class="ask" id="askPanel" hidden>
   <div class="ask-head" id="askHead">
     <span class="ask-title"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Claude</span>
+    <span class="ask-chip" id="askPracChip" hidden title="Practice chat: Claude quizzes you. Start a new chat (+) to leave it.">Practice</span>
     <div class="seg" id="askMode"><button data-v="tutor" title="Explains and gives hints, lets you solve it">Tutor</button><button data-v="solve" title="Shows the full worked solution">Solve</button></div>
+    <button class="icon-btn" id="askPractice" title="Practice: Claude quizzes you on pages you pick" aria-label="Practice"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg></button>
     <button class="icon-btn" id="askHist" title="History: earlier chats" aria-label="Chat history"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></button>
     <button class="icon-btn" id="askNew" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
     <button class="icon-btn" id="askMin" title="Minimise" aria-label="Minimise"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
@@ -367,6 +370,20 @@
     <button class="icon-btn" id="askScan" title="Scan a question: draw a box around it" aria-label="Scan a question"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg></button>
     <textarea id="askIn" rows="1" placeholder="Ask about your notes…"></textarea>
     <button class="btn primary" id="askSend">Send</button>
+  </div>
+</div>
+
+<div class="modal" id="practiceDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Practice</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="hint">Tick the pages with your learning objectives, exercises and notes, or add files. Claude gives you one exercise at a time and checks your answers: type them, or scan your handwritten work.</p>
+    <select id="pracNb" class="text-in" aria-label="Notebook"></select>
+    <div class="prac-list" id="pracList"></div>
+    <div class="prac-files" id="pracFiles"></div>
+    <div><button class="btn ghost" id="pracAdd">Add a file (PDF or photo)</button><input type="file" id="pracFile" accept="application/pdf,image/*" multiple hidden></div>
+    <label class="field"><span>Focus <em>(optional)</em></span><input type="text" id="pracFocus" placeholder="e.g. test on Friday, chapter 2, only calculations" autocomplete="off"></label>
+    <p class="hint" id="pracInfo"></p>
+    <div class="dlg-actions"><span></span><button class="btn primary" id="pracGo">Start practice</button></div>
   </div>
 </div>
 

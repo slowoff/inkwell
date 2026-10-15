@@ -4212,6 +4212,7 @@ const Ask = {
   b64: new Map(),  // asset id -> base64 of scans, so they are not read back for every message
   busy: false,
   ctrl: null,
+  mode: null,      // 'practice' while a practice chat is open; otherwise the Tutor/Solve choice (prefs.askMode) is used
   open(){
     const p = $('askPanel');
     p.hidden = false; p.classList.remove('min');
@@ -4222,7 +4223,7 @@ const Ask = {
   },
   close(){ $('askPanel').hidden = true; if(this.ctrl) this.ctrl.abort(); },
   empty(){
-    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.</div>`;
+    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.<br><br><b>Practice</b> (the target icon): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
   },
   chats(){ return [...docs.values()].filter(d => d.kind === 'chat' && live(d)).sort((a, b) => (b.data.at || 0) - (a.data.at || 0)); },
   showHistory(){
@@ -4231,7 +4232,7 @@ const Ask = {
     const day = ms => { const d = new Date(ms), now = new Date(); const same = d.toDateString() === now.toDateString(); return same ? d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : d.toLocaleDateString([], {day: 'numeric', month: 'short'}) + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : ''); };
     $('askLog').innerHTML = `<div class="ah-head"><b>History</b><button class="btn ghost ah-back">Back to chat</button></div>` + (list.length ? list.map(c => {
       const pg = c.data.page && docs.get(c.data.page), n = (c.data.view || []).filter(v => v.who === 'user').length;
-      return `<div class="ah-row ${c.id === this.chatId ? 'on' : ''}" data-chat="${c.id}"><button class="ah-open"><b>${esc(c.data.title || 'Chat')}</b><span>${esc(day(c.data.at || 0))}${pg && live(pg) ? ' · ' + esc(pg.data.title || 'Untitled page') : ''} · ${n} question${n === 1 ? '' : 's'} · ${c.data.mode === 'solve' ? 'Solve' : 'Tutor'}</span></button><button class="ah-del" title="Delete this chat" aria-label="Delete chat"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button></div>`;
+      return `<div class="ah-row ${c.id === this.chatId ? 'on' : ''}" data-chat="${c.id}"><button class="ah-open"><b>${esc(c.data.title || 'Chat')}</b><span>${esc(day(c.data.at || 0))}${pg && live(pg) ? ' · ' + esc(pg.data.title || 'Untitled page') : ''} · ${n} question${n === 1 ? '' : 's'} · ${c.data.mode === 'solve' ? 'Solve' : c.data.mode === 'practice' ? 'Practice' : 'Tutor'}</span></button><button class="ah-del" title="Delete this chat" aria-label="Delete chat"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button></div>`;
     }).join('') : '<div class="ask-empty">No saved chats yet. Every chat with Claude is kept here.</div>');
   },
   showChat(){
@@ -4251,11 +4252,17 @@ const Ask = {
     if(this.ctrl) this.ctrl.abort();
     this.busy = false; $('askSend').disabled = false;
     this.chatId = id; this.msgs = structuredClone(c.data.msgs || []); this.view = structuredClone(c.data.view || []);
-    if(c.data.mode && c.data.mode !== prefs.askMode){ prefs.askMode = c.data.mode; savePrefs(); this.renderMode(); }
+    this.mode = c.data.mode === 'practice' ? 'practice' : null;
+    if(!this.mode && c.data.mode && c.data.mode !== prefs.askMode){ prefs.askMode = c.data.mode; savePrefs(); }
+    this.renderMode();
     this.showChat();
   },
-  renderMode(){ $('askMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askMode || 'tutor'))); },
-  reset(){ if(this.ctrl) this.ctrl.abort(); this.pending = null; this.renderPending(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
+  renderMode(){
+    $('askMode').hidden = this.mode === 'practice'; $('askPracChip').hidden = this.mode !== 'practice';
+    this.renderPending && this.renderPending();
+    $('askMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askMode || 'tutor')));
+  },
+  reset(){ if(this.ctrl) this.ctrl.abort(); this.mode = null; this.renderMode(); this.pending = null; this.renderPending(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
   bubble(cls, html){
     const log = $('askLog');
     const em = log.querySelector('.ask-empty'); if(em) em.remove();
@@ -4324,7 +4331,7 @@ const Ask = {
     const a = $('askAtt'), p = this.pending;
     a.hidden = !p;
     if(p) a.querySelector('img').src = p.url;
-    $('askIn').placeholder = p ? 'Ask about the scan, or just Send' : 'Ask about your notes…';
+    $('askIn').placeholder = this.mode === 'practice' ? (p ? 'Add a note, or just Send' : 'Your answer, or scan your work') : p ? 'Ask about the scan, or just Send' : 'Ask about your notes…';
     $('askSend').disabled = this.busy;
   },
   // Send button / Enter: typed text, plus the attached scan if there is one
@@ -4334,7 +4341,7 @@ const Ask = {
     if(this.busy) return;
     $('askIn').value = ''; autoGrow();
     this.pending = null; this.renderPending();
-    if(p) this.send(t || (prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), p.url, p.typed, p.box);
+    if(p) this.send(t || (this.mode === 'practice' ? 'Here is my answer.' : prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), p.url, p.typed, p.box);
     else this.send(t);
   },
   // API form of the chat: scans stored as assets go back in as base64
@@ -4357,8 +4364,8 @@ const Ask = {
     const first = this.view.find(v => v.who === 'user');
     const auto = /^(Solve this question\.|Help me with this question\.)$/;
     const page = first && first.page && getDoc(first.page);
-    const title = first ? (first.text && !auto.test(first.text) ? first.text : 'Scanned question' + (page && page.data.title ? ' · ' + page.data.title : '')) : 'Chat';
-    const data = {title: title.slice(0, 80), at: Date.now(), page: first && first.page || null, mode: prefs.askMode || 'tutor', msgs: this.msgs, view: this.view};
+    const title = first ? (first.text && !auto.test(first.text) ? first.text.split('\n')[0] : 'Scanned question' + (page && page.data.title ? ' · ' + page.data.title : '')) : 'Chat';
+    const data = {title: title.slice(0, 80), at: Date.now(), page: first && first.page || null, mode: this.mode || prefs.askMode || 'tutor', msgs: this.msgs, view: this.view};
     const rec = this.chatId && docs.get(this.chatId);
     if(rec && live(rec)){ rec.data = data; await writeDoc(rec); }
     else { const r = await newDoc('chat', data); this.chatId = r.id; }
@@ -4384,9 +4391,10 @@ const Ask = {
     for(let j = k - 1; j >= 0; j--) if(this.view[j].who === 'user') return this.view[j].box && this.view[j].page ? {box: this.view[j].box, page: this.view[j].page} : null;
     return null;
   },
-  async send(text, imgURL, typedInScan, box){
+  async send(text, imgURL, typedInScan, box, opts){
     if(this.busy) return;
     if(!text && !imgURL) return;
+    opts = opts || {};
     if(this.histOpen) this.showChat();
     if(!Sync.sb){ this.bubble('err', 'Claude works through your sync account. Sync is not set up on this device.'); return; }
     const {data} = await Sync.sb.auth.getSession();
@@ -4401,12 +4409,13 @@ const Ask = {
     }
     let full = text;
     if(typedInScan) full += '\n\n[Typed text inside the scanned area]\n' + typedInScan;
-    if(!this.msgs.length && cur){
+    if(opts.content){ content.push(...opts.content); full = null; }
+    else if(!this.msgs.length && cur){
       const page = getDoc(cur.id), title = page ? (page.data.title || '').trim() : '';
       const pt = this.pageText(null);
       full += `\n\n[Open page in my notes${title ? ': "' + title + '"' : ''}]` + (pt ? '\nTyped text on the page:\n' + pt : '\n(no typed text on this page, only handwriting or imported pages)');
     }
-    content.push({type: 'text', text: full});
+    if(full !== null) content.push({type: 'text', text: full});
     this.msgs.push({role: 'user', content});
     const uv = {who: 'user', text}; if(assetId) uv.a = assetId; if(box && cur){ uv.box = box.map(v => Math.round(v * 10) / 10); uv.page = cur.id; } else if(cur) uv.page = cur.id;
     this.view.push(uv);
@@ -4420,7 +4429,7 @@ const Ask = {
       const res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/ask', {
         method: 'POST', signal: this.ctrl.signal,
         headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token, apikey: CFG.SUPABASE_ANON_KEY},
-        body: JSON.stringify({mode: prefs.askMode || 'tutor', model: prefs.askModel || 'auto', messages: await this.apiMsgs()})
+        body: JSON.stringify({mode: this.mode || prefs.askMode || 'tutor', model: prefs.askModel || 'auto', messages: await this.apiMsgs()})
       });
       if(!res.ok){
         let j = {}; try { j = await res.json(); } catch {}
@@ -4520,6 +4529,144 @@ $('askIn').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKe
   const up = () => { if(!drag) return; drag = null; const r = $('askPanel').getBoundingClientRect(); LSset('inkwell.askPos', {x: r.left, y: r.top}); };
   $('askHead').addEventListener('pointerup', up); $('askHead').addEventListener('pointercancel', up);
 }
+
+/* =====================================================================
+   Practice: tick pages (learning objectives, exercise sheets, notes) and/or add files; Claude quizzes you
+   one exercise at a time and checks the answers. Runs as an Ask Claude chat with mode 'practice'.
+   The material goes in the first message (marked for prompt caching, so later turns cost little).
+   ===================================================================== */
+const PRAC_MAX = 60000;
+const Prac = {
+  nb: null, picked: new Set(), files: [], busy: false,
+  open(){
+    if(!Sync.sb || !Sync.user){ toast('Practice works through your sync account: sign in first (Settings → Sync).'); return; }
+    this.nb = ui.nb && getDoc(ui.nb) ? ui.nb : (notebooks()[0] || {}).id;
+    if(cur && !this.picked.size) this.picked.add(cur.id);
+    this.render(); showModal('practiceDlg');
+  },
+  render(){
+    const nbs = notebooks();
+    $('pracNb').innerHTML = nbs.map(n => `<option value="${n.id}" ${n.id === this.nb ? 'selected' : ''}>${esc(n.data.name)}</option>`).join('');
+    let h = '';
+    for(const s of sectionsOf(this.nb)){
+      const pages = pagesOf(s.id); if(!pages.length) continue;
+      const all = pages.every(p => this.picked.has(p.id));
+      h += `<label class="prac-sec"><input type="checkbox" data-sec="${s.id}" ${all ? 'checked' : ''}><span class="tab" style="--c:var(--t${(s.data.color || 0) % TABS})"></span>${esc(s.data.name)}</label>`;
+      h += pages.map(p => `<label class="prac-page"><input type="checkbox" data-pg="${p.id}" ${this.picked.has(p.id) ? 'checked' : ''}><span>${esc(p.data.title || 'Untitled page')}</span></label>`).join('');
+    }
+    $('pracList').innerHTML = h || '<div class="hint" style="padding:10px">No pages in this notebook.</div>';
+    $('pracFiles').innerHTML = this.files.map((f, i) => `<span class="prac-file">${esc(f.name)}<button data-rmfile="${i}" aria-label="Remove ${esc(f.name)}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>`).join('');
+    this.info();
+  },
+  async info(){
+    if(this.busy) return;
+    const n = this.picked.size, f = this.files.length;
+    if(!n && !f){ $('pracInfo').textContent = 'Tick at least one page or add a file.'; $('pracGo').disabled = true; return; }
+    $('pracGo').disabled = false;
+    const text = await this.material(false);
+    const len = text.length;
+    $('pracInfo').textContent = `${n} page${n === 1 ? '' : 's'}${f ? `, ${f} file${f === 1 ? '' : 's'}` : ''} · about ${len.toLocaleString('de-CH')} characters` + (len > PRAC_MAX ? `. That is more than Claude gets (${PRAC_MAX.toLocaleString('de-CH')}); the rest is cut off, so pick fewer pages for better exercises.` : '.') + (this.unread ? ` ${this.unread} part${this.unread === 1 ? '' : 's'} (handwriting or scans) will be read first.` : '');
+  },
+  // the text of the picked pages and files; read = true first lets Claude read handwriting and scans not read yet
+  async material(read){
+    let out = '', unread = 0, step = 0;
+    const ids = [...this.picked].filter(id => getDoc(id));
+    for(const pid of ids){
+      const page = getDoc(pid), sec = getDoc(page.data.sec);
+      let items;
+      if(cur && cur.id === pid) items = [...cur.items.values()];
+      else { const rec = await IDB.get('docs', 'c_' + pid); items = rec && !rec.deleted && rec.data ? (rec.data.items || []).map(deser).filter(Boolean) : []; }
+      const pics = pagePictures(items), strokes = items.filter(it => it.t === 's' && !it.hl);
+      if(read){
+        step++; $('pracInfo').textContent = `Reading page ${step} of ${ids.length}…`;
+        try { if(strokes.length && HW.stale(page, strokes)) await HW.readPage(pid); } catch(e){ console.warn('practice hw', e); }
+        for(const it of pics) if(!ptxtOf(it.a)){ try { await savePtxt(it.a, 'ocr', await ocrAsset(it.a)); } catch(e){ console.warn('practice ocr', e); } }
+      } else {
+        if(strokes.length && HW.stale(page, strokes)) unread++;
+        unread += pics.filter(it => !ptxtOf(it.a)).length;
+      }
+      const typed = items.filter(it => it.t === 'x' || it.t === 'm' || (it.t === 'i' && it.f)).sort((a, b) => a.y - b.y || a.x - b.x)
+        .map(it => it.t === 'x' ? htmlText(it.html) : it.t === 'm' ? '$' + it.tex + '$' : fieldText(it).trim()).filter(Boolean).join('\n');
+      const fresh = getDoc(pid);
+      let block = `\n\n### Page: ${fresh.data.title || 'Untitled page'}${sec ? ' (section ' + sec.data.name + ')' : ''}\n`;
+      if(typed) block += `Typed:\n${typed}\n`;
+      const hw = HW.text(fresh); if(hw) block += `Handwriting (read by Claude):\n${hw}\n`;
+      pics.forEach((it, i) => { const t = ptxtText(ptxtOf(it.a)); if(t) block += `Imported page ${i + 1}:\n${t}\n`; });
+      out += block;
+    }
+    for(const f of this.files) out += `\n\n### File: ${f.name}\n${f.text}\n`;
+    if(!read) this.unread = unread;
+    return out.trim();
+  },
+  async addFiles(list){
+    for(const file of list){
+      const entry = {name: file.name, text: ''};
+      this.busy = true; $('pracGo').disabled = true;
+      try {
+        if(file.type === 'application/pdf' || /\.pdf$/i.test(file.name)){
+          const pdf = await pdfjsLib.getDocument({data: new Uint8Array(await file.arrayBuffer())}).promise;
+          const n = Math.min(pdf.numPages, 40), parts = [];
+          for(let i = 1; i <= n; i++){
+            $('pracInfo').textContent = `Reading ${file.name}: page ${i} of ${n}…`;
+            const page = await pdf.getPage(i);
+            let l = await pdfLines(page);
+            if(!hasRealText(l)){
+              page.cleanup();
+              const r = await renderPdfPage(pdf, i, 1400);
+              const url = r.canvas.toDataURL('image/jpeg', 0.82); r.canvas.width = r.canvas.height = 1;
+              l = parseOcr(await claudeJob('ocr', url, 'Transcribe this page.'));
+            } else page.cleanup();
+            parts.push(l.map(x => x[1]).join('\n'));
+          }
+          entry.text = parts.map((t, i) => `Page ${i + 1}:\n${t}`).join('\n');
+          if(pdf.numPages > n) entry.text += `\n(only the first ${n} of ${pdf.numPages} pages)`;
+        } else if(file.type.startsWith('image/') || /\.(jpe?g|png|heic|webp)$/i.test(file.name)){
+          $('pracInfo').textContent = `Reading ${file.name}…`;
+          const bmp = await createImageBitmap(file), k = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+          const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+          const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(bmp, 0, 0, c.width, c.height); if(bmp.close) bmp.close();
+          entry.text = parseOcr(await claudeJob('ocr', c.toDataURL('image/jpeg', 0.82), 'Transcribe this page.')).map(x => x[1]).join('\n');
+          c.width = c.height = 1;
+        } else { toast(file.name + ': only PDFs and photos can be added.'); continue; }
+        if(entry.text.trim()) this.files.push(entry); else toast('No text found in ' + file.name);
+      } catch(e){ console.warn('practice file', e); toast(file.name + ': ' + (e.code ? jobWhy(e.code) : 'could not be read.')); }
+      finally { this.busy = false; }
+    }
+    this.render();
+  },
+  async start(){
+    if(this.busy) return;
+    this.busy = true; $('pracGo').disabled = true;
+    let text;
+    try { text = await this.material(true); } finally { this.busy = false; $('pracGo').disabled = false; }
+    if(!text.trim()){ $('pracInfo').textContent = 'Nothing to practise from: the picked pages have no text that Claude can use yet.'; return; }
+    const cut = text.length > PRAC_MAX;
+    if(cut) text = text.slice(0, PRAC_MAX) + '\n(… cut off here, the material was too long)';
+    const focus = $('pracFocus').value.trim();
+    const names = [...this.picked].map(id => getDoc(id)).filter(Boolean).map(p => p.data.title || 'Untitled page').concat(this.files.map(f => f.name));
+    const label = names.slice(0, 3).join(', ') + (names.length > 3 ? ` +${names.length - 3}` : '');
+    hideModal('practiceDlg');
+    Ask.reset(); Ask.mode = 'practice'; Ask.open();
+    const content = [
+      {type: 'text', text: '<material>\n' + text + '\n</material>', cache_control: {type: 'ephemeral'}},
+      {type: 'text', text: (focus ? 'Focus: ' + focus + '\n' : '') + 'Quiz me on this material. Start with Exercise 1.'}
+    ];
+    Ask.send('Practice: ' + label + (focus ? '\nFocus: ' + focus : ''), null, null, null, {content});
+  }
+};
+$('pracNb').addEventListener('change', () => { Prac.nb = $('pracNb').value; Prac.render(); });
+$('pracList').addEventListener('change', e => {
+  const t = e.target;
+  if(t.dataset.pg){ if(t.checked) Prac.picked.add(t.dataset.pg); else Prac.picked.delete(t.dataset.pg); }
+  if(t.dataset.sec){ for(const p of pagesOf(t.dataset.sec)){ if(t.checked) Prac.picked.add(p.id); else Prac.picked.delete(p.id); } }
+  Prac.render();
+});
+$('pracFiles').addEventListener('click', e => { const b = e.target.closest('[data-rmfile]'); if(!b) return; Prac.files.splice(+b.dataset.rmfile, 1); Prac.render(); });
+$('pracAdd').addEventListener('click', () => $('pracFile').click());
+$('pracFile').addEventListener('change', () => { const fs = [...$('pracFile').files]; $('pracFile').value = ''; if(fs.length) Prac.addFiles(fs); });
+$('pracGo').addEventListener('click', () => Prac.start());
+$('askPractice').addEventListener('click', () => Prac.open());
+$('mPractice').addEventListener('click', () => { closePops(); Prac.open(); });
 
 /* =====================================================================
    Claude helpers shared by Ask, handwriting search and "to formula"
@@ -5520,6 +5667,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

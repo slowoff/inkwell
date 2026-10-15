@@ -177,6 +177,7 @@ const Sync = {
   async init(){
     if(!this.configured()){ this.state = 'local'; setStatus(); return; }
     if(!window.supabase){ this.state = 'warn'; this.msg = 'Sync library missing'; setStatus(); return; }
+    const link = readAuthLink();
     try {
       this.sb = window.supabase.createClient(CFG.SUPABASE_URL.trim(), CFG.SUPABASE_ANON_KEY.trim(), {
         auth: {persistSession: true, autoRefreshToken: true, storageKey: 'inkwell-auth', detectSessionInUrl: true}
@@ -184,12 +185,16 @@ const Sync = {
       const {data} = await this.sb.auth.getSession();
       this.user = data && data.session ? data.session.user : null;
       this.sb.auth.onAuthStateChange((ev, session) => {
+        if(ev === 'PASSWORD_RECOVERY') startRecovery();
         const was = this.user && this.user.id;
         this.user = session ? session.user : null;
         if(this.user && this.user.id !== was) this.run();
         setStatus(); renderSettings();
       });
+      if(link.recovery && this.user) startRecovery();
+      else if(link.error && !this.user){ authView = 'reset'; setTimeout(() => { openSettings(); $('resetMsg').textContent = linkErrorText(link.error); }, 300); }
     } catch(e){ this.sb = null; this.state = 'warn'; this.msg = 'Sync settings in config.js look wrong'; }
+    if(sessionStorage.getItem('inkwell.recovery') && this.user && authView !== 'newpass') startRecovery();
     setStatus(); renderSettings();
     this.run();
     setInterval(() => { if(document.visibilityState === 'visible') this.run(); }, 20000);
@@ -3341,8 +3346,19 @@ async function renderSettings(){
   renderPrefSettings(); updTrashInfo(); renderVersion();
   const ready = !!Sync.sb;
   $('setNoConfig').hidden = ready;
-  $('authForm').hidden = !ready || !!Sync.user;
-  $('signedIn').hidden = !ready || !Sync.user;
+  if(authView === 'newpass' && !Sync.user) authView = 'signin';
+  if(authView === 'reset' && Sync.user) authView = 'signin';
+  const view = !ready ? '' : authView === 'newpass' ? 'newpass' : Sync.user ? 'in' : authView === 'reset' ? 'reset' : 'signin';
+  $('authForm').hidden = view !== 'signin';
+  $('resetForm').hidden = view !== 'reset';
+  $('newPassForm').hidden = view !== 'newpass';
+  $('signedIn').hidden = view !== 'in';
+  if(view === 'newpass'){
+    const email = Sync.user.email || '';
+    $('newPassUser').value = email;
+    $('newPassHint').textContent = recovering() ? `Choose a new password for ${email || 'your account'}. You are signed in.` : `Choose a new password for ${email || 'your account'}.`;
+    $('newPassCancel').textContent = recovering() ? 'Not now' : 'Cancel';
+  }
   if(!ready && Sync.configured()) $('setNoConfig').querySelector('p').textContent = Sync.msg ? 'Sync could not start: ' + Sync.msg + '.' : 'Starting sync…';
   if(Sync.user){
     $('whoami').textContent = Sync.user.email || 'your account';
@@ -3370,6 +3386,125 @@ $('authSignup').addEventListener('click', async () => {
   renderSettings();
 });
 $('signOut').addEventListener('click', async () => { await Sync.sb.auth.signOut(); Sync.user = null; setStatus(); renderSettings(); });
+
+/* Forgot / change password.
+   The reset email links back to this page (if the address is allowed in Supabase Auth → URL Configuration);
+   otherwise the link lands on the Supabase "Site URL". Either way the link, or the address it landed on,
+   can be pasted into Inkwell, which finishes the sign-in itself. */
+let authView = 'signin';   // signin | reset | newpass
+function clearLinkErr(){ try { sessionStorage.removeItem('inkwell.linkerr'); } catch {} }
+function recovering(){ try { return !!sessionStorage.getItem('inkwell.recovery'); } catch { return false; } }
+function setRecovering(on){ try { on ? sessionStorage.setItem('inkwell.recovery', '1') : sessionStorage.removeItem('inkwell.recovery'); } catch {} }
+function readAuthLink(){
+  const h = new URLSearchParams(location.hash.replace(/^#/, '')), q = new URLSearchParams(location.search);
+  const out = {recovery: h.get('type') === 'recovery' && !!h.get('access_token'), error: h.get('error_code') || h.get('error_description') || q.get('error_code') || ''};
+  if(out.recovery) setRecovering(true);
+  // an expired/used link: remember it briefly, the first visit in a fresh Safari reloads once for the offline cache
+  try {
+    if(out.error) sessionStorage.setItem('inkwell.linkerr', JSON.stringify({c: out.error, at: Date.now()}));
+    else { const le = JSON.parse(sessionStorage.getItem('inkwell.linkerr') || 'null'); if(le && Date.now() - le.at < 60000) out.error = le.c; }
+  } catch {}
+  if(out.error && !out.recovery) history.replaceState(null, '', location.pathname + location.search.replace(/([?&])(error|error_code|error_description)=[^&]*/g, '$1').replace(/[?&]+$/, ''));
+  return out;
+}
+function linkErrorText(code){
+  return /expired|otp_expired|invalid|access_denied/i.test(code) ? 'This link has expired or was already used. Send a new one.' : 'The link did not work (' + code + '). Send a new one.';
+}
+function startRecovery(){
+  setRecovering(true);
+  authView = 'newpass';
+  setTimeout(() => { openSettings(); $('newPassMsg').textContent = ''; $('newPass').value = ''; }, 300);
+}
+$('authForgot').addEventListener('click', () => {
+  authView = 'reset';
+  $('resetEmail').value = $('authEmail').value.trim();
+  $('resetMsg').textContent = ''; $('resetLinkMsg').textContent = ''; $('resetLink').value = '';
+  $('resetPaste').hidden = true;
+  renderSettings();
+  if(!$('resetEmail').value) $('resetEmail').focus();
+});
+$('resetBack').addEventListener('click', () => {
+  authView = 'signin'; clearLinkErr();
+  if($('resetEmail').value.trim()) $('authEmail').value = $('resetEmail').value.trim();
+  renderSettings();
+});
+$('resetForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = $('resetMsg'), email = $('resetEmail').value.trim();
+  if(!/^\S+@\S+\.\S+$/.test(email)){ msg.textContent = 'Enter the email address of your account.'; return; }
+  if(!navigator.onLine){ msg.textContent = 'You are offline. Connect to the internet and try again.'; return; }
+  $('resetSend').disabled = true; msg.textContent = 'Sending'; clearLinkErr();
+  const {error} = await Sync.sb.auth.resetPasswordForEmail(email, {redirectTo: new URL('./', location.href).href});
+  $('resetSend').disabled = false;
+  if(error){
+    msg.textContent = /rate limit|too many|security purposes/i.test(error.message) ? 'Too many emails were sent. Wait a while (up to an hour), then try again.' : error.message;
+    return;
+  }
+  msg.textContent = `If ${email} has an Inkwell account, an email with a link is on its way. It can take a few minutes; check spam too.`;
+  $('resetPaste').hidden = false;
+});
+$('resetUse').addEventListener('click', () => useResetLink($('resetLink').value));
+$('resetLink').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); useResetLink($('resetLink').value); } });
+async function useResetLink(text){
+  const msg = $('resetLinkMsg');
+  text = (text || '').trim();
+  let r;
+  try {
+    if(/^\d{6,10}$/.test(text)){
+      r = await Sync.sb.auth.verifyOtp({email: $('resetEmail').value.trim(), token: text, type: 'recovery'});
+    } else {
+      let u; try { u = new URL(text); } catch { msg.textContent = 'That is not a link. Copy the whole link from the email and paste it here.'; return; }
+      const h = new URLSearchParams(u.hash.replace(/^#/, '')), q = u.searchParams;
+      const err = h.get('error_code') || h.get('error_description') || q.get('error_code') || q.get('error_description');
+      if(h.get('access_token') && h.get('refresh_token')){
+        msg.textContent = 'Checking the link';
+        r = await Sync.sb.auth.setSession({access_token: h.get('access_token'), refresh_token: h.get('refresh_token')});
+      } else if(err){ msg.textContent = linkErrorText(err); return; }
+      else if((q.get('token') || q.get('token_hash')) && (q.get('type') || 'recovery') === 'recovery'){
+        msg.textContent = 'Checking the link';
+        r = await Sync.sb.auth.verifyOtp({token_hash: q.get('token_hash') || q.get('token'), type: 'recovery'});
+      } else { msg.textContent = 'This does not look like the password link. Copy the link from the Inkwell email and paste it here.'; return; }
+    }
+  } catch(e){ r = {error: e}; }
+  if(r.error || !(r.data && r.data.session)){
+    const m = r.error && r.error.message || '';
+    msg.textContent = /expired|invalid|not found|used/i.test(m) || !m ? 'This link has expired or was already used. Send a new one.' : /fetch|network/i.test(m) ? 'You are offline. Connect to the internet and try again.' : m;
+    return;
+  }
+  Sync.user = r.data.session.user;
+  $('resetLink').value = ''; msg.textContent = '';
+  setRecovering(true);
+  authView = 'newpass';
+  setStatus(); renderSettings(); Sync.run();
+  $('newPassMsg').textContent = ''; $('newPass').value = '';
+}
+$('changePass').addEventListener('click', () => {
+  authView = 'newpass'; setRecovering(false);
+  $('newPassMsg').textContent = ''; $('newPass').value = '';
+  renderSettings();
+  $('newPass').focus();
+});
+$('newPassCancel').addEventListener('click', () => { authView = 'signin'; setRecovering(false); renderSettings(); });
+$('newPassForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = $('newPassMsg'), pass = $('newPass').value;
+  if(pass.length < 6){ msg.textContent = 'Use at least 6 characters.'; return; }
+  if(!navigator.onLine){ msg.textContent = 'You are offline. Connect to the internet and try again.'; return; }
+  msg.textContent = 'Saving';
+  const {error} = await Sync.sb.auth.updateUser({password: pass});
+  if(error){
+    const m = error.message || '';
+    msg.textContent = /different from the old|same.*password/i.test(m) ? 'That is your current password. Choose a different one.'
+      : /weak|short|characters/i.test(m) ? 'This password is too weak. ' + m
+      : /reauth|recent|nonce/i.test(m) ? 'For safety, sign out, use "Forgot password?" and change it from the email link.'
+      : /session|jwt|expired/i.test(m) ? 'Your sign-in expired. Use "Forgot password?" again.' : m;
+    return;
+  }
+  $('newPass').value = '';
+  setRecovering(false); authView = 'signin';
+  renderSettings();
+  toast('Password changed. Use the new password on your other devices.');
+});
 $('syncNow').addEventListener('click', async () => { $('syncInfo').textContent = 'Syncing'; await Sync.run(); renderSettings(); });
 
 /* Settings: theme and shape straightening (per device) */

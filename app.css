@@ -283,6 +283,13 @@ select.pf-ls option:checked{background:#9fbbe8}
 .btn.danger{color:var(--danger)}
 .btn.armed{background:var(--danger-soft)}
 .btn[disabled]{opacity:.5}
+.link-btn{align-self:flex-start;color:var(--accent);font-size:13.5px;font-weight:600;padding:4px 0;margin-top:-4px}
+.link-btn:active{opacity:.6}
+.btn-pair{display:inline-flex;gap:10px;flex-wrap:wrap}
+.auth-sub{display:flex;flex-direction:column;gap:12px;padding-top:12px;border-top:1px solid var(--line)}
+.vh{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
+#authForm,#resetForm,#newPassForm{display:flex;flex-direction:column;gap:12px}
+#authForm[hidden],#resetForm[hidden],#newPassForm[hidden],#resetPaste[hidden]{display:none}
 .file-btn{position:relative;overflow:hidden;cursor:pointer}
 .file-btn input{position:absolute;inset:0;opacity:0;cursor:pointer}
 

@@ -271,13 +271,33 @@
       <p class="hint">Sign in with the same account on every device. Your notes stay private to this account.</p>
       <label class="field"><span>Email</span><input type="email" id="authEmail" class="text-in" autocomplete="username" required></label>
       <label class="field"><span>Password</span><input type="password" id="authPass" class="text-in" autocomplete="current-password" minlength="6" required></label>
+      <button type="button" class="link-btn" id="authForgot">Forgot password?</button>
       <div class="dlg-actions"><button type="button" class="btn ghost" id="authSignup">Create account</button><button type="submit" class="btn primary">Sign in</button></div>
       <p class="hint" id="authMsg"></p>
+    </form>
+    <form id="resetForm" novalidate hidden>
+      <p class="hint">Inkwell emails you a link. Open it to choose a new password.</p>
+      <label class="field"><span>Email</span><input type="email" id="resetEmail" class="text-in" autocomplete="username" required></label>
+      <div class="dlg-actions"><button type="button" class="btn ghost" id="resetBack">Back</button><button type="submit" class="btn primary" id="resetSend">Send link</button></div>
+      <p class="hint" id="resetMsg"></p>
+      <div id="resetPaste" class="auth-sub" hidden>
+        <p class="hint">Tap the link in the email. If it opens a page that cannot load, copy that page's address (or the link itself) and paste it here.</p>
+        <label class="field"><span>Link from the email</span><input type="url" id="resetLink" class="text-in" placeholder="Paste the link here" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <div class="dlg-actions"><span></span><button type="button" class="btn primary" id="resetUse">Continue</button></div>
+        <p class="hint" id="resetLinkMsg"></p>
+      </div>
+    </form>
+    <form id="newPassForm" novalidate hidden>
+      <p class="hint" id="newPassHint">Choose a new password.</p>
+      <input type="email" id="newPassUser" autocomplete="username" tabindex="-1" aria-hidden="true" class="vh">
+      <label class="field"><span>New password</span><input type="password" id="newPass" class="text-in" autocomplete="new-password" minlength="6" required></label>
+      <div class="dlg-actions"><button type="button" class="btn ghost" id="newPassCancel">Cancel</button><button type="submit" class="btn primary">Save password</button></div>
+      <p class="hint" id="newPassMsg"></p>
     </form>
     <div id="signedIn" hidden>
       <p>Signed in as <b id="whoami"></b></p>
       <p class="hint" id="syncInfo"></p>
-      <div class="dlg-actions"><button class="btn ghost" id="signOut">Sign out</button><button class="btn primary" id="syncNow">Sync now</button></div>
+      <div class="dlg-actions"><span class="btn-pair"><button class="btn ghost" id="signOut">Sign out</button><button class="btn ghost" id="changePass">Change password</button></span><button class="btn primary" id="syncNow">Sync now</button></div>
     </div>
     <hr>
     <p class="set-h">Appearance</p>

@@ -517,7 +517,7 @@ function resize(){
 new ResizeObserver(resize).observe(stage);
 addEventListener('scroll', () => { SR = stage.getBoundingClientRect(); }, true);
 
-let rafId = 0, need = {bg: 0, ink: 0, over: 0};
+let rafId = 0, need = {bg: 0, ink: 0, over: 0}, frontZ = 1;
 function invalidate(bg = 1, ink = 1, over = 1){
   need.bg |= bg; need.ink |= ink; need.over |= over;
   if(!rafId) rafId = requestAnimationFrame(frame);
@@ -526,7 +526,11 @@ function frame(){
   rafId = 0;
   if(prefs.leftEdge && cur) clampLeft();
   const t = `translate(${cam.ox}px,${cam.oy}px) scale(${cam.z})`;
-  worldBack.style.transform = t; worldFront.style.transform = t;
+  worldBack.style.transform = t;
+  // Typed text, formulas and tape are scaled one by one instead of as one big layer: iPad Safari
+  // rasterises a big scaled layer at 1x and then stretches it, so text went blurry when zoomed in.
+  worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
+  if(cam.z !== frontZ){ frontZ = cam.z; for(const el of worldFront.children) frontXf(el); }
   $('zoomBtn').textContent = Math.round(cam.z * 100) + '%';
   if(need.bg) drawBg();
   if(need.ink) drawInk();
@@ -653,6 +657,11 @@ function htmlText(html){ const d = document.createElement('div'); d.innerHTML = 
 function prepTextEl(el){
   el.querySelectorAll('a.pl').forEach(a => { a.setAttribute('contenteditable', 'false'); a.classList.toggle('broken', !getDoc(a.dataset.page)); });
 }
+// place an element of the front layer: its left/top are world units, the camera zoom is applied here
+function frontXf(el){
+  const z = cam.z, x = parseFloat(el.style.left) || 0, y = parseFloat(el.style.top) || 0;
+  el.style.transform = z === 1 ? '' : `translate(${(z - 1) * x}px,${(z - 1) * y}px) scale(${z})`;
+}
 function itemEl(it){
   let el = elMap.get(it.id);
   const layer = it.t === 'i' ? worldBack : worldFront;
@@ -665,6 +674,7 @@ function itemEl(it){
   }
   el.style.left = it.x + 'px';
   el.style.top = it.y + 'px';
+  if(layer === worldFront) frontXf(el);
   if(it.t === 'i'){
     el.classList.add('it-img');
     el.classList.toggle('doc', !!it.doc);
@@ -2791,7 +2801,7 @@ async function goToMark(pid, g){
   const f = document.createElement('div');
   f.className = 'mark-flash';
   f.style.cssText = `left:${b[0] - 10}px;top:${b[1] - 10}px;width:${bw + 20}px;height:${bh + 20}px`;
-  worldFront.appendChild(f);
+  worldFront.appendChild(f); frontXf(f);
   setTimeout(() => f.remove(), 2200);
 }
 async function clearMark(e){
@@ -3318,7 +3328,7 @@ async function exportPdf(){
   for(const it of cur.items.values()){
     if(it.t !== 'x' && it.t !== 'm') continue;
     const el = elMap.get(it.id); if(!el) continue;
-    const c = el.cloneNode(true); c.removeAttribute('contenteditable');
+    const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.transform = '';
     if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
     const q = itemBox(it);
     tops.push({a: q[1], b: q[3], h: c.outerHTML});

@@ -174,6 +174,7 @@ async function assetURL(id){
    ===================================================================== */
 const Sync = {
   sb: null, user: null, fresh: null, signingOut: false, state: 'local', msg: '', running: false, again: false, timer: null, lastOk: 0,
+  chan: null, chanUser: null, liveOk: false, pingT: 0,
   configured(){ return !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY); },
   async init(){
     if(!this.configured()){ this.state = 'local'; setStatus(); return; }
@@ -196,6 +197,7 @@ const Sync = {
         if(ev === 'PASSWORD_RECOVERY') startRecovery();
         const was = this.user && this.user.id;
         this.user = session ? session.user : null;
+        if(!this.user || this.user.id !== was) this.unlisten();
         if(this.user && this.user.id !== was) this.run();
         setStatus(); renderSettings();
       });
@@ -208,16 +210,43 @@ const Sync = {
     setInterval(() => { if(document.visibilityState === 'visible') this.run(); }, 20000);
     addEventListener('online', () => this.run());
   },
-  soon(){ if(!this.sb || !this.user) return; clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 2500); },
+  soon(){ if(!this.sb || !this.user) return; clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), this.liveOk ? 1500 : 2500); },
+  // Instant sync: a device that uploaded changes says so on the account's realtime channel ("changed", no data);
+  // the other devices pull right away. Polling every 20 s stays as the fallback when the channel is down.
+  listen(){
+    if(!this.sb || !this.user || !this.sb.channel) return;
+    if(this.chan && this.chanUser === this.user.id) return;
+    this.unlisten();
+    this.chanUser = this.user.id;
+    try {
+      const ch = this.sb.channel('inkwell-' + this.user.id, {config: {broadcast: {self: false, ack: false}}});
+      ch.on('broadcast', {event: 'changed'}, () => this.ping());
+      ch.subscribe(st => {
+        const ok = st === 'SUBSCRIBED';
+        if(ok === this.liveOk) return;
+        this.liveOk = ok; renderSyncInfo();
+        if(ok) this.ping();   // catch up on anything missed while not connected
+      });
+      this.chan = ch;
+    } catch(e){ console.warn('live sync', e); this.chan = null; }
+  },
+  unlisten(){
+    if(this.chan){ try { this.sb.removeChannel(this.chan); } catch {} }
+    this.chan = null; this.chanUser = null; this.liveOk = false;
+  },
+  ping(){ clearTimeout(this.pingT); this.pingT = setTimeout(() => this.run(), 200); },
+  tell(){ if(this.chan && this.liveOk){ try { this.chan.send({type: 'broadcast', event: 'changed', payload: {}}); } catch(e){ console.warn('live sync send', e); } } },
   async run(){
-    if(!this.sb || !this.user){ setStatus(); return; }
+    if(!this.sb || !this.user){ this.unlisten(); setStatus(); return; }
+    this.listen();
     if(!navigator.onLine){ this.state = 'offline'; setStatus(); return; }
     if(this.running){ this.again = true; return; }
     this.running = true; this.state = 'syncing'; setStatus();
     try {
       await this.pull();
-      await this.push();
+      const sent = await this.push();
       await this.pushAssets();
+      if(sent) this.tell();
       this.state = 'synced'; this.msg = ''; this.lastOk = Date.now();
     } catch(e){
       console.warn('sync', e);
@@ -265,6 +294,7 @@ const Sync = {
       batch.push(d); size += s;
     }
     await flush();
+    return dirty.length;
   },
   async pushAssets(){
     let pend = (await IDB.get('meta', 'pendingAssets')) || [];
@@ -3599,7 +3629,7 @@ async function renderSettings(){
   if(!ready && Sync.configured()) $('setNoConfig').querySelector('p').textContent = Sync.msg ? 'Sync could not start: ' + Sync.msg + '.' : 'Starting sync…';
   if(Sync.user){
     $('whoami').textContent = Sync.user.email || 'your account';
-    $('syncInfo').textContent = Sync.state === 'warn' ? Sync.msg : Sync.lastOk ? 'Last synced ' + hhmm(Sync.lastOk) : 'Not synced yet';
+    renderSyncInfo();
   }
   try {
     const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
@@ -3624,7 +3654,12 @@ $('authSignup').addEventListener('click', async () => {
   msg.textContent = data.session ? '' : 'Account created. Open the confirmation email, then come back and sign in.';
   renderSettings();
 });
+function renderSyncInfo(){
+  const el = $('syncInfo'); if(!el || !Sync.user) return;
+  el.textContent = (Sync.state === 'warn' ? Sync.msg : Sync.lastOk ? 'Last synced ' + hhmm(Sync.lastOk) : 'Not synced yet') + (Sync.liveOk ? ' · instant sync on' : ' · checks every 20 s');
+}
 $('signOut').addEventListener('click', async () => {
+  Sync.unlisten();
   Sync.signingOut = true; Sync.fresh = null;
   try { await Sync.sb.auth.signOut(); } finally { Sync.signingOut = false; }
   Sync.user = null; setStatus(); renderSettings();

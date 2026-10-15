@@ -364,3 +364,48 @@ select.pf-ls option:checked{background:#9fbbe8}
 .trash-item .ti-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trash-item .btn{height:34px;padding:0 12px;font-size:13.5px}
 @media (max-width:700px){.set-row{flex-direction:column;align-items:stretch}.set-row .seg{min-width:0}}
+
+/* ---------- shapes & graphs ---------- */
+.shape-grid{display:grid;grid-template-columns:repeat(6,40px);gap:4px}
+.shape-grid button{width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--fg)}
+.shape-grid button:hover,.shape-grid button.on{background:var(--accent-soft);color:var(--accent)}
+.shape-grid svg{width:22px;height:22px}
+#graphOpen{display:flex;align-items:center;justify-content:center}
+.g-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.g-grid .text-in{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%}
+#gFn{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%;font-family:var(--f-mono)}
+#graphDlg .seg button.on{background:var(--paper);color:var(--fg)}
+.stage.picking{cursor:crosshair}
+
+/* ---------- Ask Claude ---------- */
+.ask-tb{color:var(--accent)}
+.ask{position:fixed;z-index:30;right:16px;bottom:calc(16px + var(--sab));width:min(430px,calc(100vw - 24px));max-height:min(72vh,680px);display:flex;flex-direction:column;background:var(--raise);border-radius:16px;box-shadow:var(--shadow),0 0 0 1px var(--line);overflow:hidden}
+.ask.min .ask-log,.ask.min .ask-foot{display:none}
+.ask-head{display:flex;align-items:center;gap:6px;padding:8px 8px 8px 14px;border-bottom:1px solid var(--line);touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
+.ask-title{display:flex;align-items:center;gap:6px;font-family:var(--f-display);font-weight:600;font-size:16px;margin-right:auto;color:var(--accent)}
+.ask-head .seg{flex:none;width:auto}
+.ask-head .seg button{padding:0 10px;height:28px;font-size:12.5px}
+.ask-head .icon-btn{width:32px;height:32px}
+.ask-log{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:12px;min-height:80px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.ask-empty{color:var(--muted);font-size:14px;line-height:1.5}
+.am{font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+.am.user{align-self:flex-end;max-width:88%;background:var(--accent-soft);padding:8px 12px;border-radius:14px 14px 4px 14px}
+.am.user img{display:block;max-width:100%;max-height:160px;border-radius:8px;margin-bottom:6px;background:#fff}
+.am.bot{align-self:stretch}
+.am.bot p{margin:0 0 .6em}.am.bot p:last-child{margin-bottom:0}
+.am.bot ul,.am.bot ol{margin:0 0 .6em;padding-left:1.3em}
+.am.bot h4{margin:.4em 0 .3em;font-size:15px}
+.am.bot code{font-family:var(--f-mono);font-size:13px;background:var(--desk);padding:1px 4px;border-radius:4px}
+.am.bot .katex-display{margin:.4em 0;overflow-x:auto;overflow-y:hidden}
+.am.err{color:var(--danger);font-size:14px}
+.am .typing{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--muted);animation:askdot 1s infinite alternate}
+@keyframes askdot{from{opacity:.25}to{opacity:1}}
+.ask-foot{display:flex;align-items:flex-end;gap:6px;padding:8px;border-top:1px solid var(--line)}
+.ask-foot textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--panel2);font-size:16px;line-height:1.35;max-height:120px;color:var(--fg)}
+.ask-foot .btn{height:38px}
+.ask-foot .icon-btn{width:38px;height:38px;color:var(--accent)}
+@media print{.ask{display:none!important}}
+/* toolbar labels only when the bar has room for them */
+.bar1{container-type:inline-size;container-name:bar1}
+@container bar1 (max-width: 980px){ .bar1 .tb .lbl{display:none} }
+@container bar1 (max-width: 560px){ .bar1 #continueBtn,.bar1 .sep{display:none} .bar1 .tb{min-width:32px;padding:0 3px} .bar1{gap:1px} }

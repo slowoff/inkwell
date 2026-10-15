@@ -56,6 +56,8 @@ const DEFAULT_PREFS = {
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
   theme: 'auto',   // 'auto' follows the iPad, or 'light' / 'dark'
   snapHold: 550,   // ms the pen must rest before a stroke is straightened; 0 = off
+  leftEdge: false, // true: the page stops at its left edge (endless only up, down and right)
+  askMode: 'tutor',
   focus: false, open: {}
 };
 const prefs = Object.assign({}, DEFAULT_PREFS, LSget('inkwell.prefs', {}));
@@ -507,6 +509,7 @@ function invalidate(bg = 1, ink = 1, over = 1){
 }
 function frame(){
   rafId = 0;
+  if(prefs.leftEdge && cur) clampLeft();
   const t = `translate(${cam.ox}px,${cam.oy}px) scale(${cam.z})`;
   worldBack.style.transform = t; worldFront.style.transform = t;
   $('zoomBtn').textContent = Math.round(cam.z * 100) + '%';
@@ -814,7 +817,7 @@ function redo(){
   setItems(op.a); cur.undo.push(op); clearSel(); updUndo();
 }
 function updUndo(){ $('undo').disabled = !cur || !cur.undo.length; $('redo').disabled = !cur || !cur.redo.length; }
-function changed(){ lastLocalEdit = Date.now(); invalidate(0, 1, 1); saveContentSoon(); refreshPaper(); }
+function changed(){ if(cur) cur.lx = undefined; lastLocalEdit = Date.now(); invalidate(0, 1, 1); saveContentSoon(); refreshPaper(); }
 
 async function saveContent(){
   if(!cur) return;
@@ -872,6 +875,7 @@ function onDown(e){
     touches.set(e.pointerId, {x: sx, y: sy, sx, sy, t: performance.now(), target: e.target});
     try { stage.setPointerCapture(e.pointerId); } catch {}
     if(touches.size === 1){
+      if(pick){ startTool(e, sx, sy, 0.55); if(act) act.touch = true; return; }
       if(prefs.ruler.on && onRuler(sx, sy)){ gesture = startRulerGesture(); return; }
       if(prefs.finger){ startTool(e, sx, sy, 0.55); if(act) act.touch = true; return; }
       gesture = {kind: 'pending', start: {...cam}};
@@ -1020,7 +1024,9 @@ function startTool(e, sx, sy, pr){
   const [wx, wy] = toWorld(sx, sy);
   const tool = prefs.tool;
   act = {tool, id: e.pointerId, sx, sy, moved: false, target: e.target, anchor: [sx, sy]};
-  if(tool === 'pen' || tool === 'hl'){
+  if(pick){
+    clearSel(); act.kind = 'pick'; act.w0 = [wx, wy]; act.w1 = null;
+  } else if(tool === 'pen' || tool === 'hl'){
     clearSel();
     act.kind = 'stroke';
     act.c = prefs[tool].c; act.w = tool === 'hl' ? hlWidth() : penWidth(); act.hl = tool === 'hl' ? 1 : 0;
@@ -1069,7 +1075,7 @@ function toolMove(e){
       if(Math.hypot(sx - act.anchor[0], sy - act.anchor[1]) > 3){ act.anchor = [sx, sy]; armHold(); }
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
     else if(act.kind === 'lasso'){ act.poly.push(sx, sy); }
-    else if(act.kind === 'tape' || act.kind === 'place'){ act.w1 = toWorld(sx, sy); }
+    else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){ act.w1 = toWorld(sx, sy); }
   }
   drawLiveSoon();
 }
@@ -1094,6 +1100,8 @@ function endTool(e){
     addItems([{t: 'tp', id: 'p' + newId(), x: Math.min(x0, x1), y: Math.min(y0, y1), w, h}]);
   } else if(a.kind === 'place'){
     placeAt(a);
+  } else if(a.kind === 'pick'){
+    finishPick(a);
   }
 }
 
@@ -1122,6 +1130,8 @@ function drawLive(){
     liveCtx.globalAlpha = 0.6; liveCtx.fillStyle = tokens.tape;
     liveCtx.fillRect(Math.min(act.w0[0], act.w1[0]), Math.min(act.w0[1], act.w1[1]), Math.abs(act.w1[0] - act.w0[0]), Math.abs(act.w1[1] - act.w0[1]));
     liveCtx.globalAlpha = 1;
+  } else if(act.kind === 'pick' && act.w1){
+    drawPickPreview(act);
   } else if(act.kind === 'erase' && act.cursor){
     liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     liveCtx.beginPath(); liveCtx.arc(act.cursor[0], act.cursor[1], eraserRadius(), 0, Math.PI * 2);
@@ -2456,9 +2466,9 @@ function openPop(id, anchor){
   p.style.left = x + 'px'; p.style.top = y + 'px';
 }
 function closePop(id){ $(id).hidden = true; }
-function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop']) $(id).hidden = true; }
+function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop']) $(id).hidden = true; }
 document.addEventListener('pointerdown', e => {
-  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,[data-act="tcolor"]')) return;
+  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,[data-act="tcolor"]')) return;
   closePops();
 }, true);
 function showModal(id){ closePops(); $(id).hidden = false; }
@@ -2523,7 +2533,7 @@ $('importFile').addEventListener('change', async () => {
   const f = $('importFile').files[0]; if(!f) return;
   $('importPick').hidden = true; $('importSetup').hidden = false; $('impStatus').textContent = 'Reading file';
   try { await loadImport(f); $('impStatus').textContent = ''; }
-  catch(e){ console.warn(e); $('impStatus').textContent = 'This file could not be opened. ' + (e && e.name === 'PasswordException' ? 'It is password protected.' : 'Try saving it as PDF again.'); $('impGo').disabled = true; }
+  catch(e){ console.warn(e); $('impStatus').textContent = e && e.name === 'OldWord' ? 'This is an old Word file (.doc). Open it in Word and save it as .docx or PDF, then import that.' : 'This file could not be opened. ' + (e && e.name === 'PasswordException' ? 'It is password protected.' : /\.docx$/i.test(f.name) ? (e && /load/i.test(e.message) ? e.message : 'Try saving it again in Word, or as PDF.') : 'Try saving it as PDF again.'); $('impGo').disabled = true; }
 });
 // Reads a PDF page's fillable fields. Returns {f: fields for the item, blank: [[annotationId, emptyValue]]}.
 async function pdfFields(page){
@@ -2596,6 +2606,15 @@ async function loadImport(f){
     $('impCount').textContent = `(${pdf.numPages} page${pdf.numPages === 1 ? '' : 's'})`;
     for(let i = 1; i <= Math.min(5, pdf.numPages); i++){ const r = await renderPdfPage(pdf, i, 120); prev.appendChild(r.canvas); }
     if(pdf.numPages > 5){ const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ ${pdf.numPages - 5} more`; prev.appendChild(m); }
+  } else if(/\.docx$/i.test(f.name) || f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'){
+    const pages = await renderDocx(f, t => { $('impStatus').textContent = t; });
+    imp = {kind: 'docx', pages, n: pages.length, name: f.name.replace(/\.docx$/i, '').trim()};
+    $('impPagesWrap').hidden = false; $('impPages').value = '';
+    $('impCount').textContent = `(${pages.length} page${pages.length === 1 ? '' : 's'})`;
+    for(const pg of pages.slice(0, 5)){ const t = document.createElement('canvas'), k = 120 / pg.canvas.width; t.width = 120; t.height = Math.round(pg.canvas.height * k); t.getContext('2d').drawImage(pg.canvas, 0, 0, t.width, t.height); prev.appendChild(t); }
+    if(pages.length > 5){ const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ ${pages.length - 5} more`; prev.appendChild(m); }
+  } else if(/\.doc$/i.test(f.name) || f.type === 'application/msword'){
+    throw Object.assign(new Error('old Word'), {name: 'OldWord'});
   } else if(f.type.startsWith('image/') || /\.(jpe?g|png|heic|webp|gif)$/i.test(f.name)){
     const url = URL.createObjectURL(f);
     const img = new Image(); img.src = url;
@@ -2628,7 +2647,7 @@ $('impGo').addEventListener('click', async () => {
   // place below everything already on the page, then scroll there
   const cb = contentBox();
   // empty, untitled page + PDF: the page takes the PDF's file name
-  const pageDoc = getDoc(cur.id), nameAfterPdf = imp.kind === 'pdf' && !cb && !!imp.name && !!pageDoc && !(pageDoc.data.title || '').trim() && !$('title').value.trim();
+  const pageDoc = getDoc(cur.id), nameAfterPdf = (imp.kind === 'pdf' || imp.kind === 'docx') && !cb && !!imp.name && !!pageDoc && !(pageDoc.data.title || '').trim() && !$('title').value.trim();
   const [vx, vy] = toWorld(W > 600 ? 48 : 16, 24);
   const x0 = cb ? cb[0] : vx, y0 = cb ? cb[3] + 48 : vy;
   let y = y0, nFields = 0; const items = [];
@@ -2648,6 +2667,17 @@ $('impGo').addEventListener('click', async () => {
         const item = {t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a, doc: 1};
         if(pf.f.length){ item.f = pf.f; nFields += pf.f.length; }
         items.push(item);
+        y += hWorld + 24;
+      }
+    } else if(imp.kind === 'docx'){
+      const pages = parsePages($('impPages').value, imp.n);
+      if(!pages.length){ $('impStatus').textContent = 'No pages match that range.'; go.disabled = false; return; }
+      for(let k = 0; k < pages.length; k++){
+        $('impStatus').textContent = `Printing page ${k + 1} of ${pages.length}`;
+        const pg = imp.pages[pages[k] - 1];
+        const wWorld = pg.w / A4W * A4W * size, hWorld = wWorld * pg.h / pg.w;
+        const a = await saveAsset(await canvasBlob(pg.canvas));
+        items.push({t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a, doc: 1});
         y += hWorld + 24;
       }
     } else {
@@ -2801,11 +2831,17 @@ function renderPrefSettings(){
   $('setTheme').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.theme || 'auto')));
   const hold = +prefs.snapHold || 0;
   $('setHold').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === hold));
+  $('setLeft').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === (prefs.leftEdge ? 1 : 0)));
+  $('setLeftHint').textContent = prefs.leftEdge ? 'Pages stop at the left edge and only grow up, down and to the right.' : 'Pages go on forever in every direction.';
   $('setHoldHint').textContent = hold ? `Hold the pen still for ${(hold / 1000).toFixed(2).replace(/0$/, '')} s at the end of a stroke to turn it into a straight line or shape.` : 'Strokes are never straightened.';
 }
 $('setTheme').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
   prefs.theme = b.dataset.v; savePrefs(); setThemeAttr(); themeChanged(); renderPrefSettings();
+});
+$('setLeft').addEventListener('click', e => {
+  const b = e.target.closest('button[data-v]'); if(!b) return;
+  prefs.leftEdge = b.dataset.v === '1'; savePrefs(); renderPrefSettings(); invalidate();
 });
 $('setHold').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
@@ -2996,6 +3032,577 @@ $('restoreFile').addEventListener('change', async () => {
 });
 
 /* =====================================================================
+   Page edge on the left (Settings -> Left side of the page)
+   ===================================================================== */
+function clampLeft(){
+  if(cur.lx === undefined){ const b = contentBox(); cur.lx = b ? Math.min(0, b[0]) : 0; }
+  const max = (W > 900 ? 56 : 20) - cur.lx * cam.z;
+  if(cam.ox > max) cam.ox = max;
+}
+
+/* =====================================================================
+   Box picking: draw a box on the page to place a shape or scan a question
+   ===================================================================== */
+let pick = null;   // {kind: 'shape', shape} | {kind: 'scan'}
+function startPick(p, msg){ if(!cur){ toast('Open a page first'); return; } clearSel(); pick = p; stage.classList.add('picking'); if(msg) toast(msg); }
+function endPick(){ pick = null; stage.classList.remove('picking'); }
+function pickBox(a){
+  const [x0, y0] = a.w0, [x1, y1] = a.w1 || a.w0;
+  return {x0, y0, x1, y1, tap: Math.abs(x1 - x0) * cam.z < 10 && Math.abs(y1 - y0) * cam.z < 10};
+}
+function finishPick(a){
+  const p = pick; endPick();
+  if(!p) return;
+  const b = pickBox(a);
+  if(p.kind === 'shape') insertShape(p.shape, b);
+  else if(p.kind === 'scan'){
+    if(b.tap){ toast('Drag a box around the question'); startPick(p); return; }
+    Ask.scan(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.max(b.x0, b.x1), Math.max(b.y0, b.y1));
+  }
+}
+function drawPickPreview(a){
+  liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
+  if(pick && pick.kind === 'shape'){
+    const b = pickBox(a);
+    liveCtx.fillStyle = inkColor(prefs.pen.c, false, false);
+    for(const it of shapeItems(pick.shape, b)) liveCtx.fill(strokePath(it, false));
+  } else {
+    const x = Math.min(a.w0[0], a.w1[0]), y = Math.min(a.w0[1], a.w1[1]), w = Math.abs(a.w1[0] - a.w0[0]), h = Math.abs(a.w1[1] - a.w0[1]);
+    liveCtx.globalAlpha = 0.08; liveCtx.fillStyle = tokens.accent; liveCtx.fillRect(x, y, w, h); liveCtx.globalAlpha = 1;
+    liveCtx.setLineDash([6 / cam.z, 5 / cam.z]); liveCtx.lineWidth = 1.5 / cam.z; liveCtx.strokeStyle = tokens.accent; liveCtx.strokeRect(x, y, w, h); liveCtx.setLineDash([]);
+  }
+}
+
+/* =====================================================================
+   Shapes (inserted as ink strokes, so lasso, recolour, eraser and sync all just work)
+   ===================================================================== */
+function polyPts(V, closed, step = 2.5){
+  const out = [], pts = closed ? V.concat([V[0]]) : V;
+  for(let i = 0; i < pts.length - 1; i++){
+    const a = pts[i], b = pts[i + 1], n = Math.max(1, Math.ceil(dist(a, b) / step));
+    for(let k = 0; k < n; k++) out.push(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n, 0.55);
+  }
+  const l = pts[pts.length - 1]; out.push(l[0], l[1], 0.55);
+  return out;
+}
+function arrowHead(from, tip, size){
+  const ang = Math.atan2(tip[1] - from[1], tip[0] - from[0]), s = 0.45;
+  return [[tip[0] - size * Math.cos(ang - s), tip[1] - size * Math.sin(ang - s)], tip, [tip[0] - size * Math.cos(ang + s), tip[1] - size * Math.sin(ang + s)]];
+}
+const LINE_SHAPES = ['line', 'arrow', 'darrow', 'spring', 'dline'];
+// Returns the polylines of a shape: [[points, closed], ...]
+function shapePolys(shape, b, w){
+  let {x0, y0, x1, y1} = b;
+  const line = LINE_SHAPES.includes(shape);
+  if(b.tap){
+    const d = 120 / cam.z;
+    if(line){ x0 -= d / 2; x1 = x0 + d; y1 = y0; } else { x0 -= d / 2; y0 -= d / 2; x1 = x0 + d; y1 = y0 + d * (shape === 'rect' ? 0.66 : 1); }
+  }
+  if(line){
+    // snap the angle to 15° steps when close
+    let len = Math.hypot(x1 - x0, y1 - y0), ang = Math.atan2(y1 - y0, x1 - x0);
+    const sn = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
+    if(Math.abs(sn - ang) < 0.06){ ang = sn; x1 = x0 + len * Math.cos(ang); y1 = y0 + len * Math.sin(ang); }
+    const p0 = [x0, y0], p1 = [x1, y1], hs = clamp(Math.max(10, w * 5), 0, len * 0.45);
+    if(shape === 'line') return [[[p0, p1], false]];
+    if(shape === 'arrow') return [[[p0, p1], false], [arrowHead(p0, p1, hs), false]];
+    if(shape === 'darrow') return [[[p0, p1], false], [arrowHead(p0, p1, hs), false], [arrowHead(p1, p0, hs), false]];
+    if(shape === 'dline'){
+      const out = [], dash = Math.max(6, w * 4), gap = dash * 0.7;
+      for(let t = 0; t < len; t += dash + gap){ const e = Math.min(len, t + dash); out.push([[[x0 + Math.cos(ang) * t, y0 + Math.sin(ang) * t], [x0 + Math.cos(ang) * e, y0 + Math.sin(ang) * e]], false]); }
+      return out;
+    }
+    // spring: straight ends, zigzag middle
+    const ux = Math.cos(ang), uy = Math.sin(ang), nx = -uy, ny = ux, amp = clamp(len * 0.07, 5, 18), lead = len * 0.12, coils = Math.max(4, Math.round((len - 2 * lead) / (amp * 1.1)));
+    const P = [p0, [x0 + ux * lead, y0 + uy * lead]];
+    for(let i = 0; i < coils; i++){ const t = lead + (len - 2 * lead) * (i + 0.5) / coils, sgn = i % 2 ? -1 : 1; P.push([x0 + ux * t + nx * amp * sgn, y0 + uy * t + ny * amp * sgn]); }
+    P.push([x1 - ux * lead, y1 - uy * lead], p1);
+    return [[P, false]];
+  }
+  let L = Math.min(x0, x1), T = Math.min(y0, y1), R = Math.max(x0, x1), B = Math.max(y0, y1);
+  let bw = R - L, bh = B - T;
+  if(Math.abs(bw - bh) < 0.08 * Math.max(bw, bh)){ const m = Math.max(bw, bh); bw = bh = m; if(x1 < x0) L = R - m; else R = L + m; if(y1 < y0) T = B - m; else B = T + m; }
+  const cx = (L + R) / 2, cy = (T + B) / 2;
+  if(shape === 'rect') return [[[[L, T], [R, T], [R, B], [L, B]], true]];
+  if(shape === 'ellipse'){ const V = []; for(let i = 0; i < 96; i++){ const t = i / 96 * Math.PI * 2; V.push([cx + bw / 2 * Math.cos(t), cy + bh / 2 * Math.sin(t)]); } return [[V, true]]; }
+  if(shape === 'triangle') return [[[[cx, T], [R, B], [L, B]], true]];
+  if(shape === 'rtri') return [[[[L, T], [L, B], [R, B]], true]];
+  if(shape === 'diamond') return [[[[cx, T], [R, cy], [cx, B], [L, cy]], true]];
+  if(shape === 'hexagon') return [[[[L + bw * 0.25, T], [R - bw * 0.25, T], [R, cy], [R - bw * 0.25, B], [L + bw * 0.25, B], [L, cy]], true]];
+  if(shape === 'star'){
+    const V = [];
+    for(let i = 0; i < 10; i++){ const r = i % 2 ? 0.4 : 1, t = -Math.PI / 2 + i * Math.PI / 5; V.push([cx + bw / 2 * r * Math.cos(t), cy + bh / 2 * r * Math.sin(t) + bh * 0.05]); }
+    return [[V, true]];
+  }
+  return [];
+}
+function shapeItems(shape, b){
+  const w = penWidth();
+  return shapePolys(shape, b, w).map(([V, closed]) => ({t: 's', id: 's' + newId(), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}));
+}
+function insertShape(shape, b){
+  const items = shapeItems(shape, b);
+  if(!items.length) return;
+  addItems(items);
+  setTool('lasso'); selectIds(items.map(it => it.id));
+}
+$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } openPop('shapePop', e.currentTarget); });
+$('shapeGrid').addEventListener('click', e => {
+  const b = e.target.closest('button[data-shape]'); if(!b) return;
+  closePops();
+  startPick({kind: 'shape', shape: b.dataset.shape}, 'Drag on the page to draw the ' + (b.title || 'shape').toLowerCase());
+});
+
+/* =====================================================================
+   Graphs: axes with ticks, numbers, grid and an optional plotted function
+   ===================================================================== */
+// Small safe formula parser for y = f(x): numbers, x (or t), + - * / ^, brackets, implicit multiplication,
+// sin cos tan asin acos atan sqrt abs exp ln log, pi, e
+function parseFn(src){
+  const s = String(src || '').replace(/^\s*[yf]\s*(\(\s*[xt]\s*\))?\s*=/i, '').replace(/·|×/g, '*').replace(/−/g, '-').replace(/,/g, '.').trim();
+  if(!s) return null;
+  const toks = []; let i = 0;
+  while(i < s.length){
+    const c = s[i];
+    if(/\s/.test(c)){ i++; continue; }
+    const num = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(s.slice(i));
+    if(num && !(num[2] && /^e[a-z]/i.test(s.slice(i + num[1].length)))){ toks.push({t: 'n', v: parseFloat(num[0])}); i += num[0].length; continue; }
+    const id = /^[a-z]+/i.exec(s.slice(i));
+    if(id){ toks.push({t: 'i', v: id[0].toLowerCase()}); i += id[0].length; continue; }
+    if('+-*/^()'.includes(c)){ toks.push({t: c}); i++; continue; }
+    throw new Error('Unknown sign "' + c + '"');
+  }
+  const F = {sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan, sqrt: Math.sqrt, abs: Math.abs, exp: Math.exp, ln: Math.log, log: Math.log10};
+  let p = 0;
+  const peek = () => toks[p], next = () => toks[p++];
+  const startsPrimary = t => t && (t.t === 'n' || t.t === 'i' || t.t === '(');
+  function expr(){ let a = term(); while(peek() && (peek().t === '+' || peek().t === '-')){ const op = next().t, l = a, r = term(); a = op === '+' ? x => l(x) + r(x) : x => l(x) - r(x); } return a; }
+  function term(){
+    let a = unary();
+    for(;;){
+      const t = peek();
+      if(t && (t.t === '*' || t.t === '/')){ next(); const l = a, r = unary(); a = t.t === '*' ? x => l(x) * r(x) : x => l(x) / r(x); }
+      else if(startsPrimary(t)){ const l = a, r = power(); a = x => l(x) * r(x); }
+      else return a;
+    }
+  }
+  function unary(){ const t = peek(); if(t && (t.t === '-' || t.t === '+')){ next(); const a = unary(); return t.t === '-' ? x => -a(x) : a; } return power(); }
+  function power(){ const b = primary(); if(peek() && peek().t === '^'){ next(); const e = unary(); return x => Math.pow(b(x), e(x)); } return b; }
+  function primary(){
+    const t = next();
+    if(!t) throw new Error('The formula ends too early');
+    if(t.t === 'n'){ const v = t.v; return () => v; }
+    if(t.t === '('){ const a = expr(); if(!peek() || next().t !== ')') throw new Error('A bracket is not closed'); return a; }
+    if(t.t === 'i'){
+      if(t.v === 'x' || t.v === 't') return x => x;
+      if(t.v === 'pi') return () => Math.PI;
+      if(t.v === 'e') return () => Math.E;
+      if(F[t.v]){
+        const f = F[t.v];
+        if(peek() && peek().t === '('){ next(); const a = expr(); if(!peek() || next().t !== ')') throw new Error('A bracket is not closed'); return x => f(a(x)); }
+        const a = power(); return x => f(a(x));
+      }
+      throw new Error('Unknown name "' + t.v + '"');
+    }
+    throw new Error('Unexpected "' + t.t + '"');
+  }
+  const f = expr();
+  if(p < toks.length) throw new Error('Unexpected "' + (toks[p].v ?? toks[p].t) + '"');
+  return f;
+}
+function labelTex(s){
+  s = String(s || '').trim();
+  if(!s) return '';
+  if(/[\\^_{}]/.test(s) || /^[a-zA-Z](\s*\(\s*[a-zA-Z]\s*\))?$/.test(s)) return s;
+  // "v in m/s" -> italic variable + upright rest
+  const m = /^([a-zA-Z])(\s+.*|\s*[\[(].*)$/.exec(s);
+  const txt = t => '\\text{' + t.replace(/[\\{}$&#%~^_]/g, '') + '}';
+  return m ? m[1] + '\\ ' + txt(m[2].trim()) : txt(s);
+}
+const fmtNum = v => { const r = Math.round(v * 1e6) / 1e6; return String(r).replace('-', '-'); };
+function buildGraph(o, gx, gy){
+  const items = [], w = penWidth(), axisC = 'auto', id = p => p + newId() + Math.random().toString(36).slice(2, 5);
+  const stroke = (V, c = axisC, ww = w) => items.push({t: 's', id: id('s'), c, w: ww, hl: 0, p: polyPts(V, false)});
+  const formula = (tex, x, y, fs) => { if(tex) items.push({t: 'm', id: id('m'), x, y, tex, fs, c: 'auto'}); };
+  const hs = Math.max(10, w * 5);
+  if(o.type === '3d'){
+    const Ox = gx + 120, Oy = gy + 200, L = 210;
+    const ends = {y: [Ox + L, Oy], z: [Ox, Oy - L], x: [Ox - L * 0.55, Oy + L * 0.55]};
+    for(const k of ['x', 'y', 'z']){
+      const e = ends[k];
+      stroke([[Ox, Oy], e]); stroke(arrowHead([Ox, Oy], e, hs));
+      for(let i = 1; i <= 4; i++){
+        const t = i / 5, px = Ox + (e[0] - Ox) * t, py = Oy + (e[1] - Oy) * t;
+        if(k === 'z') stroke([[px - 4, py], [px + 4, py]]); else stroke([[px, py - 4], [px, py + 4]]);
+      }
+    }
+    formula(labelTex(o.ly), ends.y[0] + 6, ends.y[1] + 4, 18);
+    formula(labelTex(o.lz), ends.z[0] + 10, ends.z[1] - 6, 18);
+    formula(labelTex(o.lx), ends.x[0] - 26, ends.x[1] - 6, 18);
+    return items;
+  }
+  const GW = 380, GH = 270;
+  let {x0, x1, xs, y0, y1, ys} = o;
+  const X = v => gx + (v - x0) / (x1 - x0) * GW, Y = v => gy + GH - (v - y0) / (y1 - y0) * GH;
+  const ax = X(clamp(0, x0, x1)), ay = Y(clamp(0, y0, y1));
+  const ticks = (a, b, st) => { const out = []; if(!(st > 0)) return out; const n0 = Math.ceil(a / st - 1e-9), n1 = Math.floor(b / st + 1e-9); if(n1 - n0 > 200) return out; for(let n = n0; n <= n1; n++) out.push(n * st); return out; };
+  const tx = ticks(x0, x1, xs), ty = ticks(y0, y1, ys);
+  if(o.grid){
+    for(const v of tx) if(Math.abs(X(v) - ax) > 0.5) stroke([[X(v), Y(y0)], [X(v), Y(y1)]], '#8A97A4', w * 0.45);
+    for(const v of ty) if(Math.abs(Y(v) - ay) > 0.5) stroke([[X(x0), Y(v)], [X(x1), Y(v)]], '#8A97A4', w * 0.45);
+  }
+  const xe = [X(x1) + 22, ay], ye = [ax, Y(y1) - 22];
+  stroke([[X(x0), ay], xe]); stroke(arrowHead([X(x0), ay], xe, hs));
+  stroke([[ax, Y(y0)], ye]); stroke(arrowHead([ax, Y(y0)], ye, hs));
+  const every = arr => Math.max(1, Math.ceil(arr.length / 12));
+  const ex = every(tx), ey = every(ty);
+  tx.forEach((v, i) => {
+    if(Math.abs(X(v) - ax) < 0.5) return;
+    stroke([[X(v), ay - 4], [X(v), ay + 4]]);
+    if(o.nums && i % ex === 0){ const t = fmtNum(v); formula(t, X(v) - t.length * 3.6, ay + 7, 12); }
+  });
+  ty.forEach((v, i) => {
+    if(Math.abs(Y(v) - ay) < 0.5) return;
+    stroke([[ax - 4, Y(v)], [ax + 4, Y(v)]]);
+    if(o.nums && i % ey === 0){ const t = fmtNum(v); formula(t, ax - 10 - t.length * 7.2, Y(v) - 9, 12); }
+  });
+  if(o.nums && x0 <= 0 && x1 >= 0 && y0 <= 0 && y1 >= 0) formula('0', ax - 14, ay + 5, 12);
+  formula(labelTex(o.lx), xe[0] - 4, ay + 10, 18);
+  formula(labelTex(o.ly), ax + 10, ye[1] - 8, 18);
+  if(o.fn){
+    const N = 600, segs = []; let seg = [];
+    for(let i = 0; i <= N; i++){
+      const xv = x0 + (x1 - x0) * i / N, yv = o.fn(xv);
+      if(isFinite(yv) && yv >= y0 - (y1 - y0) * 1e-3 && yv <= y1 + (y1 - y0) * 1e-3) seg.push([X(xv), Y(clamp(yv, y0, y1))]);
+      else { if(seg.length > 1) segs.push(seg); seg = []; }
+    }
+    if(seg.length > 1) segs.push(seg);
+    for(const sg of segs){
+      // thin out points that lie on a straight line
+      const V = rdp(sg, 0.25);
+      items.push({t: 's', id: id('s'), c: '#1F4FCF', w: w * 1.15, hl: 0, p: polyPts(V, false)});
+    }
+  }
+  return items;
+}
+const GRAPH_DEFAULTS = {q1: {x0: 0, x1: 10, xs: 1, y0: 0, y1: 10, ys: 1}, q4: {x0: -5, x1: 5, xs: 1, y0: -5, y1: 5, ys: 1}};
+let graphType = 'q1';
+function setGraphType(t){
+  graphType = t;
+  $('gType').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === t));
+  document.querySelectorAll('#graphDlg .g2d').forEach(el => el.hidden = t === '3d');
+  document.querySelectorAll('#graphDlg .g3').forEach(el => el.hidden = t !== '3d');
+  const d = GRAPH_DEFAULTS[t];
+  if(d) for(const [k, v] of Object.entries({gX0: d.x0, gX1: d.x1, gXs: d.xs, gY0: d.y0, gY1: d.y1, gYs: d.ys})) $(k).value = v;
+}
+$('graphOpen').addEventListener('click', () => {
+  closePops();
+  if(!$('gLx').value) $('gLx').value = 'x';
+  if(!$('gLy').value) $('gLy').value = 'y';
+  if(!$('gLz').value) $('gLz').value = 'z';
+  if(!$('gX1').value){ $('gNums').checked = true; setGraphType('q1'); }
+  $('gFnMsg').textContent = '';
+  showModal('graphDlg');
+});
+$('gType').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b) setGraphType(b.dataset.v); });
+$('gFn').addEventListener('input', () => {
+  try { parseFn($('gFn').value); $('gFnMsg').textContent = ''; } catch(err){ $('gFnMsg').textContent = err.message; }
+});
+$('gInsert').addEventListener('click', () => {
+  if(!cur) return;
+  const num = id => { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) ? v : NaN; };
+  const o = {type: graphType, lx: $('gLx').value, ly: $('gLy').value, lz: $('gLz').value, nums: $('gNums').checked, grid: $('gGrid').checked};
+  if(graphType !== '3d'){
+    Object.assign(o, {x0: num('gX0'), x1: num('gX1'), xs: Math.abs(num('gXs')), y0: num('gY0'), y1: num('gY1'), ys: Math.abs(num('gYs'))});
+    if(!(o.x1 > o.x0) || !(o.y1 > o.y0)){ $('gFnMsg').textContent = 'Each "to" must be bigger than its "from".'; return; }
+    try { o.fn = parseFn($('gFn').value); } catch(err){ $('gFnMsg').textContent = err.message; return; }
+  }
+  const [gx, gy] = toWorld(Math.max(40, W / 2 - 240 * cam.z), Math.max(40, H / 2 - 170 * cam.z));
+  const items = buildGraph(o, gx, gy);
+  hideModal('graphDlg');
+  addItems(items);
+  setTool('lasso'); setTimeout(() => selectIds(items.map(it => it.id)), 60);
+});
+
+/* =====================================================================
+   Word documents: rendered to page images, like a PDF
+   ===================================================================== */
+function loadScript(src){
+  return new Promise((res, rej) => {
+    if(document.querySelector(`script[data-src="${src}"]`)) return res();
+    const s = document.createElement('script'); s.src = src; s.dataset.src = src;
+    s.onload = () => res(); s.onerror = () => rej(new Error('Could not load ' + src + ' (offline?)'));
+    document.head.appendChild(s);
+  });
+}
+async function wordLibs(){
+  if(!window.JSZip) await loadScript('lib/docx/jszip.min.js');
+  if(!window.docx || !window.docx.renderAsync) await loadScript('lib/docx/docx-preview.min.js');
+  if(!window.html2canvas) await loadScript('lib/docx/html2canvas.min.js');
+}
+// Renders every page of a .docx to a canvas (about 2 px per CSS px). Long sections without page breaks are
+// cut into page-sized pieces at blank rows between lines of text.
+async function renderDocx(file, onStatus){
+  await wordLibs();
+  const box = document.createElement('div');
+  box.className = 'docx-render';
+  box.style.cssText = 'position:absolute;left:0;top:0;z-index:-5;background:#fff;color:#000;color-scheme:light;width:max-content;pointer-events:none';
+  document.body.appendChild(box);
+  try {
+    await window.docx.renderAsync(await file.arrayBuffer(), box, box, {inWrapper: false, breakPages: true, ignoreLastRenderedPageBreak: false, ignoreWidth: false, ignoreHeight: false, renderHeaders: true, renderFooters: true, renderFootnotes: true, useBase64URL: true, experimental: true});
+    if(document.fonts && document.fonts.ready) await document.fonts.ready;
+    await new Promise(r => setTimeout(r, 60));
+    const sections = [...box.querySelectorAll('section.docx')];
+    if(!sections.length) throw new Error('No pages found in this Word file');
+    const pages = [], scale = 2;
+    for(let si = 0; si < sections.length; si++){
+      const sec = sections[si];
+      // only this section in the layout, so it sits at the top of the document while it is captured
+      sections.forEach(o => { o.style.display = o === sec ? '' : 'none'; });
+      const cs = getComputedStyle(sec);
+      const pw = sec.offsetWidth, padT = parseFloat(cs.paddingTop) || 0, padB = parseFloat(cs.paddingBottom) || 0;
+      const ph = Math.max(parseFloat(cs.minHeight) || 0, 100) || pw * 1.414;
+      const total = sec.scrollHeight, r = sec.getBoundingClientRect(), top = r.top + scrollY, left = r.left + scrollX;
+      let srcY = 0, first = true;
+      while(srcY < total - padB - 2 || first){
+        onStatus && onStatus(`Reading page ${pages.length + 1}`);
+        const avail = Math.max(50, first ? ph - padB : ph - padT - padB);
+        const take = Math.min(avail, total - srcY);
+        const cv = await html2canvas(sec, {scale, backgroundColor: '#ffffff', logging: false, useCORS: true,
+          x: left, y: top + srcY, width: pw, height: take, scrollX: 0, scrollY: 0, windowWidth: Math.max(pw + 40, innerWidth),
+          ignoreElements: el => el !== document.body && el !== document.documentElement && el.tagName !== 'HEAD' && !box.contains(el) && !el.contains(box)});
+        let cut = take;
+        if(srcY + take < total - padB - 2){
+          // find a blank row in the lowest quarter so no line of text is cut in half
+          const ctx = cv.getContext('2d'), y0 = Math.floor(cv.height * 0.72), data = ctx.getImageData(0, y0, cv.width, cv.height - y0).data, rowW = cv.width * 4;
+          for(let y = cv.height - y0 - 1; y >= 0; y--){
+            let blank = true;
+            for(let x = 0; x < rowW; x += 16){ if(data[y * rowW + x] < 235 || data[y * rowW + x + 1] < 235 || data[y * rowW + x + 2] < 235){ blank = false; break; } }
+            if(blank){ cut = (y0 + y) / scale; break; }
+          }
+        }
+        const page = document.createElement('canvas');
+        page.width = Math.round(pw * scale); page.height = Math.round(ph * scale);
+        const pc = page.getContext('2d');
+        pc.fillStyle = '#fff'; pc.fillRect(0, 0, page.width, page.height);
+        pc.drawImage(cv, 0, 0, cv.width, Math.round(cut * scale), 0, Math.round((first ? 0 : padT) * scale), cv.width, Math.round(cut * scale));
+        cv.width = cv.height = 1;
+        pages.push({canvas: page, w: pw, h: ph});
+        srcY += Math.max(cut, 20); first = false;
+        if(pages.length > 300) break;
+      }
+    }
+    return pages;
+  } finally { box.remove(); }
+}
+
+/* =====================================================================
+   Ask Claude: scan a question (or just type) and get help in a floating window
+   ===================================================================== */
+const Ask = {
+  msgs: [],        // API messages for this chat
+  busy: false,
+  ctrl: null,
+  open(){
+    const p = $('askPanel');
+    p.hidden = false; p.classList.remove('min');
+    const pos = LSget('inkwell.askPos', null);
+    if(pos){ p.style.left = clamp(pos.x, 4, innerWidth - 120) + 'px'; p.style.top = clamp(pos.y, 4, innerHeight - 60) + 'px'; p.style.right = 'auto'; p.style.bottom = 'auto'; }
+    this.renderMode();
+    if(!this.msgs.length) this.empty();
+  },
+  close(){ $('askPanel').hidden = true; if(this.ctrl) this.ctrl.abort(); },
+  empty(){
+    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.</div>`;
+  },
+  renderMode(){ $('askMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askMode || 'tutor'))); },
+  reset(){ if(this.ctrl) this.ctrl.abort(); this.msgs = []; this.busy = false; this.empty(); $('askSend').disabled = false; },
+  bubble(cls, html){
+    const log = $('askLog');
+    const em = log.querySelector('.ask-empty'); if(em) em.remove();
+    const d = document.createElement('div'); d.className = 'am ' + cls; d.innerHTML = html;
+    log.appendChild(d); log.scrollTop = log.scrollHeight;
+    return d;
+  },
+  // what is typed on the open page (text boxes, formulas, form fields), top to bottom
+  pageText(box){
+    if(!cur) return '';
+    const parts = [];
+    for(const it of cur.items.values()){
+      if(box){ const b = itemBox(it); if(b[2] < box[0] || b[0] > box[2] || b[3] < box[1] || b[1] > box[3]) continue; }
+      let t = '';
+      if(it.t === 'x') t = htmlText(it.html);
+      else if(it.t === 'm') t = '$' + it.tex + '$';
+      else if(it.t === 'i' && it.f) t = fieldText(it).trim();
+      if(t) parts.push([it.y, it.x, t]);
+    }
+    parts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    return parts.map(p => p[2]).join('\n').slice(0, 8000);
+  },
+  async capture(x0, y0, x1, y1){
+    const pad = 6; x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    const w = x1 - x0, h = y1 - y0, s = clamp(1500 / Math.max(w, h), 0.2, 3);
+    const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.setTransform(s, 0, 0, s, -x0 * s, -y0 * s);
+    const inBox = it => { const b = itemBox(it); return !(b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1); };
+    const all = [...cur.items.values()].filter(inBox);
+    for(const it of all.filter(i => i.t === 'i')){
+      try {
+        const img = new Image(); img.src = await assetURL(it.a); await img.decode();
+        ctx.drawImage(img, it.x, it.y, it.w, it.h);
+      } catch {}
+      if(it.f){ ctx.fillStyle = '#18212B'; for(const f of it.f){ if(f.k === 'tx' && f.v){ ctx.font = `${Math.max(8, f.h * it.h * 0.6)}px sans-serif`; ctx.fillText(String(f.v), it.x + f.x * it.w + 2, it.y + (f.y + f.h * 0.75) * it.h); } } }
+    }
+    for(const it of all.filter(i => i.t === 's').sort((a, b) => (b.hl || 0) - (a.hl || 0))){
+      ctx.globalAlpha = it.hl ? 0.4 : 1; ctx.fillStyle = inkColor(it.c, true, true); ctx.fill(strokePath(it, false));
+    }
+    ctx.globalAlpha = 1;
+    for(const it of all.filter(i => i.t === 'x' || i.t === 'm')){
+      const fsz = it.t === 'x' ? 16 * (it.fs || 1) : (it.fs || 22) * 0.8, maxW = it.t === 'x' ? it.w : 2000;
+      ctx.fillStyle = '#18212B'; ctx.font = (it.t === 'm' ? 'italic ' : '') + fsz + 'px sans-serif';
+      const words = (it.t === 'x' ? htmlText(it.html) : it.tex).split(/\s+/); let line = '', y = it.y + fsz;
+      for(const wd of words){ const tl = line ? line + ' ' + wd : wd; if(ctx.measureText(tl).width > maxW && line){ ctx.fillText(line, it.x, y); y += fsz * 1.35; line = wd; } else line = tl; }
+      if(line) ctx.fillText(line, it.x, y);
+    }
+    // hide-answer tape stays closed for Claude too
+    for(const it of all.filter(i => i.t === 'tp')){ ctx.fillStyle = '#E9B949'; ctx.fillRect(it.x, it.y, it.w, it.h); }
+    return c.toDataURL('image/jpeg', 0.85);
+  },
+  async scan(x0, y0, x1, y1){
+    this.open();
+    let url;
+    try { url = await this.capture(x0, y0, x1, y1); } catch(e){ this.bubble('err', 'Could not read that part of the page: ' + esc(e.message || e)); return; }
+    const typed = this.pageText([x0, y0, x1, y1]);
+    const q = $('askIn').value.trim();
+    $('askIn').value = '';
+    this.send(q || (prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), url, typed);
+  },
+  async send(text, imgURL, typedInScan){
+    if(this.busy) return;
+    if(!text && !imgURL) return;
+    if(!Sync.sb){ this.bubble('err', 'Claude works through your sync account. Sync is not set up on this device.'); return; }
+    const {data} = await Sync.sb.auth.getSession();
+    const session = data && data.session;
+    if(!session){ this.bubble('err', 'Sign in first: Settings (gear, top left) → Sync.'); return; }
+    const content = [];
+    if(imgURL) content.push({type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: imgURL.split(',')[1]}});
+    let full = text;
+    if(typedInScan) full += '\n\n[Typed text inside the scanned area]\n' + typedInScan;
+    if(!this.msgs.length && cur){
+      const page = getDoc(cur.id), title = page ? (page.data.title || '').trim() : '';
+      const pt = this.pageText(null);
+      full += `\n\n[Open page in my notes${title ? ': "' + title + '"' : ''}]` + (pt ? '\nTyped text on the page:\n' + pt : '\n(no typed text on this page, only handwriting or imported pages)');
+    }
+    content.push({type: 'text', text: full});
+    this.msgs.push({role: 'user', content});
+    this.bubble('user', (imgURL ? `<img src="${imgURL}" alt="Scanned question">` : '') + esc(text).replace(/\n/g, '<br>'));
+    const out = this.bubble('bot', '<span class="typing"></span>');
+    this.busy = true; $('askSend').disabled = true;
+    let acc = '', last = 0;
+    const paint = force => { const now = performance.now(); if(!force && now - last < 120) return; last = now; out.innerHTML = renderMd(acc) || '<span class="typing"></span>'; const log = $('askLog'); if(log.scrollHeight - log.scrollTop - log.clientHeight < 140) log.scrollTop = log.scrollHeight; };
+    try {
+      this.ctrl = new AbortController();
+      const res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/ask', {
+        method: 'POST', signal: this.ctrl.signal,
+        headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token, apikey: CFG.SUPABASE_ANON_KEY},
+        body: JSON.stringify({mode: prefs.askMode || 'tutor', messages: this.msgs})
+      });
+      if(!res.ok){
+        let j = {}; try { j = await res.json(); } catch {}
+        const why = {not_allowed: 'This account is not allowed to use Claude yet. Your email has to be added to ASK_ALLOWED_EMAILS in Supabase (Edge Functions → Secrets).', no_key: 'Claude is not set up yet: the Anthropic API key is missing in Supabase (Edge Functions → Secrets → ANTHROPIC_API_KEY).', too_big: 'That was too much at once. Start a new chat (+) and scan a smaller part.'}[j.error];
+        throw new Error(why || (res.status === 404 ? 'The Claude helper is not installed on the server yet.' : (j.message || j.error || 'Server error ' + res.status)));
+      }
+      const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+      for(;;){
+        const {value, done} = await reader.read(); if(done) break;
+        buf += dec.decode(value, {stream: true});
+        let k;
+        while((k = buf.indexOf('\n\n')) >= 0){
+          const chunk = buf.slice(0, k); buf = buf.slice(k + 2);
+          for(const line of chunk.split('\n')){
+            if(!line.startsWith('data:')) continue;
+            let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
+            if(ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta'){ acc += ev.delta.text; paint(); }
+            else if(ev.type === 'error') throw new Error((ev.error && ev.error.message) || 'Claude stopped with an error');
+          }
+        }
+      }
+      paint(true);
+      if(!acc) throw new Error('No answer came back');
+      this.msgs.push({role: 'assistant', content: [{type: 'text', text: acc}]});
+    } catch(e){
+      this.msgs.pop();   // let the question be asked again
+      if(e.name === 'AbortError'){ out.remove(); }
+      else { out.className = 'am err'; out.textContent = /Failed to fetch|Load failed|NetworkError/i.test(e.message) ? 'No connection to the server. Check the internet and try again.' : e.message; }
+    }
+    this.busy = false; this.ctrl = null; $('askSend').disabled = false;
+  }
+};
+// Small Markdown renderer for answers: paragraphs, lists, headings, bold/italic, code, and $math$ via KaTeX.
+function renderMd(src){
+  const math = [];
+  const keep = (tex, display) => { math.push([tex, display]); return '\u0000' + (math.length - 1) + '\u0000'; };
+  let s = String(src || '')
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, t) => keep(t, true))
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_, t) => keep(t, true))
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => keep(t, false))
+    .replace(/(^|[^\\$])\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\d)/g, (_, pre, t) => pre + keep(t, false));
+  s = esc(s);
+  const inline = t => t.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
+  const out = []; let list = null, para = [];
+  const flushP = () => { if(para.length){ out.push('<p>' + inline(para.join('<br>')) + '</p>'); para = []; } };
+  const flushL = () => { if(list){ out.push(`<${list.t}>` + list.items.map(i => '<li>' + inline(i) + '</li>').join('') + `</${list.t}>`); list = null; } };
+  for(const raw of s.split('\n')){
+    const line = raw.trimEnd();
+    let m;
+    if(!line.trim()){ flushP(); flushL(); continue; }
+    if((m = /^\s*#{1,6}\s+(.*)$/.exec(line))){ flushP(); flushL(); out.push('<h4>' + inline(m[1]) + '</h4>'); continue; }
+    if((m = /^\s*[-*•]\s+(.*)$/.exec(line))){ flushP(); if(!list || list.t !== 'ul'){ flushL(); list = {t: 'ul', items: []}; } list.items.push(m[1]); continue; }
+    if((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))){ flushP(); if(!list || list.t !== 'ol'){ flushL(); list = {t: 'ol', items: []}; } list.items.push(m[1]); continue; }
+    if(list && /^\s{2,}/.test(raw)){ list.items[list.items.length - 1] += '<br>' + line.trim(); continue; }
+    flushL(); para.push(line);
+  }
+  flushP(); flushL();
+  return out.join('').replace(/\u0000(\d+)\u0000/g, (_, i) => {
+    const [tex, display] = math[+i];
+    try { return window.katex ? katex.renderToString(tex, {displayMode: display, throwOnError: false}) : esc(tex); } catch { return esc(tex); }
+  });
+}
+$('askBtn').addEventListener('click', () => {
+  if(!cur){ Ask.open(); return; }
+  Ask.open();
+  startPick({kind: 'scan'}, 'Draw a box around the question');
+});
+$('askScan').addEventListener('click', () => startPick({kind: 'scan'}, 'Draw a box around the question'));
+$('askClose').addEventListener('click', () => { if(pick && pick.kind === 'scan') endPick(); Ask.close(); });
+$('askMin').addEventListener('click', () => $('askPanel').classList.toggle('min'));
+$('askNew').addEventListener('click', () => Ask.reset());
+$('askMode').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(!b) return; prefs.askMode = b.dataset.v; savePrefs(); Ask.renderMode(); });
+$('askSend').addEventListener('click', () => { const t = $('askIn').value.trim(); if(!t) return; $('askIn').value = ''; autoGrow(); Ask.send(t); });
+function autoGrow(){ const t = $('askIn'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
+$('askIn').addEventListener('input', autoGrow);
+$('askIn').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); $('askSend').click(); } });
+{
+  // drag the window by its title bar
+  let drag = null;
+  $('askHead').addEventListener('pointerdown', e => {
+    if(e.target.closest('button')) return;
+    const r = $('askPanel').getBoundingClientRect();
+    drag = {dx: e.clientX - r.left, dy: e.clientY - r.top, id: e.pointerId};
+    $('askHead').setPointerCapture(e.pointerId);
+  });
+  $('askHead').addEventListener('pointermove', e => {
+    if(!drag || e.pointerId !== drag.id) return;
+    const p = $('askPanel'), x = clamp(e.clientX - drag.dx, 4, innerWidth - 120), y = clamp(e.clientY - drag.dy, 4, innerHeight - 50);
+    Object.assign(p.style, {left: x + 'px', top: y + 'px', right: 'auto', bottom: 'auto'});
+  });
+  const up = () => { if(!drag) return; drag = null; const r = $('askPanel').getBoundingClientRect(); LSset('inkwell.askPos', {x: r.left, y: r.top}); };
+  $('askHead').addEventListener('pointerup', up); $('askHead').addEventListener('pointercancel', up);
+}
+
+/* =====================================================================
    Keyboard (hardware keyboard / PC)
    ===================================================================== */
 document.addEventListener('keydown', e => {
@@ -3014,7 +3621,7 @@ document.addEventListener('keydown', e => {
   const t = map[e.key.toLowerCase()];
   if(t){ setTool(t); return; }
   if((e.key === 'Delete' || e.key === 'Backspace') && sel){ const ids = sel.ids.slice(); clearSel(); removeItems(ids); return; }
-  if(e.key === 'Escape'){ clearSel(); closePops(); }
+  if(e.key === 'Escape'){ clearSel(); closePops(); if(pick){ endPick(); toast('Cancelled'); } }
 });
 document.addEventListener('keyup', e => { if(e.key === ' ') spaceDown = false; });
 
@@ -3105,6 +3712,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, cam, docs, prefs, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, cam, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

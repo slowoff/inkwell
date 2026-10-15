@@ -5,6 +5,8 @@
 //   ASK_MODEL           optional, the strong model, defaults to claude-sonnet-5-5
 //   ASK_FAST_MODEL      optional, the cheap model, defaults to claude-haiku-5-5
 // Body: {mode: 'tutor'|'solve', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
+// Background jobs (fixed model, no chat): mode 'read' = transcribe handwriting for search (fast model),
+// mode 'latex' = turn a handwritten formula into LaTeX (smart model).
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const ORIGINS = ["https://slowoff.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
@@ -40,6 +42,19 @@ Mode: TUTOR. Teach, don't solve:
   solve: `${BASE}
 
 Mode: SOLVE. Give a complete worked solution: given values, formula, steps with units, result (bold), and one line on the idea behind it.`,
+};
+
+const JOBS: Record<string, { system: string; max: number; smart: boolean }> = {
+  read: {
+    max: 1500, smart: false,
+    system: `You transcribe handwritten notes so they can be searched. The image shows only handwriting (pen strokes) from a student's notes page; it may be in German, English, French or Portuguese and may contain maths.
+Output only the words, numbers and formulas you can read, in reading order, as plain text. Write maths in plain LaTeX without $ signs (e.g. v = \\frac{s}{t}). No comments, no explanations, no markdown.
+Skip drawings, arrows and scribbles. If nothing is readable, output nothing at all.`,
+  },
+  latex: {
+    max: 400, smart: true,
+    system: `The image shows one handwritten maths or physics expression. Output only the LaTeX for it, with no $ signs, no code fences and no comments. Use \\frac, ^{}, _{}, \\sqrt{}, \\cdot, \\Delta etc. Write units with \\text{} and a thin space, e.g. 9.81\\,\\text{m/s}^2. If it is not readable as maths, output exactly: ?`,
+  },
 };
 
 const ROUTER = `You decide which AI model should answer a student's question. Reply with exactly one word.
@@ -84,17 +99,18 @@ Deno.serve(async (req) => {
   if (!messages.length) return fail(req, 400, "no_messages");
 
   const smart = Deno.env.get("ASK_MODEL") || "claude-sonnet-5-5", fast = Deno.env.get("ASK_FAST_MODEL") || "claude-haiku-5-5";
-  const model = body.model === "fast" ? fast : body.model === "smart" ? smart : await pickModel(key, messages, fast, smart);
+  const job = JOBS[body.mode || ""];
+  const model = job ? (job.smart ? smart : fast) : body.model === "fast" ? fast : body.model === "smart" ? smart : await pickModel(key, messages, fast, smart);
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model,
-      max_tokens: 2500,
+      max_tokens: job ? job.max : 2500,
       stream: true,
-      system: MODES[body.mode || "tutor"] || MODES.tutor,
-      messages,
+      system: job ? job.system : MODES[body.mode || "tutor"] || MODES.tutor,
+      messages: job ? messages.slice(-1) : messages,
     }),
   });
   if (!r.ok || !r.body) {

@@ -48,7 +48,8 @@ function toast(msg, btnLabel, onBtn){
 const DEFAULT_PREFS = {
   tool: 'pen',
   pen: {c: 'auto', s: 40}, hl: {c: '#F5C400', s: 40}, eraser: {s: 30, mode: 'stroke'}, mark: {s: 40},
-  wheel: 'right',  // Pencil menu on press and hold: 'right' (opens left of the pen), 'left', or 'off'
+  wheel: 'right',
+  hwSearch: true,  // Claude reads handwriting in the background so search finds it  // Pencil menu on press and hold: 'right' (opens left of the pen), 'left', or 'off'
   penFavs: ['auto', '#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF'],
   hlFavs: ['#F5C400', '#4CC26B', '#FF6FA3', '#3BA5F0'],
   finger: false,
@@ -517,7 +518,7 @@ function frame(){
   $('zoomBtn').textContent = Math.round(cam.z * 100) + '%';
   if(need.bg) drawBg();
   if(need.ink) drawInk();
-  if(need.over){ positionOverlays(); imgSoon(); }
+  if(need.over){ positionOverlays(); imgSoon(); renderSlider(); }
   need = {bg: 0, ink: 0, over: 0};
   if(act) drawLive();
 }
@@ -866,7 +867,7 @@ function redo(){
   setItems(op.a); cur.undo.push(op); clearSel(); updUndo();
 }
 function updUndo(){ $('undo').disabled = !cur || !cur.undo.length; $('redo').disabled = !cur || !cur.redo.length; }
-function changed(){ if(cur) cur.lx = undefined; lastLocalEdit = Date.now(); invalidate(0, 1, 1); saveContentSoon(); refreshPaper(); markBadgeSoon(); }
+function changed(){ if(cur) cur.lx = undefined; slPages = null; lastLocalEdit = Date.now(); invalidate(0, 1, 1); saveContentSoon(); refreshPaper(); markBadgeSoon(); hwSoon(); }
 
 async function saveContent(){
   if(!cur) return;
@@ -1559,6 +1560,7 @@ function computeSel(){
 }
 function clearSel(){ sel = null; $('selBox').hidden = true; }
 function transformItem(it, tf){
+  if(tf.r) return rotateItem(it, tf.r, tf.ax, tf.ay);
   const m = (x, y) => [tf.ax + (x - tf.ax) * tf.s + tf.dx, tf.ay + (y - tf.ay) * tf.s + tf.dy];
   const o = Object.assign({}, it);
   if(it.t === 's'){
@@ -1573,12 +1575,28 @@ function transformItem(it, tf){
   }
   return o;
 }
+// Rotate by r radians around (ax, ay). Ink and shapes turn; text, formulas, pictures and tape
+// move with the selection but stay upright (they have no rotation of their own).
+function rotateItem(it, r, ax, ay){
+  const c = Math.cos(r), s = Math.sin(r), rot = (x, y) => [ax + (x - ax) * c - (y - ay) * s, ay + (x - ax) * s + (y - ay) * c];
+  const o = Object.assign({}, it);
+  if(it.t === 's'){
+    const p = it.p.slice();
+    for(let i = 0; i < p.length; i += 3){ const [x, y] = rot(p[i], p[i+1]); p[i] = x; p[i+1] = y; }
+    o.p = p;
+  } else {
+    const b = itemBox(it), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, [nx, ny] = rot(cx, cy);
+    o.x = it.x + nx - cx; o.y = it.y + ny - cy;
+  }
+  return o;
+}
 const selRect = $('selRect');
 selRect.addEventListener('pointerdown', e => {
   if(!sel || !cur) return;
   e.stopPropagation(); e.preventDefault();
   const [sx, sy] = pt(e);
-  selDrag = {id: e.pointerId, sx, sy, handle: e.target.id === 'selHandle', orig: sel.ids.map(id => cur.items.get(id)), b: sel.b.slice(), moved: false};
+  selDrag = {id: e.pointerId, sx, sy, handle: e.target.id === 'selHandle', rot: !!e.target.closest('#selRot'), orig: sel.ids.map(id => cur.items.get(id)), b: sel.b.slice(), moved: false};
+  if(selDrag.rot){ const b = sel.b; selDrag.cx = (b[0] + b[2]) / 2; selDrag.cy = (b[1] + b[3]) / 2; const [wx, wy] = toWorld(sx, sy); selDrag.a0 = Math.atan2(wy - selDrag.cy, wx - selDrag.cx); }
   try { selRect.setPointerCapture(e.pointerId); } catch {}
 });
 selRect.addEventListener('pointermove', e => {
@@ -1586,7 +1604,15 @@ selRect.addEventListener('pointermove', e => {
   const [sx, sy] = pt(e);
   if(Math.hypot(sx - selDrag.sx, sy - selDrag.sy) > 2) selDrag.moved = true;
   let tf;
-  if(selDrag.handle){
+  if(selDrag.rot){
+    const [wx, wy] = toWorld(sx, sy);
+    let deg = (Math.atan2(wy - selDrag.cy, wx - selDrag.cx) - selDrag.a0) * 180 / Math.PI;
+    deg = ((deg % 360) + 540) % 360 - 180;
+    const snap = Math.round(deg / 15) * 15;
+    if(Math.abs(deg - snap) < 4) deg = snap;   // clicks into 15° steps (0, 45, 90 ...)
+    const lab = $('selAng'); lab.hidden = false; lab.textContent = Math.round(deg) + '°';
+    tf = {r: deg * Math.PI / 180, ax: selDrag.cx, ay: selDrag.cy};
+  } else if(selDrag.handle){
     const b = selDrag.b, w0 = (b[2] - b[0]) * cam.z, h0 = (b[3] - b[1]) * cam.z;
     const s = Math.max(0.1, 1 + ((sx - selDrag.sx) + (sy - selDrag.sy)) / Math.max(20, w0 + h0));
     tf = {dx: 0, dy: 0, s, ax: b[0], ay: b[1]};
@@ -1599,6 +1625,7 @@ selRect.addEventListener('pointermove', e => {
 const endSelDrag = e => {
   if(!selDrag || e.pointerId !== selDrag.id) return;
   const d = selDrag; selDrag = null;
+  $('selAng').hidden = true;
   if(d.moved && d.cur){ commit(d.orig.map(it => [it.id, it]), d.cur.map(it => [it.id, it])); changed(); }
   else if(!d.moved){
     // tap inside the selection: open a formula or a text box directly
@@ -1613,6 +1640,7 @@ function renderGroupBtns(){
   const oneGroup = gs.size === 1 && !gs.has('');
   $('selGroup').hidden = its.length < 2 || oneGroup;
   $('selUngroup').hidden = !its.some(it => it.g);
+  $('selMath').hidden = !its.some(it => it.t === 's' && !it.hl) || its.some(it => it.t !== 's');
 }
 function renderSelColors(){
   renderGroupBtns();
@@ -1627,6 +1655,13 @@ $('selColors').addEventListener('click', e => {
   const c = b.dataset.c;
   const list = sel.ids.map(id => cur.items.get(id)).filter(it => it && (it.t === 's' || it.t === 'm')).map(it => Object.assign({}, it, {c}));
   if(list.length) replaceItems(list);
+});
+$('selMath').addEventListener('click', () => strokesToFormula());
+$('selRot90').addEventListener('click', () => {
+  if(!sel) return;
+  const b = sel.b, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  replaceItems(sel.ids.map(id => cur.items.get(id)).filter(Boolean).map(it => rotateItem(it, Math.PI / 2, cx, cy)));
+  computeSel(); positionOverlays();
 });
 $('selDel').addEventListener('click', () => { if(!sel) return; const ids = sel.ids.slice(); clearSel(); removeItems(ids); });
 $('selGroup').addEventListener('click', () => {
@@ -2065,7 +2100,7 @@ function positionOverlays(){
       Object.assign(selRect.style, {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'});
       const m = $('selMenu'), mw = m.offsetWidth || 260, mh = m.offsetHeight || 46;
       let my = y - mh - 10;
-      if(my < 8) my = y + h + 10;
+      if(my < 8) my = y + h + 22;
       if(my > H - mh - 8) my = clamp(y + 8, 8, H - mh - 8);
       m.style.left = clamp(x + w / 2 - mw / 2, 8, Math.max(8, W - mw - 8)) + 'px';
       m.style.top = my + 'px';
@@ -2121,6 +2156,7 @@ async function openPage(id, opts = {}){
   const saved = LSget('inkwell.cam.' + id, null);
   if(saved && isFinite(saved.z)) Object.assign(cam, saved);
   else { cam.z = 1; cam.ox = W > 900 ? 56 : 20; cam.oy = 28; }
+  slPages = null;
   clearSel(); updUndo(); renderRuler(); invalidate();
   markActivePage(); markBadgeSoon();
   if(width() === 'narrow') app.dataset.view = 'editor';
@@ -2131,10 +2167,12 @@ async function closeCurrent(){
   finishEditing();
   if(act) cancelAct();
   await flushSaves();
+  clearTimeout(hwPageT);
+  if(HW.on()){ HW.enqueue(cur.id); HW.kick(); }
   cur = null; clearSel();
 }
 function showEmpty(){
-  cur = null;
+  cur = null; slPages = null;
   worldBack.innerHTML = ''; worldFront.innerHTML = ''; elMap.clear(); geo.clear();
   $('stageEmpty').hidden = false; $('title').value = '';
   clearSel(); updUndo(); renderRuler(); invalidate();
@@ -2327,10 +2365,10 @@ async function renderSearch(q){
   if($('search').value.trim() !== q) return;
   const needle = q.toLowerCase(), hits = [];
   for(const p of [...docs.values()].filter(d => d.kind === 'page' && live(d)).sort((a, b) => b.updated - a.updated)){
-    const hay = ((p.data.title || '') + ' ' + (idx.get(p.id) || '')).toLowerCase();
+    const hay = ((p.data.title || '') + ' ' + (idx.get(p.id) || '') + ' ' + HW.text(p)).toLowerCase();
     if(hay.includes(needle)) hits.push(pageItemHTML(p, pathOf(p)));
   }
-  $('pageList').innerHTML = hits.length ? hits.join('') : '<div class="empty"><strong>Nothing found</strong>No page contains that text. Handwriting is not searchable.</div>';
+  $('pageList').innerHTML = hits.length ? hits.join('') : '<div class="empty"><strong>Nothing found</strong>No page contains that text.' + (prefs.hwSearch === false ? ' Reading handwriting is off in the settings.' : '') + '</div>';
 }
 let searchT;
 $('search').addEventListener('input', () => {
@@ -3319,6 +3357,8 @@ function renderPrefSettings(){
   $('setLeft').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === (prefs.leftEdge ? 1 : 0)));
   $('setLeftHint').textContent = prefs.leftEdge ? 'Pages stop at the left edge and only grow up, down and to the right.' : 'Pages go on forever in every direction.';
   $('setModel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askModel || 'auto')));
+  $('setHw').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.hwSearch === false ? 'off' : 'on')));
+  renderHwStatus();
   $('setWheel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.wheel || 'right')));
   $('setWheelHint').textContent = prefs.wheel === 'off' ? 'Holding the Pencil still does nothing special.' : `Press the Pencil on the page and hold it still to open a quick menu for tools, colours and thickness. It opens ${prefs.wheel === 'left' ? 'to the right of' : 'to the left of'} the Pencil, away from your hand.`;
   $('setModelHint').textContent = {auto: 'A quick check picks the cheap model for easy questions and the smart one for worksheets, handwriting and calculations.', fast: 'Always Haiku: cheapest and fastest, weaker at handwriting and long calculations.', smart: 'Always Sonnet: best answers, about 20 times the price of Haiku.'}[prefs.askModel || 'auto'];
@@ -3335,6 +3375,11 @@ $('setLeft').addEventListener('click', e => {
 $('setModel').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
   prefs.askModel = b.dataset.v; savePrefs(); renderPrefSettings();
+});
+$('setHw').addEventListener('click', e => {
+  const b = e.target.closest('button[data-v]'); if(!b) return;
+  prefs.hwSearch = b.dataset.v === 'on'; savePrefs(); renderPrefSettings();
+  if(prefs.hwSearch){ HW.state = ''; HW.scanAll(); } else { HW.queue.length = 0; }
 });
 $('setWheel').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
@@ -3904,7 +3949,10 @@ async function renderDocx(file, onStatus){
    Ask Claude: scan a question (or just type) and get help in a floating window
    ===================================================================== */
 const Ask = {
-  msgs: [],        // API messages for this chat
+  msgs: [],        // API messages for this chat; scanned images are kept as assets: {type:'image', a: assetId}
+  view: [],        // what the chat shows: {who:'user', text, a?, box?, page?} / {who:'bot', text, model?}
+  chatId: null,    // doc id of this chat in the history (kind 'chat')
+  b64: new Map(),  // asset id -> base64 of scans, so they are not read back for every message
   busy: false,
   ctrl: null,
   open(){
@@ -3919,8 +3967,38 @@ const Ask = {
   empty(){
     $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.</div>`;
   },
+  chats(){ return [...docs.values()].filter(d => d.kind === 'chat' && live(d)).sort((a, b) => (b.data.at || 0) - (a.data.at || 0)); },
+  showHistory(){
+    this.histOpen = true; $('askPanel').classList.add('hist');
+    const list = this.chats();
+    const day = ms => { const d = new Date(ms), now = new Date(); const same = d.toDateString() === now.toDateString(); return same ? d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : d.toLocaleDateString([], {day: 'numeric', month: 'short'}) + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : ''); };
+    $('askLog').innerHTML = `<div class="ah-head"><b>History</b><button class="btn ghost ah-back">Back to chat</button></div>` + (list.length ? list.map(c => {
+      const pg = c.data.page && docs.get(c.data.page), n = (c.data.view || []).filter(v => v.who === 'user').length;
+      return `<div class="ah-row ${c.id === this.chatId ? 'on' : ''}" data-chat="${c.id}"><button class="ah-open"><b>${esc(c.data.title || 'Chat')}</b><span>${esc(day(c.data.at || 0))}${pg && live(pg) ? ' · ' + esc(pg.data.title || 'Untitled page') : ''} · ${n} question${n === 1 ? '' : 's'} · ${c.data.mode === 'solve' ? 'Solve' : 'Tutor'}</span></button><button class="ah-del" title="Delete this chat" aria-label="Delete chat"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button></div>`;
+    }).join('') : '<div class="ask-empty">No saved chats yet. Every chat with Claude is kept here.</div>');
+  },
+  showChat(){
+    this.histOpen = false; $('askPanel').classList.remove('hist');
+    $('askLog').innerHTML = '';
+    if(!this.view.length){ this.empty(); return; }
+    for(const v of this.view){
+      if(v.who === 'user'){
+        const d = this.bubble('user', (v.a ? '<img alt="Scanned question">' : '') + esc(v.text || '').replace(/\n/g, '<br>'));
+        if(v.a){ const img = d.querySelector('img'); const b = this.b64.get(v.a); if(b) img.src = 'data:image/jpeg;base64,' + b; else assetURL(v.a).then(u => { if(u) img.src = u; else img.replaceWith(Object.assign(document.createElement('div'), {className: 'am-noimg', textContent: 'Scan not downloaded yet'})); }); }
+      } else this.botBubble(v.text, v.model);
+    }
+    $('askLog').scrollTop = $('askLog').scrollHeight;
+  },
+  load(id){
+    const c = docs.get(id); if(!c || !live(c)) return;
+    if(this.ctrl) this.ctrl.abort();
+    this.busy = false; $('askSend').disabled = false;
+    this.chatId = id; this.msgs = structuredClone(c.data.msgs || []); this.view = structuredClone(c.data.view || []);
+    if(c.data.mode && c.data.mode !== prefs.askMode){ prefs.askMode = c.data.mode; savePrefs(); this.renderMode(); }
+    this.showChat();
+  },
   renderMode(){ $('askMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askMode || 'tutor'))); },
-  reset(){ if(this.ctrl) this.ctrl.abort(); this.msgs = []; this.busy = false; this.empty(); $('askSend').disabled = false; },
+  reset(){ if(this.ctrl) this.ctrl.abort(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
   bubble(cls, html){
     const log = $('askLog');
     const em = log.querySelector('.ask-empty'); if(em) em.remove();
@@ -3981,17 +4059,70 @@ const Ask = {
     const typed = this.pageText([x0, y0, x1, y1]);
     const q = $('askIn').value.trim();
     $('askIn').value = '';
-    this.send(q || (prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), url, typed);
+    this.send(q || (prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), url, typed, [x0, y0, x1, y1]);
   },
-  async send(text, imgURL, typedInScan){
+  // API form of the chat: scans stored as assets go back in as base64
+  async apiMsgs(){
+    const out = [];
+    for(const m of this.msgs){
+      const content = [];
+      for(const c of m.content){
+        if(c.type === 'image' && c.a){
+          let b = this.b64.get(c.a);
+          if(!b){ b = await assetB64(c.a); if(b) this.b64.set(c.a, b); }
+          if(b) content.push({type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: b}});
+        } else content.push(c);
+      }
+      out.push({role: m.role, content});
+    }
+    return out;
+  },
+  async saveChat(){
+    const first = this.view.find(v => v.who === 'user');
+    const auto = /^(Solve this question\.|Help me with this question\.)$/;
+    const page = first && first.page && getDoc(first.page);
+    const title = first ? (first.text && !auto.test(first.text) ? first.text : 'Scanned question' + (page && page.data.title ? ' · ' + page.data.title : '')) : 'Chat';
+    const data = {title: title.slice(0, 80), at: Date.now(), page: first && first.page || null, mode: prefs.askMode || 'tutor', msgs: this.msgs, view: this.view};
+    const rec = this.chatId && docs.get(this.chatId);
+    if(rec && live(rec)){ rec.data = data; await writeDoc(rec); }
+    else { const r = await newDoc('chat', data); this.chatId = r.id; }
+  },
+  botBubble(text, model){
+    const out = this.bubble('bot', renderMd(text));
+    this.decorateBot(out, text, model);
+    return out;
+  },
+  decorateBot(out, text, model){
+    if(model) out.insertAdjacentHTML('beforeend', `<div class="am-model">${esc(model)}</div>`);
+    const bar = document.createElement('div'); bar.className = 'am-acts';
+    bar.innerHTML = `<button class="am-put" title="Put this answer on the page next to the question"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Put on page</button>`;
+    bar.querySelector('.am-put').addEventListener('click', () => putAnswer(text, this.boxFor(out)));
+    out.appendChild(bar);
+  },
+  // the scan box of the question this answer belongs to
+  boxFor(el){
+    const bots = [...$('askLog').querySelectorAll('.am.bot')], i = bots.indexOf(el);
+    const answers = this.view.filter(v => v.who === 'bot');
+    const v = answers[i]; if(!v) return null;
+    const k = this.view.indexOf(v);
+    for(let j = k - 1; j >= 0; j--) if(this.view[j].who === 'user') return this.view[j].box && this.view[j].page ? {box: this.view[j].box, page: this.view[j].page} : null;
+    return null;
+  },
+  async send(text, imgURL, typedInScan, box){
     if(this.busy) return;
     if(!text && !imgURL) return;
+    if(this.histOpen) this.showChat();
     if(!Sync.sb){ this.bubble('err', 'Claude works through your sync account. Sync is not set up on this device.'); return; }
     const {data} = await Sync.sb.auth.getSession();
     const session = data && data.session;
     if(!session){ this.bubble('err', 'Sign in first: Settings (gear, top left) → Sync.'); return; }
     const content = [];
-    if(imgURL) content.push({type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: imgURL.split(',')[1]}});
+    let assetId = null;
+    if(imgURL){
+      // keep the scan as an asset so the chat history can show it and send it again later
+      try { assetId = await saveAsset(await (await fetch(imgURL)).blob()); this.b64.set(assetId, imgURL.split(',')[1]); content.push({type: 'image', a: assetId}); }
+      catch { content.push({type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: imgURL.split(',')[1]}}); }
+    }
     let full = text;
     if(typedInScan) full += '\n\n[Typed text inside the scanned area]\n' + typedInScan;
     if(!this.msgs.length && cur){
@@ -4001,6 +4132,8 @@ const Ask = {
     }
     content.push({type: 'text', text: full});
     this.msgs.push({role: 'user', content});
+    const uv = {who: 'user', text}; if(assetId) uv.a = assetId; if(box && cur){ uv.box = box.map(v => Math.round(v * 10) / 10); uv.page = cur.id; } else if(cur) uv.page = cur.id;
+    this.view.push(uv);
     this.bubble('user', (imgURL ? `<img src="${imgURL}" alt="Scanned question">` : '') + esc(text).replace(/\n/g, '<br>'));
     const out = this.bubble('bot', '<span class="typing"></span>');
     this.busy = true; $('askSend').disabled = true;
@@ -4011,7 +4144,7 @@ const Ask = {
       const res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/ask', {
         method: 'POST', signal: this.ctrl.signal,
         headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token, apikey: CFG.SUPABASE_ANON_KEY},
-        body: JSON.stringify({mode: prefs.askMode || 'tutor', model: prefs.askModel || 'auto', messages: this.msgs})
+        body: JSON.stringify({mode: prefs.askMode || 'tutor', model: prefs.askModel || 'auto', messages: await this.apiMsgs()})
       });
       if(!res.ok){
         let j = {}; try { j = await res.json(); } catch {}
@@ -4020,27 +4153,16 @@ const Ask = {
       }
       const used = res.headers.get('x-ask-model') || '';
       const usedName = /haiku/i.test(used) ? 'Haiku (fast)' : /sonnet/i.test(used) ? 'Sonnet (smart)' : used;
-      const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
-      for(;;){
-        const {value, done} = await reader.read(); if(done) break;
-        buf += dec.decode(value, {stream: true});
-        let k;
-        while((k = buf.indexOf('\n\n')) >= 0){
-          const chunk = buf.slice(0, k); buf = buf.slice(k + 2);
-          for(const line of chunk.split('\n')){
-            if(!line.startsWith('data:')) continue;
-            let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
-            if(ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta'){ acc += ev.delta.text; paint(); }
-            else if(ev.type === 'error') throw new Error((ev.error && ev.error.message) || 'Claude stopped with an error');
-          }
-        }
-      }
+      await readSSE(res, t => { acc += t; paint(); });
       paint(true);
       if(!acc) throw new Error('No answer came back');
-      if(usedName) out.insertAdjacentHTML('beforeend', `<div class="am-model">${esc(usedName)}${(prefs.askModel || 'auto') === 'auto' ? ', picked automatically' : ''}</div>`);
+      const modelLine = usedName ? usedName + ((prefs.askModel || 'auto') === 'auto' ? ', picked automatically' : '') : '';
+      this.decorateBot(out, acc, modelLine);
       this.msgs.push({role: 'assistant', content: [{type: 'text', text: acc}]});
+      this.view.push({who: 'bot', text: acc, model: modelLine});
+      this.saveChat().catch(e => console.warn('chat save', e));
     } catch(e){
-      this.msgs.pop();   // let the question be asked again
+      this.msgs.pop(); this.view.pop();   // let the question be asked again
       if(e.name === 'AbortError'){ out.remove(); }
       else { out.className = 'am err'; out.textContent = /Failed to fetch|Load failed|NetworkError/i.test(e.message) ? 'No connection to the server. Check the internet and try again.' : e.message; }
     }
@@ -4086,6 +4208,19 @@ $('askScan').addEventListener('click', () => startPick({kind: 'scan'}, 'Draw a b
 $('askClose').addEventListener('click', () => { if(pick && pick.kind === 'scan') endPick(); Ask.close(); });
 $('askMin').addEventListener('click', () => $('askPanel').classList.toggle('min'));
 $('askNew').addEventListener('click', () => Ask.reset());
+$('askHist').addEventListener('click', () => { if(Ask.histOpen) Ask.showChat(); else Ask.showHistory(); });
+$('askLog').addEventListener('click', async e => {
+  if(e.target.closest('.ah-back')){ Ask.showChat(); return; }
+  const row = e.target.closest('.ah-row'); if(!row) return;
+  const id = row.dataset.chat;
+  if(e.target.closest('.ah-del')){
+    if(id === Ask.chatId){ Ask.reset(); }
+    await removeDoc(id, 'chat', null, true);
+    Ask.showHistory(); toast('Chat deleted');
+    return;
+  }
+  if(e.target.closest('.ah-open')) Ask.load(id);
+});
 $('askMode').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(!b) return; prefs.askMode = b.dataset.v; savePrefs(); Ask.renderMode(); });
 $('askSend').addEventListener('click', () => { const t = $('askIn').value.trim(); if(!t) return; $('askIn').value = ''; autoGrow(); Ask.send(t); });
 function autoGrow(){ const t = $('askIn'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
@@ -4108,6 +4243,584 @@ $('askIn').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKe
   const up = () => { if(!drag) return; drag = null; const r = $('askPanel').getBoundingClientRect(); LSset('inkwell.askPos', {x: r.left, y: r.top}); };
   $('askHead').addEventListener('pointerup', up); $('askHead').addEventListener('pointercancel', up);
 }
+
+/* =====================================================================
+   Claude helpers shared by Ask, handwriting search and "to formula"
+   ===================================================================== */
+// Reads the server-sent events of a streamed Claude answer and hands over each piece of text.
+async function readSSE(res, onText){
+  const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+  for(;;){
+    const {value, done} = await reader.read(); if(done) break;
+    buf += dec.decode(value, {stream: true});
+    let k;
+    while((k = buf.indexOf('\n\n')) >= 0){
+      const chunk = buf.slice(0, k); buf = buf.slice(k + 2);
+      for(const line of chunk.split('\n')){
+        if(!line.startsWith('data:')) continue;
+        let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
+        if(ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') onText(ev.delta.text);
+        else if(ev.type === 'error') throw new Error((ev.error && ev.error.message) || 'Claude stopped with an error');
+      }
+    }
+  }
+}
+async function assetB64(id){
+  try {
+    let rec = await IDB.get('assets', id);
+    if(!rec) rec = await Sync.fetchAsset(id);
+    if(!rec) return null;
+    return await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(rec.blob); });
+  } catch { return null; }
+}
+// One background job on the server ('read' or 'latex'): image in, text out.
+async function claudeJob(mode, jpegURL, prompt){
+  const err = code => Object.assign(new Error(code), {code});
+  if(!Sync.sb) throw err('no_sync');
+  if(!navigator.onLine) throw err('offline');
+  const {data} = await Sync.sb.auth.getSession();
+  const session = data && data.session;
+  if(!session) throw err('not_signed_in');
+  let res;
+  try {
+    res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/ask', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token, apikey: CFG.SUPABASE_ANON_KEY},
+      body: JSON.stringify({mode, messages: [{role: 'user', content: [{type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: jpegURL.split(',')[1]}}, {type: 'text', text: prompt}]}]})
+    });
+  } catch { throw err('offline'); }
+  if(!res.ok){ let j = {}; try { j = await res.json(); } catch {} throw err(j.error || 'http_' + res.status); }
+  let acc = '';
+  await readSSE(res, t => { acc += t; });
+  return acc.trim();
+}
+// Strokes drawn black on white, cropped to their box (for Claude to read).
+function inkImage(strokes, maxPx){
+  let b = null;
+  for(const it of strokes){ const q = strokeBox(it); b = b ? boxUnion(b, q) : q; }
+  if(!b) return null;
+  const pad = 14, x0 = b[0] - pad, y0 = b[1] - pad, w = b[2] - b[0] + 2 * pad, h = b[3] - b[1] + 2 * pad;
+  const s = clamp(maxPx / Math.max(w, h), 0.15, 2.5);
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.setTransform(s, 0, 0, s, -x0 * s, -y0 * s);
+  for(const it of strokes){ ctx.fillStyle = inkColor(it.c, true); ctx.fill(strokePath(it, false)); }
+  const url = c.toDataURL('image/jpeg', 0.82);
+  c.width = c.height = 1;
+  return {url, box: b};
+}
+const jobWhy = code => ({not_allowed: 'This account is not allowed to use Claude (ASK_ALLOWED_EMAILS in Supabase).', no_key: 'The Anthropic API key is missing in Supabase.', not_signed_in: 'Sign in to sync first.', no_sync: 'Sync is not set up on this device.', offline: 'No internet connection.'}[code] || 'Claude could not be reached (' + code + ').');
+
+/* =====================================================================
+   Put an Ask Claude answer on the page
+   ===================================================================== */
+const GREEK = {alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', phi: 'φ', varphi: 'φ', omega: 'ω', eta: 'η', Delta: 'Δ', Omega: 'Ω', Sigma: 'Σ', Phi: 'Φ', Gamma: 'Γ', Theta: 'Θ', Lambda: 'Λ', Pi: 'Π'};
+const SUP = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '⁺', 'n': 'ⁿ'};
+const SUB = {'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉'};
+// Inline maths as readable plain text for a text box (the text box cannot show LaTeX).
+function texPlain(t){
+  let s = String(t);
+  for(let i = 0; i < 6; i++){
+    const before = s;
+    s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_, a, b) => (/^[\w.]+$/.test(a) ? a : '(' + a + ')') + '/' + (/^[\w.]+$/.test(b) ? b : '(' + b + ')'))
+         .replace(/\\sqrt\s*\{([^{}]*)\}/g, (_, a) => '√' + (/^[\w.]+$/.test(a) ? a : '(' + a + ')'))
+         .replace(/\\(?:text|mathrm|mathbf|operatorname|mathit)\s*\{([^{}]*)\}/g, '$1');
+    if(s === before) break;
+  }
+  s = s.replace(/\^\{?\\circ\}?/g, '°').replace(/\\degree/g, '°')
+       .replace(/\^\{([0-9+\-n]+)\}|\^([0-9+\-n])/g, (_, a, b) => [...(a || b)].map(ch => SUP[ch] || ch).join(''))
+       .replace(/_\{([0-9]+)\}|_([0-9])/g, (_, a, b) => [...(a || b)].map(ch => SUB[ch] || ch).join(''))
+       .replace(/\\(cdot)/g, '·').replace(/\\times/g, '×').replace(/\\div/g, '÷').replace(/\\pm/g, '±').replace(/\\approx/g, '≈')
+       .replace(/\\neq?/g, '≠').replace(/\\le(q)?/g, '≤').replace(/\\ge(q)?/g, '≥').replace(/\\infty/g, '∞').replace(/\\(?:right|Right)arrow|\\to/g, '→')
+       .replace(/\\Rightarrow/g, '⇒').replace(/\\left|\\right/g, '').replace(/\\[,;:!]|\\quad|\\qquad|~/g, ' ')
+       .replace(/\\([A-Za-z]+)/g, (m, w) => GREEK[w] || w).replace(/[{}]/g, '').replace(/\s{2,}/g, ' ');
+  return s.trim();
+}
+function mdInline(t){
+  return esc(t).replace(/`([^`]+)`/g, '$1').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
+}
+// Answer (Markdown + LaTeX) -> page items: text boxes for text, formulas for display maths.
+function answerBlocks(md){
+  const blocks = [];
+  let s = String(md || '').replace(/\r/g, '');
+  // display maths becomes its own block
+  s = s.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g, (_, a, b) => '\n\n\u0001' + (a || b).trim().replace(/\n/g, ' ') + '\u0001\n\n');
+  for(const part of s.split(/\n{2,}/)){
+    const p = part.trim(); if(!p) continue;
+    const m = /^\u0001([\s\S]*)\u0001$/.exec(p);
+    if(m){ blocks.push({t: 'm', tex: m[1]}); continue; }
+    const inl = x => mdInline(x.replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => '\u0002' + t + '\u0002').replace(/\$([^$\n]+?)\$/g, (_, t) => '\u0002' + t + '\u0002')).replace(/\u0002([^\u0002]*)\u0002/g, (_, t) => texPlain(t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')));
+    const lines = p.split('\n');
+    if(lines.every(l => /^\s*([-*•]|\d+[.)])\s+/.test(l) || /^\s{2,}/.test(l))){
+      const ordered = /^\s*\d/.test(lines[0]);
+      const items = []; for(const l of lines){ const mm = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(l); if(mm) items.push(mm[1]); else if(items.length) items[items.length - 1] += ' ' + l.trim(); }
+      blocks.push({t: 'x', html: ordered ? items.map((it, i) => `<p>${i + 1}. ${inl(it)}</p>`).join('') : `<ul>${items.map(it => `<li>${inl(it)}</li>`).join('')}</ul>`});
+      continue;
+    }
+    const h = /^#{1,6}\s+(.*)$/.exec(lines[0]);
+    if(h && lines.length === 1){ blocks.push({t: 'x', html: `<h2>${inl(h[1])}</h2>`}); continue; }
+    blocks.push({t: 'x', html: '<p>' + lines.map(inl).join('<br>') + '</p>'});
+  }
+  return blocks;
+}
+async function putAnswer(md, src){
+  if(!cur){ toast('Open a page first'); return; }
+  const blocks = answerBlocks(md);
+  if(!blocks.length) return;
+  const W0 = 440;
+  let x, y;
+  if(src && src.page === cur.id && src.box){
+    // beside the question; if it was on an imported worksheet, beside the worksheet, not over it
+    const bx = src.box;
+    let right = bx[2];
+    for(const it of cur.items.values()) if(it.t === 'i' && bx[0] < it.x + it.w && bx[2] > it.x && bx[1] < it.y + it.h && bx[3] > it.y) right = Math.max(right, it.x + it.w);
+    x = right + 28; y = bx[1];
+  } else {
+    // below what is in view, or below the page's content
+    const v = viewRect(), cb = contentBox();
+    x = cb ? cb[0] : v[0] + 40; y = cb ? cb[3] + 40 : v[1] + 40;
+  }
+  const g = 'g' + newId(), added = [];
+  for(const b of blocks){
+    const id = (b.t === 'm' ? 'm' : 'x') + newId() + Math.random().toString(36).slice(2, 5);
+    const it = b.t === 'm' ? {t: 'm', id, x, y, tex: b.tex, fs: 22, c: 'auto', g} : {t: 'x', id, x, y, w: W0, fs: 1, html: cleanHTML(b.html), g};
+    setItems([[id, it]]);   // laid out one by one so each box can be measured
+    added.push(it);
+    const el = elMap.get(id);
+    y += (el ? el.offsetHeight : 40) + 6;
+  }
+  // move down until it covers nothing that is already on the page
+  {
+    const mine = new Set(added.map(it => it.id)), bb = added.map(itemBox).reduce(boxUnion);
+    const others = [...cur.items.values()].filter(it => !mine.has(it.id)).map(itemBox);
+    let dy = 0;
+    for(let k = 0; k < 400; k++){
+      const hit = others.find(o => o[0] < bb[2] + 8 && o[2] > bb[0] - 8 && o[1] < bb[3] + dy + 8 && o[3] > bb[1] + dy - 8);
+      if(!hit) break;
+      dy = hit[3] - bb[1] + 16;
+    }
+    if(dy){ for(let k = 0; k < added.length; k++){ added[k] = Object.assign({}, added[k], {y: added[k].y + dy}); } setItems(added.map(it => [it.id, it])); }
+  }
+  commit(added.map(it => [it.id, null]), added.map(it => [it.id, it]));
+  // show where it went
+  const b = added.map(itemBox).reduce(boxUnion);
+  const sx0 = b[0] * cam.z + cam.ox, sx1 = b[2] * cam.z + cam.ox, sy0 = b[1] * cam.z + cam.oy, sy1 = b[3] * cam.z + cam.oy;
+  if(sx1 > W || sx0 < 0 || sy0 < 0 || sy1 > H){ cam.ox = W * 0.55 - (b[0] + b[2]) / 2 * cam.z; cam.oy = H * 0.4 - b[1] * cam.z; if(sx1 - sx0 > W) cam.ox = 20 - b[0] * cam.z; invalidate(); saveCamSoon(); }
+  setTool('lasso'); selectIds(added.map(it => it.id));
+  toast('Put on the page. Drag it where you want it.');
+}
+
+/* =====================================================================
+   Searchable handwriting: Claude (fast model) reads the ink in the background.
+   Ink is read in cells of HW_CW x HW_CH world px; a cell is read again only when its strokes change.
+   Result per page in page.data.hw = {c: {"cx,cy": {s: signature, t: text}}, at}
+   ===================================================================== */
+const HW_CW = 1600, HW_CH = 1100;
+const HW = {
+  queue: [], busy: false, state: '', done: 0, timer: 0, lastScan: 0,
+  cells(items){
+    const m = new Map();
+    for(const it of items){
+      if(!it || it.t !== 's' || it.hl || !it.p || it.p.length < 6) continue;
+      const b = strokeBox(it), key = Math.floor((b[0] + b[2]) / 2 / HW_CW) + ',' + Math.floor((b[1] + b[3]) / 2 / HW_CH);
+      if(!m.has(key)) m.set(key, []);
+      m.get(key).push(it);
+    }
+    return m;
+  },
+  sig(strokes){
+    let h = 5381;
+    for(const id of strokes.map(s => s.id).sort()) for(let i = 0; i < id.length; i++) h = ((h << 5) + h + id.charCodeAt(i)) | 0;
+    return strokes.length + ':' + (h >>> 0).toString(36);
+  },
+  text(page){
+    const c = page && page.data.hw && page.data.hw.c; if(!c) return '';
+    return Object.keys(c).sort((a, b) => { const [ax, ay] = a.split(',').map(Number), [bx, by] = b.split(',').map(Number); return ay - by || ax - bx; }).map(k => c[k].t || '').join(' ').trim();
+  },
+  on(){ return prefs.hwSearch !== false && !!Sync.sb && !!Sync.user; },
+  // which pages have ink that has not been read yet
+  async scanAll(){
+    if(!this.on()) return;
+    this.lastScan = Date.now();
+    const all = await IDB.all('docs');
+    for(const d of all){
+      if(d.kind !== 'content' || d.deleted || !d.data) continue;
+      const pid = d.id.slice(2), page = getDoc(pid); if(!page) continue;
+      if(cur && cur.id === pid) continue;   // the open page is read when it is left
+      const raw = (d.data.items || []).filter(s => s && s.t === 's' && !s.hl);
+      if(!raw.length){ if(page.data.hw && Object.keys(page.data.hw.c || {}).length) this.enqueue(pid); continue; }
+      if(this.stale(page, raw.map(deser))) this.enqueue(pid);
+    }
+    this.kick();
+  },
+  stale(page, strokes){
+    const have = (page.data.hw && page.data.hw.c) || {}, cells = this.cells(strokes);
+    if(cells.size !== Object.keys(have).length) return true;
+    for(const [k, list] of cells) if(!have[k] || have[k].s !== this.sig(list)) return true;
+    return false;
+  },
+  enqueue(pid){ if(!this.queue.includes(pid)) this.queue.push(pid); },
+  kick(){ if(!this.busy && this.queue.length) { clearTimeout(this.timer); this.timer = setTimeout(() => this.work(), 1500); } renderHwStatus(); },
+  async work(){
+    if(this.busy || !this.on()) return;
+    if(document.visibilityState !== 'visible' || !navigator.onLine){ this.timer = setTimeout(() => this.work(), 20000); return; }
+    const pid = this.queue.shift(); if(!pid) return;
+    this.busy = true; renderHwStatus();
+    try { await this.readPage(pid); this.state = ''; }
+    catch(e){
+      const c = e.code || '';
+      if(c === 'offline'){ this.queue.unshift(pid); this.busy = false; this.timer = setTimeout(() => this.work(), 30000); renderHwStatus(); return; }
+      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
+      else { this.state = 'Last try failed: ' + jobWhy(c || e.message); console.warn('hw', e); }
+    }
+    this.busy = false; renderHwStatus();
+    if(this.queue.length) this.timer = setTimeout(() => this.work(), 1500);
+  },
+  async readPage(pid){
+    const page = getDoc(pid); if(!page) return;
+    let items;
+    if(cur && cur.id === pid) items = [...cur.items.values()];
+    else { const rec = await IDB.get('docs', 'c_' + pid); if(!rec || rec.deleted || !rec.data) return; items = (rec.data.items || []).map(deser).filter(Boolean); }
+    const cells = this.cells(items), old = (page.data.hw && page.data.hw.c) || {}, next = {};
+    let changed = Object.keys(old).some(k => !cells.has(k));
+    for(const [k, list] of cells){
+      const sig = this.sig(list);
+      if(old[k] && old[k].s === sig){ next[k] = old[k]; continue; }
+      changed = true;
+      let n = 0; for(const it of list) n += it.p.length / 3;
+      let t = '';
+      if(n >= 25){ const img = inkImage(list, 1500); if(img) t = (await claudeJob('read', img.url, 'Transcribe the handwriting.')).slice(0, 4000); }
+      next[k] = {s: sig, t};
+      this.done++;
+    }
+    if(!changed) return;
+    const fresh = getDoc(pid); if(!fresh) return;
+    await patchDoc(fresh, {hw: {c: next, at: Date.now()}});
+    searchCache = null;
+  }
+};
+function renderHwStatus(){
+  const el = $('setHwHint'); if(!el) return;
+  if(prefs.hwSearch === false){ el.textContent = 'Handwriting is not read. Search finds typed text only.'; return; }
+  if(!Sync.sb || !Sync.user){ el.textContent = 'Needs sync sign-in: Claude reads your handwriting through your account.'; return; }
+  const pages = [...docs.values()].filter(d => d.kind === 'page' && live(d) && d.data.hw).length;
+  el.textContent = HW.state ? HW.state : `Claude reads your handwriting in the background so search finds it (about CHF 0.01 for 20 pages). ${pages} page${pages === 1 ? '' : 's'} read` + (HW.busy || HW.queue.length ? `, ${HW.queue.length + (HW.busy ? 1 : 0)} waiting.` : '.');
+}
+// the open page is read a little after you stop writing, and when you leave it
+let hwPageT = 0;
+function hwSoon(){
+  clearTimeout(hwPageT);
+  if(!cur || !HW.on()) return;
+  const id = cur.id;
+  hwPageT = setTimeout(() => { if(cur && cur.id === id && !act){ HW.enqueue(id); HW.kick(); } }, 45000);
+}
+
+/* =====================================================================
+   Handwritten formula -> typed formula (lasso menu)
+   ===================================================================== */
+function measureMath(tex, fs){
+  const d = document.createElement('div');
+  d.className = 'it it-math'; d.style.cssText = `position:absolute;left:-9999px;top:0;font-size:${fs}px;visibility:hidden`;
+  document.body.appendChild(d);
+  try { katex.render(tex, d, {throwOnError: true, displayMode: true}); } catch { d.remove(); return null; }
+  const r = [d.offsetWidth, d.offsetHeight]; d.remove(); return r;
+}
+async function strokesToFormula(){
+  if(!sel || !cur) return;
+  const strokes = sel.ids.map(id => cur.items.get(id)).filter(it => it && it.t === 's' && !it.hl);
+  if(!strokes.length) return;
+  const btn = $('selMath'); btn.disabled = true; btn.textContent = 'Reading…';
+  try {
+    const img = inkImage(strokes, 1000);
+    let tex = await claudeJob('latex', img.url, 'Convert this handwritten expression to LaTeX.');
+    tex = tex.replace(/^```(?:latex)?\s*|\s*```$/g, '').replace(/^\$+|\$+$/g, '').replace(/^\\\[|\\\]$/g, '').trim();
+    if(!tex || tex === '?' || !measureMath(tex, 40)){ toast('Could not read that as a formula. Write it a bit bigger and try again.'); return; }
+    const b = img.box, bw = b[2] - b[0], bh = b[3] - b[1];
+    const [mw, mh] = measureMath(tex, 40);
+    let fs = 40 * Math.min(bh / Math.max(1, mh) * 1.05, bw / Math.max(1, mw) * 1.15);
+    fs = Math.round(clamp(fs, 14, 96));
+    const [, h2] = measureMath(tex, fs);
+    const cols = {}; for(const s of strokes) cols[s.c] = (cols[s.c] || 0) + 1;
+    const c = Object.keys(cols).sort((a, b2) => cols[b2] - cols[a])[0] || 'auto';
+    const m = {t: 'm', id: 'm' + newId(), x: b[0] - 6, y: b[1] + (bh - h2) / 2, tex, fs, c};
+    const g = strokes[0].g && strokes.every(s => s.g === strokes[0].g) ? strokes[0].g : null; if(g) m.g = g;
+    clearSel();
+    apply(strokes.map(s => [s.id, null]).concat([[m.id, m]]), strokes.map(s => [s.id, s]).concat([[m.id, null]]));
+    selectIds([m.id]);
+    toast('Turned into a formula. Undo brings your handwriting back; tap the formula to edit it.');
+  } catch(e){ toast(jobWhy(e.code || e.message)); }
+  finally { btn.disabled = false; btn.textContent = 'To formula'; }
+}
+
+/* =====================================================================
+   Page slider on the right: jump through imported pages
+   ===================================================================== */
+let slPages = null, slDrag = null;
+function sliderPages(){
+  if(slPages) return slPages;
+  slPages = cur ? [...cur.items.values()].filter(it => it.t === 'i' && it.h > 150).sort((a, b) => a.y - b.y || a.x - b.x) : [];
+  return slPages;
+}
+function sliderIndexAt(){
+  const pages = sliderPages(); if(!pages.length) return 0;
+  const v = viewRect(), cy = v[1] + (v[3] - v[1]) * 0.35;
+  let best = 0, bd = Infinity;
+  pages.forEach((p, i) => { const d = cy < p.y ? p.y - cy : cy > p.y + p.h ? cy - p.y - p.h : 0; if(d < bd){ bd = d; best = i; } });
+  return best;
+}
+function renderSlider(){
+  const el = $('pgSlider'); if(!el) return;
+  const pages = sliderPages();
+  if(!cur || pages.length < 2){ el.hidden = true; return; }
+  el.hidden = false;
+  const i = slDrag ? slDrag.i : sliderIndexAt(), n = pages.length;
+  const track = $('pgTrack'), th = track.clientHeight;
+  const y = n > 1 ? i / (n - 1) * th : 0;
+  $('pgThumb').style.transform = `translateY(${y}px)`;
+  $('pgLabel').textContent = `${i + 1} / ${n}`;
+  $('pgLabel').style.transform = `translateY(${y}px)`;
+  // violet ticks where pages have "later" marks
+  const key = n + ':' + [...markCounts.entries()].join() + ':' + (cur.items.size);
+  if(el._ticks !== key){
+    el._ticks = key;
+    const marks = clusterMarks([...cur.items.values()]);
+    const idx = new Set();
+    for(const g of marks){ const my = (g.b[1] + g.b[3]) / 2; const k = pages.findIndex(p => my >= p.y && my <= p.y + p.h); if(k >= 0) idx.add(k); }
+    $('pgTicks').innerHTML = [...idx].map(k => `<i style="top:${(n > 1 ? k / (n - 1) * 100 : 0).toFixed(2)}%"></i>`).join('');
+  }
+}
+function sliderJump(i){
+  const p = sliderPages()[i]; if(!p) return;
+  cam.oy = 16 - p.y * cam.z;
+  const v = viewRect();
+  if(p.x + p.w < v[0] || p.x > v[2]) cam.ox = Math.max(16, (W - p.w * cam.z) / 2) - p.x * cam.z;
+  invalidate(); saveCamSoon();
+}
+{
+  const el = $('pgSlider');
+  const at = e => { const r = $('pgTrack').getBoundingClientRect(), n = sliderPages().length; return clamp(Math.round((e.clientY - r.top) / Math.max(1, r.height) * (n - 1)), 0, n - 1); };
+  el.addEventListener('pointerdown', e => {
+    e.stopPropagation(); e.preventDefault();
+    if(!sliderPages().length) return;
+    slDrag = {id: e.pointerId, i: at(e)};
+    try { el.setPointerCapture(e.pointerId); } catch {}
+    el.classList.add('on'); sliderJump(slDrag.i); renderSlider();
+  });
+  el.addEventListener('pointermove', e => {
+    e.stopPropagation();
+    if(!slDrag || e.pointerId !== slDrag.id) return;
+    const i = at(e); if(i !== slDrag.i){ slDrag.i = i; sliderJump(i); renderSlider(); }
+  });
+  const end = e => { e.stopPropagation(); if(!slDrag || e.pointerId !== slDrag.id) return; slDrag = null; el.classList.remove('on'); renderSlider(); };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+}
+
+/* =====================================================================
+   Scan paper with the camera: find the sheet, straighten it, clean it up
+   ===================================================================== */
+const Scan = {
+  src: null,      // canvas with the photo (max 2600 px)
+  q: null,        // corners in photo pixels [[x,y] x4] TL, TR, BR, BL
+  mode: 'doc',
+  async load(file){
+    $('scanStatus').textContent = 'Reading photo';
+    let bmp;
+    try { bmp = await createImageBitmap(file, {imageOrientation: 'from-image'}); }
+    catch { const u = URL.createObjectURL(file); const im = new Image(); im.src = u; await im.decode(); bmp = im; }
+    const w0 = bmp.width || bmp.naturalWidth, h0 = bmp.height || bmp.naturalHeight, k = Math.min(1, 2600 / Math.max(w0, h0));
+    const c = document.createElement('canvas'); c.width = Math.round(w0 * k); c.height = Math.round(h0 * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    if(bmp.close) bmp.close();
+    this.src = c; this.q = findSheet(c); this.draw();
+    $('scanStatus').textContent = this.q.auto ? 'Drag the corners if they are not on the edges of the sheet.' : 'Could not find the sheet. Drag the corners onto its edges.';
+  },
+  rotate(){
+    if(!this.src) return;
+    const s = this.src, c = document.createElement('canvas'); c.width = s.height; c.height = s.width;
+    const ctx = c.getContext('2d'); ctx.translate(c.width, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(s, 0, 0);
+    // corners turn with the photo: (x, y) -> (H - y, x), and the order shifts by one
+    const q = this.q.map(([x, y]) => [s.height - y, x]);
+    this.q = [q[3], q[0], q[1], q[2]]; this.q.auto = true;
+    s.width = s.height = 1; this.src = c; this.draw();
+  },
+  // view geometry: photo fitted into the editor box
+  fit(){
+    const box = $('scanView'), bw = box.clientWidth || 480, bh = box.clientHeight || 520;
+    const k = Math.min(bw / this.src.width, bh / this.src.height);
+    return {k, ox: (bw - this.src.width * k) / 2, oy: (bh - this.src.height * k) / 2};
+  },
+  draw(){
+    if(!this.src) return;
+    const cv = $('scanCv'), f = this.fit(), d = Math.min(window.devicePixelRatio || 1, 2);
+    const vw = $('scanView').clientWidth || 480, vh = $('scanView').clientHeight || 520;
+    cv.width = Math.round(vw * d); cv.height = Math.round(vh * d); cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
+    const ctx = cv.getContext('2d'); ctx.setTransform(d, 0, 0, d, 0, 0); ctx.clearRect(0, 0, vw, vh);
+    ctx.drawImage(this.src, f.ox, f.oy, this.src.width * f.k, this.src.height * f.k);
+    const P = this.q.map(([x, y]) => [f.ox + x * f.k, f.oy + y * f.k]);
+    ctx.fillStyle = 'rgba(10,14,20,.45)';
+    ctx.beginPath(); ctx.rect(0, 0, vw, vh); ctx.moveTo(P[0][0], P[0][1]); for(const p of [P[3], P[2], P[1]]) ctx.lineTo(p[0], p[1]); ctx.closePath(); ctx.fill('evenodd');
+    ctx.strokeStyle = '#3BA5F0'; ctx.lineWidth = 2; ctx.beginPath(); P.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); ctx.stroke();
+    $('scanView').querySelectorAll('.scan-h').forEach((h, i) => { h.style.left = P[i][0] + 'px'; h.style.top = P[i][1] + 'px'; });
+  },
+  async place(again){
+    if(!this.src || !cur) return;
+    const go = $('scanGo'), go2 = $('scanNext'); go.disabled = go2.disabled = true;
+    $('scanStatus').textContent = 'Straightening';
+    await new Promise(r => setTimeout(r, 30));
+    try {
+      const out = warpSheet(this.src, this.q, 1700);
+      if(this.mode === 'doc'){ $('scanStatus').textContent = 'Cleaning up'; await new Promise(r => setTimeout(r, 10)); cleanPaper(out); }
+      const a = await saveAsset(await canvasBlob(out));
+      const wW = A4W, hW = wW * out.height / out.width;
+      out.width = out.height = 1;
+      const cb = contentBox(), [vx, vy] = toWorld(W > 600 ? 48 : 16, 24);
+      const x0 = cb ? cb[0] : vx, y0 = cb ? cb[3] + 48 : vy;
+      addItems([{t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wW, h: hW, a, doc: 1}]);
+      setTool('pen');
+      cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon();
+      toast('Scan placed on the page');
+      this.src.width = this.src.height = 1; this.src = null;
+      if(again){ $('scanSetup').hidden = true; $('scanPick').hidden = false; $('scanStatus').textContent = ''; $('scanFile').click(); }
+      else hideModal('scanDlg');
+    } catch(e){ console.warn(e); $('scanStatus').textContent = 'Could not process the photo: ' + (e.message || e); }
+    go.disabled = go2.disabled = false;
+  }
+};
+// Finds the sheet of paper: the biggest bright area, then its four outermost corners.
+function findSheet(src){
+  const k = Math.min(1, 360 / Math.max(src.width, src.height)), w = Math.max(8, Math.round(src.width * k)), h = Math.max(8, Math.round(src.height * k));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', {willReadFrequently: true}); ctx.drawImage(src, 0, 0, w, h);
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const L = new Float32Array(w * h), hist = new Uint32Array(256);
+  for(let i = 0; i < w * h; i++){ const r = px[4 * i], g = px[4 * i + 1], b = px[4 * i + 2]; const v = (r * 77 + g * 150 + b * 29) >> 8; const sat = Math.max(r, g, b) - Math.min(r, g, b); L[i] = v - sat * 0.5; hist[clamp(Math.round(L[i]), 0, 255)]++; }
+  // Otsu threshold between paper and background
+  let sum = 0; for(let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, t = 128;
+  for(let i = 0; i < 256; i++){ wB += hist[i]; if(!wB) continue; const wF = w * h - wB; if(!wF) break; sB += i * hist[i]; const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) ** 2; if(v > best){ best = v; t = i; } }
+  const on = new Uint8Array(w * h); for(let i = 0; i < w * h; i++) on[i] = L[i] > t ? 1 : 0;
+  // biggest connected bright area
+  const lab = new Int32Array(w * h).fill(-1), stack = [];
+  let bestN = 0, bestL = -1, nl = 0;
+  for(let i = 0; i < w * h; i++){
+    if(!on[i] || lab[i] >= 0) continue;
+    let n = 0; lab[i] = nl; stack.push(i);
+    while(stack.length){ const j = stack.pop(); n++; const x = j % w, y = (j / w) | 0; for(const q of [x > 0 ? j - 1 : -1, x < w - 1 ? j + 1 : -1, y > 0 ? j - w : -1, y < h - 1 ? j + w : -1]) if(q >= 0 && on[q] && lab[q] < 0){ lab[q] = nl; stack.push(q); } }
+    if(n > bestN){ bestN = n; bestL = nl; } nl++;
+  }
+  const fallback = () => { const m = 0.04; const q = [[src.width * m, src.height * m], [src.width * (1 - m), src.height * m], [src.width * (1 - m), src.height * (1 - m)], [src.width * m, src.height * (1 - m)]]; q.auto = false; return q; };
+  if(bestN < w * h * 0.12) return fallback();
+  // touching the photo edge on all four sides means it is the background (or a full-frame page)
+  let tl = null, tr = null, br = null, bl = null;
+  for(let i = 0; i < w * h; i++){
+    if(lab[i] !== bestL) continue;
+    const x = i % w, y = (i / w) | 0;
+    if(!tl || x + y < tl[0] + tl[1]) tl = [x, y];
+    if(!br || x + y > br[0] + br[1]) br = [x, y];
+    if(!tr || x - y > tr[0] - tr[1]) tr = [x, y];
+    if(!bl || y - x > bl[1] - bl[0]) bl = [x, y];
+  }
+  const q = [tl, tr, br, bl].map(([x, y]) => [(x + 0.5) / k, (y + 0.5) / k]);
+  const area = Math.abs(q.reduce((a, p, i) => { const n2 = q[(i + 1) % 4]; return a + p[0] * n2[1] - n2[0] * p[1]; }, 0)) / 2;
+  // too small, or simply the whole photo (no edge between sheet and table): let the user place the corners
+  if(area < src.width * src.height * 0.15 || area > src.width * src.height * 0.95) return fallback();
+  q.auto = true;
+  return q;
+}
+// Perspective warp of the quadrilateral q (TL, TR, BR, BL) onto a rectangle outW wide.
+function warpSheet(src, q, outW){
+  const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  const wq = (d(q[0], q[1]) + d(q[3], q[2])) / 2, hq = (d(q[0], q[3]) + d(q[1], q[2])) / 2;
+  let ratio = hq / Math.max(1, wq);
+  if(Math.abs(ratio - Math.SQRT2) / Math.SQRT2 < 0.1) ratio = Math.SQRT2;   // close to A4 portrait
+  else if(Math.abs(ratio - 1 / Math.SQRT2) * Math.SQRT2 < 0.1) ratio = 1 / Math.SQRT2;
+  const W2 = Math.round(outW), H2 = Math.round(outW * ratio);
+  // homography from the unit square to the quadrilateral
+  const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = q;
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3, dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+  const den = dx1 * dy2 - dx2 * dy1;
+  const g = den ? (dx3 * dy2 - dx2 * dy3) / den : 0, hh = den ? (dx1 * dy3 - dx3 * dy1) / den : 0;
+  const a = x1 - x0 + g * x1, b = x3 - x0 + hh * x3, c = x0, dd = y1 - y0 + g * y1, e = y3 - y0 + hh * y3, f = y0;
+  const sctx = src.getContext('2d', {willReadFrequently: true});
+  const S = sctx.getImageData(0, 0, src.width, src.height), sp = S.data, SW = src.width, SH = src.height;
+  const out = document.createElement('canvas'); out.width = W2; out.height = H2;
+  const octx = out.getContext('2d'), O = octx.createImageData(W2, H2), op = O.data;
+  for(let y = 0; y < H2; y++){
+    const v = (y + 0.5) / H2;
+    for(let x = 0; x < W2; x++){
+      const u = (x + 0.5) / W2, z = g * u + hh * v + 1;
+      let sx = (a * u + b * v + c) / z - 0.5, sy = (dd * u + e * v + f) / z - 0.5;
+      if(sx < 0) sx = 0; else if(sx > SW - 1.001) sx = SW - 1.001;
+      if(sy < 0) sy = 0; else if(sy > SH - 1.001) sy = SH - 1.001;
+      const ix = sx | 0, iy = sy | 0, fx = sx - ix, fy = sy - iy, i0 = (iy * SW + ix) * 4, i1 = i0 + SW * 4, o = (y * W2 + x) * 4;
+      for(let ch = 0; ch < 3; ch++){
+        const top = sp[i0 + ch] + (sp[i0 + 4 + ch] - sp[i0 + ch]) * fx, bot = sp[i1 + ch] + (sp[i1 + 4 + ch] - sp[i1 + ch]) * fx;
+        op[o + ch] = top + (bot - top) * fy;
+      }
+      op[o + 3] = 255;
+    }
+  }
+  octx.putImageData(O, 0, 0);
+  return out;
+}
+// "Document" look: even out shadows (divide by the paper brightness around each spot), then white paper, dark ink.
+function cleanPaper(cv){
+  const w = cv.width, h = cv.height, ctx = cv.getContext('2d', {willReadFrequently: true});
+  const img = ctx.getImageData(0, 0, w, h), p = img.data;
+  const bs = 24, gw = Math.ceil(w / bs), gh = Math.ceil(h / bs), bg = new Float32Array(gw * gh);
+  // brightest paper in each block (90th percentile of brightness), smoothed
+  for(let gy = 0; gy < gh; gy++) for(let gx = 0; gx < gw; gx++){
+    const hist = new Uint16Array(64); let n = 0;
+    for(let y = gy * bs; y < Math.min(h, gy * bs + bs); y += 2) for(let x = gx * bs; x < Math.min(w, gx * bs + bs); x += 2){ const i = (y * w + x) * 4; hist[((p[i] * 77 + p[i + 1] * 150 + p[i + 2] * 29) >> 8) >> 2]++; n++; }
+    let acc = 0, k = 63; for(; k > 0; k--){ acc += hist[k]; if(acc >= n * 0.1) break; }
+    bg[gy * gw + gx] = Math.max(40, k * 4 + 2);
+  }
+  // spread the paper level across blocks that are mostly ink (max over neighbours), then blur
+  const bg2 = new Float32Array(gw * gh);
+  for(let y = 0; y < gh; y++) for(let x = 0; x < gw; x++){ let m = 0; for(let dy = -1; dy <= 1; dy++) for(let dx = -1; dx <= 1; dx++){ const xx = x + dx, yy = y + dy; if(xx >= 0 && yy >= 0 && xx < gw && yy < gh) m = Math.max(m, bg[yy * gw + xx]); } bg2[y * gw + x] = m; }
+  for(let y = 0; y < gh; y++) for(let x = 0; x < gw; x++){ let s = 0, n = 0; for(let dy = -1; dy <= 1; dy++) for(let dx = -1; dx <= 1; dx++){ const xx = x + dx, yy = y + dy; if(xx >= 0 && yy >= 0 && xx < gw && yy < gh){ s += bg2[yy * gw + xx]; n++; } } bg[y * gw + x] = s / n; }
+  for(let y = 0; y < h; y++){
+    const fy = clamp((y + 0.5) / bs - 0.5, 0, gh - 1), y0 = fy | 0, y1 = Math.min(gh - 1, y0 + 1), ty = fy - y0;
+    for(let x = 0; x < w; x++){
+      const fx = clamp((x + 0.5) / bs - 0.5, 0, gw - 1), x0 = fx | 0, x1 = Math.min(gw - 1, x0 + 1), tx = fx - x0;
+      const b = (bg[y0 * gw + x0] * (1 - tx) + bg[y0 * gw + x1] * tx) * (1 - ty) + (bg[y1 * gw + x0] * (1 - tx) + bg[y1 * gw + x1] * tx) * ty;
+      const i = (y * w + x) * 4;
+      for(let ch = 0; ch < 3; ch++){
+        let v = p[i + ch] / b;                 // 1 = paper
+        v = (v - 0.45) / 0.45;                 // stretch: paper white, ink dark
+        v = v >= 1 ? 1 : v <= 0 ? 0 : v * v * (3 - 2 * v);
+        p[i + ch] = v * 255;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+$('scanFile').addEventListener('change', async () => {
+  const f = $('scanFile').files[0]; $('scanFile').value = '';
+  if(!f) return;
+  $('scanPick').hidden = true; $('scanSetup').hidden = false;
+  try { await Scan.load(f); } catch(e){ console.warn(e); $('scanStatus').textContent = 'This photo could not be opened.'; }
+});
+$('scanBtn').addEventListener('click', () => { hideModal('importDlg'); if(!cur){ toast('Open a page first'); return; } $('scanPick').hidden = false; $('scanSetup').hidden = true; $('scanStatus').textContent = ''; showModal('scanDlg'); });
+$('scanRetake').addEventListener('click', () => $('scanFile').click());
+$('scanRot').addEventListener('click', () => Scan.rotate());
+$('scanMode').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(!b) return; Scan.mode = b.dataset.v; $('scanMode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
+$('scanGo').addEventListener('click', () => Scan.place(false));
+$('scanNext').addEventListener('click', () => Scan.place(true));
+$('scanView').querySelectorAll('.scan-h').forEach((hd, i) => {
+  let drag = null;
+  hd.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); drag = e.pointerId; try { hd.setPointerCapture(e.pointerId); } catch {} hd.classList.add('on'); });
+  hd.addEventListener('pointermove', e => {
+    if(drag !== e.pointerId || !Scan.src) return;
+    const r = $('scanView').getBoundingClientRect(), f = Scan.fit();
+    Scan.q[i] = [clamp((e.clientX - r.left - f.ox) / f.k, 0, Scan.src.width), clamp((e.clientY - r.top - f.oy) / f.k, 0, Scan.src.height)];
+    Scan.draw();
+  });
+  const up = () => { drag = null; hd.classList.remove('on'); };
+  hd.addEventListener('pointerup', up); hd.addEventListener('pointercancel', up);
+});
+addEventListener('resize', () => { if(!$('scanDlg').hidden && Scan.src) Scan.draw(); });
 
 /* =====================================================================
    Keyboard (hardware keyboard / PC)
@@ -4193,6 +4906,8 @@ async function boot(){
   if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   purgeTrash().catch(() => {});
   scanMarks().catch(() => {});
+  setTimeout(() => HW.scanAll().catch(() => {}), 20000);
+  setInterval(() => { if(document.visibilityState === 'visible') HW.scanAll().catch(() => {}); }, 10 * 60000);
 }
 function themeChanged(){
   readTokens();
@@ -4243,6 +4958,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, cam, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

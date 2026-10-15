@@ -4,9 +4,10 @@
 //   ASK_ALLOWED_EMAILS  comma-separated emails of Inkwell accounts that may use Claude
 //   ASK_MODEL           optional, the strong model, defaults to claude-sonnet-5-5
 //   ASK_FAST_MODEL      optional, the cheap model, defaults to claude-haiku-5-5
-// Body: {mode: 'tutor'|'solve', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
+// Body: {mode: 'tutor'|'solve'|'practice', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
 // Background jobs (fixed model, no chat): mode 'read' = transcribe handwriting for search (fast model),
-// mode 'latex' = turn a handwritten formula into LaTeX (smart model).
+// mode 'latex' = turn a handwritten formula into LaTeX (smart model), mode 'ocr' = read an imported page
+// picture for search (fast model), mode 'scribe' = handwriting -> typed text box (fast model).
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const ORIGINS = ["https://slowoff.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
@@ -42,6 +43,16 @@ Mode: TUTOR. Teach, don't solve:
   solve: `${BASE}
 
 Mode: SOLVE. Give a complete worked solution: given values, formula, steps with units, result (bold), and one line on the idea behind it.`,
+  practice: `${BASE}
+
+Mode: PRACTICE. You quiz Rafael to check whether he really knows the material. His first message contains his learning objectives, exercises and notes (text from his Inkwell pages or files he added) and maybe a focus.
+- Base everything on that material. If learning objectives are there, cover them and say which objective each exercise checks.
+- Give ONE exercise at a time, then stop and wait for his answer. Number them: Exercise 1, Exercise 2, ...
+- Mix the kinds: calculations with new numbers (similar to the given exercises, never copies), short explanations, definitions, "what happens if" questions. Start easy, get harder when he answers well, go back to basics when he struggles.
+- Never show the solution before he answers. If he asks for a hint, give a small one.
+- When he answers (typed, or a scan of his handwritten work): start with Correct, Partly correct or Wrong, then a short explanation, the right result if he was wrong and the exact step where he went wrong. Then give the next exercise.
+- Keep a running score like "Score: 3/4" at the end of each feedback.
+- If he says stop, done or enough: give a short summary with the score, which objectives look solid, which need more work and what to review.`,
 };
 
 const JOBS: Record<string, { system: string; max: number; smart: boolean }> = {
@@ -50,6 +61,18 @@ const JOBS: Record<string, { system: string; max: number; smart: boolean }> = {
     system: `You transcribe handwritten notes so they can be searched. The image shows only handwriting (pen strokes) from a student's notes page; it may be in German, English, French or Portuguese and may contain maths.
 Output only the words, numbers and formulas you can read, in reading order, as plain text. Write maths in plain LaTeX without $ signs (e.g. v = \\frac{s}{t}). No comments, no explanations, no markdown.
 Skip drawings, arrows and scribbles. If nothing is readable, output nothing at all.`,
+  },
+  ocr: {
+    max: 3000, smart: false,
+    system: `You transcribe one page of a student's worksheet, textbook or notes (printed text, maybe some handwriting) so it can be searched. It may be in German, English, French or Portuguese.
+Output one line of text per line on the page, top to bottom, in reading order (left column before right column). Start every line with its vertical position on the page as a whole percent from the top, then a | character, for example:
+12|Aufgabe 3: Ein Auto beschleunigt gleichmässig
+Write maths as plain text (v = s/t, x², √2). No comments, no markdown, no explanations. Skip pictures and decoration. If the page has no text at all, output exactly: NO_TEXT`,
+  },
+  scribe: {
+    max: 400, smart: false,
+    system: `The image shows handwriting a student just wrote with the Apple Pencil on a notes page. Convert it to typed text exactly as written: the same words, the same line breaks, the same language (German, English, French or Portuguese). Use the context to decide unclear letters, but do not correct grammar and do not rephrase. Write maths as plain text with Unicode (v = s/t, x², √, Δ, ·, →).
+Output only the text, nothing else. If the strokes are a drawing, a shape, an arrow, a graph or a scribble and not writing, output exactly: NOT_TEXT`,
   },
   latex: {
     max: 400, smart: true,
@@ -95,7 +118,14 @@ Deno.serve(async (req) => {
   if (raw.length > 9_000_000) return fail(req, 413, "too_big");
   let body: { mode?: string; model?: string; messages?: any[] };
   try { body = JSON.parse(raw); } catch { return fail(req, 400, "bad_json"); }
-  const messages = Array.isArray(body.messages) ? body.messages.slice(-40) : [];
+  // long chats: the first message stays (in a practice session it holds the notes), then the latest turns
+  const all = Array.isArray(body.messages) ? body.messages : [];
+  let messages = all;
+  if (all.length > 40) {
+    let i = all.length - 38;
+    while (i < all.length && all[i]?.role !== "assistant") i++;
+    messages = [all[0], ...all.slice(i)];
+  }
   if (!messages.length) return fail(req, 400, "no_messages");
 
   const smart = Deno.env.get("ASK_MODEL") || "claude-sonnet-5-5", fast = Deno.env.get("ASK_FAST_MODEL") || "claude-haiku-5-5";

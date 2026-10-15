@@ -453,6 +453,14 @@ select.pf-ls option:checked{background:#9fbbe8}
 .later-done{width:40px;flex:none;display:grid;place-items:center;border-radius:10px;color:var(--muted)}
 @media (hover:hover){.later-done:hover{background:var(--accent-soft);color:var(--ok)}}
 .later-done svg{width:20px;height:20px}
+.hit-line{display:flex;gap:8px;align-items:baseline;width:100%;text-align:left;padding:6px 12px 6px 22px;margin:-2px 0 4px;border-radius:8px;font-size:13px;line-height:1.35;color:var(--muted)}
+.hit-line .hl-n{flex:none;font-weight:600;color:var(--fg);font-variant-numeric:tabular-nums}
+.hit-line .hl-s{min-width:0;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.hit-line mark{background:color-mix(in srgb,#F5C400 45%,transparent);color:inherit;border-radius:2px;padding:0 1px}
+.hit-line:active{background:color-mix(in srgb,var(--fg) 8%,transparent)}
+@media (hover:hover){.hit-line:hover{background:color-mix(in srgb,var(--fg) 6%,transparent)}}
+.hit-flash{position:absolute;border-radius:4px;background:rgba(245,196,0,.38);pointer-events:none;animation:hitFlash 2.5s ease-out forwards}
+@keyframes hitFlash{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0}}
 .mark-flash{position:absolute;border-radius:10px;border:3px solid #8B5CF6;pointer-events:none;animation:markFlash 2.1s ease-out forwards}
 @keyframes markFlash{0%{opacity:0;transform:scale(1.25)}15%{opacity:1;transform:scale(1)}70%{opacity:1}100%{opacity:0}}
 

@@ -2385,22 +2385,38 @@ async function buildSearch(){
     if(d.kind !== 'content' || d.deleted || !d.data) continue;
     let txt = '';
     for(const it of d.data.items || []){ if(it.t === 'x') txt += ' ' + htmlText(it.html); else if(it.t === 'm') txt += ' ' + it.tex; else if(it.t === 'i' && it.f) txt += fieldText(it); }
-    map.set(d.id.slice(2), txt.toLowerCase());
+    map.set(d.id.slice(2), {txt: fold(txt), pics: pagePictures(d.data.items || [])});
   }
   searchCache = map;
   return map;
+}
+// everything readable on a page: title, typed text, handwriting (as read by Claude), imported pages
+function pageWords(p, e){
+  return [p.data.title || '', e ? e.txt : '', HW.text(p)].concat(e ? e.pics.map(it => ptxtText(ptxtOf(it.a))) : []).join('\n');
 }
 async function renderSearch(q){
   $('editSec').hidden = true; $('newPage').parentElement.hidden = true; $('secEdit').innerHTML = '';
   $('listTitle').innerHTML = `<div class="crumb">Search</div><h2>“${esc(q)}”</h2>`;
   const idx = await buildSearch();
   if($('search').value.trim() !== q) return;
-  const needle = q.toLowerCase(), hits = [];
+  const needle = fold(q), hits = [];
   for(const p of [...docs.values()].filter(d => d.kind === 'page' && live(d)).sort((a, b) => b.updated - a.updated)){
-    const hay = ((p.data.title || '') + ' ' + (idx.get(p.id) || '') + ' ' + HW.text(p)).toLowerCase();
-    if(hay.includes(needle)) hits.push(pageItemHTML(p, pathOf(p)));
+    let e = idx.get(p.id);
+    if(cur && cur.id === p.id){
+      const items = [...cur.items.values()];
+      let txt = ''; for(const it of items){ if(it.t === 'x') txt += ' ' + htmlText(it.html); else if(it.t === 'm') txt += ' ' + it.tex; else if(it.t === 'i' && it.f) txt += fieldText(it); }
+      e = {txt: fold(txt), pics: pagePictures(items)};
+    }
+    const hay = fold(pageWords(p, e)).replace(/-\n/g, '').replace(/\n/g, ' ');
+    if(!hay.includes(needle)) continue;
+    let h = pageItemHTML(p, pathOf(p));
+    // where it is inside imported pages (PDFs, scans): tap to jump to that line
+    const sub = e ? ptxtHits(e.pics, needle, 4) : [];
+    for(const x of sub) h += `<button class="hit-line" data-page="${p.id}" data-jump="${x.id}" data-y="${x.y}"><span class="hl-n">p. ${x.n}</span><span class="hl-s">${x.html}</span></button>`;
+    hits.push(h);
   }
-  $('pageList').innerHTML = hits.length ? hits.join('') : '<div class="empty"><strong>Nothing found</strong>No page contains that text.' + (prefs.hwSearch === false ? ' Reading handwriting is off in the settings.' : '') + '</div>';
+  const reading = PT.queue.length + (PT.busy ? 1 : 0);
+  $('pageList').innerHTML = hits.length ? hits.join('') : '<div class="empty"><strong>Nothing found</strong>No page contains that text.' + (prefs.hwSearch === false ? ' Reading handwriting and scans is off in the settings.' : reading ? ` ${reading} imported page${reading === 1 ? ' is' : 's are'} still being read.` : '') + '</div>';
 }
 let searchT;
 $('search').addEventListener('input', () => {
@@ -2450,7 +2466,8 @@ $('pageList').addEventListener('click', e => {
   const t = e.target.closest('[data-page]'); if(!t) return;
   const p = getDoc(t.dataset.page); if(!p) return;
   if(!$('search').value.trim()){ ui.sec = p.data.sec; }
-  openPage(p.id).then(() => { if($('search').value.trim()) markActivePage(); });
+  const jump = t.dataset.jump, y = +t.dataset.y;
+  openPage(p.id).then(() => { if($('search').value.trim()) markActivePage(); if(jump) jumpToLine(jump, y); });
 });
 $('newPage').addEventListener('click', () => newPage());
 $('newMore').addEventListener('click', e => { renderTemplates(); openPop('newPop', e.currentTarget); });
@@ -3229,13 +3246,14 @@ $('impGo').addEventListener('click', async () => {
       for(let k = 0; k < pages.length; k++){
         $('impStatus').textContent = `Printing page ${k + 1} of ${pages.length}`;
         const page = await imp.pdf.getPage(pages[k]); const v1 = page.getViewport({scale: 1});
-        const pf = await pdfFields(page); page.cleanup();
+        const pf = await pdfFields(page), lines = await pdfLines(page); page.cleanup();
         const wWorld = v1.width / 595.28 * A4W * size, hWorld = wWorld * v1.height / v1.width;
         const px = Math.round(clamp(wWorld * 2.4, 900, 2000));
         const r = await renderPdfPage(imp.pdf, pages[k], px, pf.f.length ? pf.blank : null);
         const a = await saveAsset(await canvasBlob(r.canvas));
         r.canvas.width = r.canvas.height = 1;
         const item = {t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a, doc: 1};
+        if(hasRealText(lines)) await savePtxt(a, 'pdf', lines);   // searchable right away; scans are read by Claude later
         if(pf.f.length){ item.f = pf.f; nFields += pf.f.length; }
         items.push(item);
         y += hWorld + 24;
@@ -3270,7 +3288,7 @@ $('impGo').addEventListener('click', async () => {
   }
   const pd = nameAfterPdf && items.length && getDoc(cur.id);
   if(pd && !(pd.data.title || '').trim() && !$('title').value.trim()){ $('title').value = imp.name; await patchDoc(pd, {title: imp.name}); refreshPageItem(cur.id); }
-  if(items.length){ addItems(items); setTool('pen'); cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon(); }
+  if(items.length){ addItems(items); setTool('pen'); cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon(); PT.soon(); }
   hideModal('importDlg');
   toast((items.length === 1 ? 'Placed on the page' : `Placed ${items.length} pages`) + (nFields ? ` · ${nFields} fillable field${nFields === 1 ? '' : 's'}` : ''));
 });
@@ -3615,7 +3633,7 @@ $('setModel').addEventListener('click', e => {
 $('setHw').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
   prefs.hwSearch = b.dataset.v === 'on'; savePrefs(); renderPrefSettings();
-  if(prefs.hwSearch){ HW.state = ''; HW.scanAll(); } else { HW.queue.length = 0; }
+  if(prefs.hwSearch){ HW.state = ''; PT.state = ''; HW.scanAll(); PT.scanAll(); } else { HW.queue.length = 0; PT.queue.length = 0; }
 });
 $('setWheel').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
@@ -4753,10 +4771,11 @@ const HW = {
 };
 function renderHwStatus(){
   const el = $('setHwHint'); if(!el) return;
-  if(prefs.hwSearch === false){ el.textContent = 'Handwriting is not read. Search finds typed text only.'; return; }
-  if(!Sync.sb || !Sync.user){ el.textContent = 'Needs sync sign-in: Claude reads your handwriting through your account.'; return; }
+  if(prefs.hwSearch === false){ el.textContent = 'Handwriting and scans are not read. Search finds typed text and the text of PDFs.'; return; }
+  if(!Sync.sb || !Sync.user){ el.textContent = 'Needs sync sign-in: Claude reads your handwriting and scans through your account.'; return; }
   const pages = [...docs.values()].filter(d => d.kind === 'page' && live(d) && d.data.hw).length;
-  el.textContent = HW.state ? HW.state : `Claude reads your handwriting in the background so search finds it (about CHF 0.01 for 20 pages). ${pages} page${pages === 1 ? '' : 's'} read` + (HW.busy || HW.queue.length ? `, ${HW.queue.length + (HW.busy ? 1 : 0)} waiting.` : '.');
+  const pics = [...docs.values()].filter(d => d.kind === 'ptxt' && live(d)).length, wait = PT.queue.length + (PT.busy ? 1 : 0);
+  el.textContent = HW.state || PT.state ? (HW.state || PT.state) : `Claude reads your handwriting and scanned pages in the background so search finds them (about CHF 0.01 for 20 pages). PDF text is searchable without it. ${pages} page${pages === 1 ? '' : 's'} of handwriting read` + (HW.busy || HW.queue.length ? `, ${HW.queue.length + (HW.busy ? 1 : 0)} waiting` : '') + `; ${pics} imported page${pics === 1 ? '' : 's'} searchable` + (wait ? `, ${wait} being read.` : '.');
 }
 // the open page is read a little after you stop writing, and when you leave it
 let hwPageT = 0;
@@ -4765,6 +4784,171 @@ function hwSoon(){
   if(!cur || !HW.on()) return;
   const id = cur.id;
   hwPageT = setTimeout(() => { if(cur && cur.id === id && !act){ HW.enqueue(id); HW.kick(); } }, 45000);
+}
+
+/* =====================================================================
+   Text of imported pages, for search and practice.
+   One doc per page picture: kind 'ptxt', id 'pt_' + asset id, data {a, src, l: [[y, line], ...]}
+   y = top of the line as a fraction of the picture height (-1 when unknown). src: 'pdf' (text layer of the PDF,
+   read at import, free) or 'ocr' (Claude's fast model read the picture: scans, photos, Word pages, older imports).
+   ===================================================================== */
+const fold = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const ptxtOf = a => { const d = docs.get('pt_' + a); return live(d) ? d.data : null; };
+const ptxtText = d => d && Array.isArray(d.l) ? d.l.map(x => x[1]).join('\n') : '';
+// Lines of a PDF page's text layer, top to bottom (pdf.js text items grouped by baseline).
+async function pdfLines(page){
+  let tc;
+  try { tc = await page.getTextContent(); } catch(e){ console.warn('pdf text', e); return []; }
+  const vp = page.getViewport({scale: 1}), H = vp.height || 1, parts = [];
+  for(const it of tc.items || []){
+    if(!it.str || !it.str.trim()) continue;
+    const tr = it.transform || [1, 0, 0, 1, 0, 0];
+    const [x, y] = vp.convertToViewportPoint(tr[4], tr[5]);
+    const h = Math.abs(it.height) || Math.hypot(tr[2], tr[3]) || 10;
+    parts.push({x, y, h, w: Math.abs(it.width) || it.str.length * h * 0.5, s: it.str});
+  }
+  parts.sort((a, b) => a.y - b.y || a.x - b.x);
+  const lines = [];
+  for(const p of parts){
+    const ln = lines[lines.length - 1];
+    if(ln && Math.abs(p.y - ln.y) < Math.min(p.h, ln.h) * 0.5) ln.parts.push(p);
+    else lines.push({y: p.y, h: p.h, parts: [p]});
+  }
+  const out = [];
+  let total = 0;
+  for(const ln of lines){
+    ln.parts.sort((a, b) => a.x - b.x);
+    let s = '', end = null;
+    for(const p of ln.parts){
+      if(end !== null && p.x - end > p.h * 0.18 && !/\s$/.test(s) && !/^\s/.test(p.s)) s += ' ';
+      s += p.s; end = p.x + p.w;
+    }
+    s = s.replace(/\s+/g, ' ').trim();
+    if(!s) continue;
+    out.push([Math.round(clamp((ln.y - ln.h) / H, 0, 1) * 1000) / 1000, s]);
+    total += s.length;
+    if(total > 20000) break;
+  }
+  return out;
+}
+// enough real text to be worth keeping (otherwise it is a scan and Claude reads the picture)
+const hasRealText = l => l.reduce((n, x) => n + (x[1].match(/[\p{L}\p{N}]/gu) || []).length, 0) >= 20;
+async function savePtxt(a, src, l){
+  const id = 'pt_' + a, old = docs.get(id);
+  const data = {a, src, l};
+  if(old){ old.data = data; old.deleted = false; await writeDoc(old); }
+  else await newDoc('ptxt', data, id);
+  searchCache = null;
+}
+// Claude reads one imported page picture. Lines come back as "NN|text" with NN = vertical position in %.
+async function ocrAsset(a){
+  let rec = await IDB.get('assets', a);
+  if(!rec) rec = await Sync.fetchAsset(a);
+  if(!rec) throw Object.assign(new Error('missing'), {code: 'missing'});
+  const bmp = await createImageBitmap(rec.blob);
+  const k = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  if(bmp.close) bmp.close();
+  const url = c.toDataURL('image/jpeg', 0.82); c.width = c.height = 1;
+  const raw = await claudeJob('ocr', url, 'Transcribe this page.');
+  return parseOcr(raw);
+}
+function parseOcr(raw){
+  const l = [];
+  let total = 0;
+  for(const line of String(raw || '').split('\n')){
+    const t = line.trim(); if(!t) continue;
+    const m = /^(\d{1,3})\s*\|\s*(.*)$/.exec(t);
+    const y = m ? clamp(+m[1] / 100, 0, 1) : -1, s = (m ? m[2] : t).trim();
+    if(!s || /^NO_TEXT$/i.test(s)) continue;
+    l.push([Math.round(y * 1000) / 1000, s.slice(0, 600)]);
+    total += s.length; if(total > 20000) break;
+  }
+  return l;
+}
+// Background reader for page pictures that have no text yet (same on/off setting as handwriting).
+const PT = {
+  queue: [], busy: false, state: '', done: 0, timer: 0,
+  on(){ return HW.on(); },
+  // pictures on live pages (open page first) that have no text doc yet
+  async scanAll(){
+    if(!this.on()) return;
+    const all = await IDB.all('docs'), first = [], rest = [];
+    for(const d of all){
+      if(d.kind !== 'content' || d.deleted || !d.data) continue;
+      const pid = d.id.slice(2); if(!getDoc(pid)) continue;
+      const items = cur && cur.id === pid ? [...cur.items.values()] : d.data.items || [];
+      for(const it of items) if(it && it.t === 'i' && it.a && !docs.has('pt_' + it.a)) (cur && cur.id === pid ? first : rest).push(it.a);
+    }
+    for(const a of first.concat(rest)) if(!this.queue.includes(a)) this.queue.push(a);
+    this.kick();
+  },
+  soon(){ clearTimeout(this.scanT); this.scanT = setTimeout(() => this.scanAll().catch(() => {}), 3000); },
+  kick(){ if(!this.busy && this.queue.length){ clearTimeout(this.timer); this.timer = setTimeout(() => this.work(), 1200); } renderHwStatus(); },
+  async work(){
+    if(this.busy || !this.on()) return;
+    if(document.visibilityState !== 'visible' || !navigator.onLine){ this.timer = setTimeout(() => this.work(), 20000); return; }
+    const a = this.queue.shift(); if(!a) return;
+    if(docs.has('pt_' + a)){ this.kick(); return; }
+    this.busy = true; renderHwStatus();
+    try { await savePtxt(a, 'ocr', await ocrAsset(a)); this.done++; this.state = ''; }
+    catch(e){
+      const c = e.code || '';
+      if(c === 'offline'){ this.queue.unshift(a); this.busy = false; this.timer = setTimeout(() => this.work(), 30000); renderHwStatus(); return; }
+      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
+      else if(c !== 'missing'){ this.state = 'Last try failed: ' + jobWhy(c || e.message); console.warn('ocr', e); }
+    }
+    this.busy = false; renderHwStatus();
+    if(this.queue.length) this.timer = setTimeout(() => this.work(), 1200);
+  }
+};
+// imported pictures of a page in reading order (top to bottom, then left to right), with their page number
+function pagePictures(items){
+  return items.filter(it => it && it.t === 'i' && it.a).sort((a, b) => a.y - b.y || a.x - b.x);
+}
+// Search hits inside imported pages: up to max lines that contain the needle (already folded)
+function ptxtHits(pics, needle, max){
+  const out = [];
+  pics.forEach((it, n) => {
+    if(out.length >= max) return;
+    const d = ptxtOf(it.a); if(!d || !d.l) return;
+    for(let i = 0; i < d.l.length && out.length < max; i++){
+      const line = d.l[i][1], f = fold(line);
+      let k = f.indexOf(needle), shown = line;
+      let pair = false;
+      if(k < 0 && i + 1 < d.l.length){
+        // a match that runs over the line break, e.g. a word split as "Beschleu-" / "nigung"
+        const head = /-$/.test(line) ? line.slice(0, -1) : line + ' ';
+        const joined = head + d.l[i + 1][1], kk = fold(joined).indexOf(needle);
+        if(kk >= 0 && kk < head.length && kk + needle.length > head.length){ k = kk; shown = joined; pair = true; }
+      }
+      if(k < 0) continue;
+      out.push({id: it.id, n: n + 1, y: d.l[i][0], html: snippetHTML(shown, k, needle.length)});
+      if(pair) i++;
+    }
+  });
+  return out;
+}
+function snippetHTML(s, k, len){
+  const a = Math.max(0, k - 50), b = Math.min(s.length, k + len + 70);
+  return (a > 0 ? '…' : '') + esc(s.slice(a, k)) + '<mark>' + esc(s.slice(k, k + len)) + '</mark>' + esc(s.slice(k + len, b)) + (b < s.length ? '…' : '');
+}
+// open page shows the line: picture fills the width, line a third down the screen, yellow band flashes
+function jumpToLine(itemId, y){
+  const it = cur && cur.items.get(itemId); if(!it) return;
+  const fit = (W - 32) / it.w;
+  if(cam.z < fit * 0.6 || cam.z > fit * 2.2) cam.z = clamp(fit, 0.1, 8);
+  const ly = it.y + (y >= 0 ? y : 0) * it.h;
+  cam.ox = (W - it.w * cam.z) / 2 - it.x * cam.z;
+  cam.oy = H * (y >= 0 ? 0.33 : 0.04) - ly * cam.z;
+  invalidate(); saveCamSoon();
+  const f = document.createElement('div');
+  f.className = y >= 0 ? 'hit-flash' : 'mark-flash';
+  const bandH = Math.max(22, it.h * 0.035);
+  f.style.cssText = y >= 0 ? `left:${it.x}px;top:${ly - bandH * 0.25}px;width:${it.w}px;height:${bandH}px` : `left:${it.x - 8}px;top:${it.y - 8}px;width:${it.w + 16}px;height:${it.h + 16}px`;
+  worldFront.appendChild(f); frontXf(f);
+  setTimeout(() => f.remove(), 2600);
 }
 
 /* =====================================================================
@@ -4947,7 +5131,7 @@ const Scan = {
       out.width = out.height = 1;
       const cb = contentBox(), [vx, vy] = toWorld(W > 600 ? 48 : 16, 24);
       const x0 = cb ? cb[0] : vx, y0 = cb ? cb[3] + 48 : vy;
-      addItems([{t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wW, h: hW, a, doc: 1}]);
+      addItems([{t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wW, h: hW, a, doc: 1}]); PT.soon();
       setTool('pen');
       cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon();
       toast('Scan placed on the page');
@@ -5178,7 +5362,8 @@ async function boot(){
   purgeTrash().catch(() => {});
   scanMarks().catch(() => {});
   setTimeout(() => HW.scanAll().catch(() => {}), 20000);
-  setInterval(() => { if(document.visibilityState === 'visible') HW.scanAll().catch(() => {}); }, 10 * 60000);
+  setTimeout(() => PT.scanAll().catch(() => {}), 26000);
+  setInterval(() => { if(document.visibilityState === 'visible'){ HW.scanAll().catch(() => {}); PT.scanAll().catch(() => {}); } }, 10 * 60000);
 }
 function themeChanged(){
   readTokens();
@@ -5229,6 +5414,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

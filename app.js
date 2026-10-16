@@ -2630,6 +2630,124 @@ $('pageList').addEventListener('click', e => {
   const jump = t.dataset.jump, y = +t.dataset.y;
   openPage(p.id).then(() => { if($('search').value.trim()) markActivePage(); if(jump) jumpToLine(jump, y); });
 });
+/* ---------- drag to reorder: notebooks, sections, pages ----------
+   Mouse: press and drag. Touch / Pencil: press and hold (RO_HOLD), then drag; a quick swipe still scrolls.
+   Sections can go into another open notebook; a page dropped on a section in the left column moves there. */
+const RO_HOLD = 400;
+let ro = null, roClickBlock = 0;
+const roSel = '.page-item[data-page], .sec-row[data-sec], .nb-main[data-nb]';
+function roDown(e){
+  if(ro || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const el = e.target.closest(roSel); if(!el) return;
+  const kind = el.dataset.page ? 'page' : el.dataset.sec ? 'sec' : 'nb';
+  if(kind === 'page' && $('search').value.trim()) return;   // search results are not a list to sort
+  ro = {el, kind, id: el.dataset.page || el.dataset.sec || el.dataset.nb, pid: e.pointerId, x: e.clientX, y: e.clientY, mouse: e.pointerType === 'mouse', on: false, drop: null};
+  if(!ro.mouse) ro.t = setTimeout(() => { if(ro && !ro.on) roBegin(); }, RO_HOLD);
+}
+function roBegin(){
+  const r = ro.el.getBoundingClientRect();
+  ro.on = true; ro.dy = ro.y - r.top; ro.dx = ro.x - r.left;
+  const g = ro.el.cloneNode(true); g.classList.add('ro-ghost'); g.classList.remove('on');
+  g.style.left = r.left + 'px'; g.style.top = r.top + 'px'; g.style.width = r.width + 'px';
+  document.body.appendChild(g); ro.ghost = g;
+  const line = document.createElement('div'); line.className = 'ro-line'; line.hidden = true; document.body.appendChild(line); ro.line = line;
+  ro.el.classList.add('ro-drag'); document.body.classList.add('ro-on');
+  try { ro.el.setPointerCapture(ro.pid); } catch {}
+}
+function roRows(){
+  if(ro.kind === 'nb') return [...$('nbList').querySelectorAll('.nb-main[data-nb]')];
+  if(ro.kind === 'sec') return [...$('nbList').querySelectorAll('.sec-row[data-sec], .add-sec[data-addsec]')];
+  return [...$('pageList').querySelectorAll('.page-item[data-page]')];
+}
+function roMove(e){
+  if(!ro || e.pointerId !== ro.pid) return;
+  if(!ro.on){
+    const d = Math.hypot(e.clientX - ro.x, e.clientY - ro.y);
+    if(ro.mouse){ if(d > 6) roBegin(); else return; }
+    else { if(d > 8){ clearTimeout(ro.t); ro = null; } return; }   // moved before the hold: it is a scroll
+  }
+  e.preventDefault();
+  ro.ghost.style.top = (e.clientY - ro.dy) + 'px';
+  if(ro.kind === 'page') ro.ghost.style.left = (e.clientX - ro.dx) + 'px';   // pages can travel to a section
+  // scroll the list when the finger nears its top or bottom
+  const box = ro.el.closest('.nb-list, #pageList, .page-list') || ro.el.parentElement;
+  const scroller = box && (box.scrollHeight > box.clientHeight ? box : box.parentElement);
+  if(scroller){ const b = scroller.getBoundingClientRect(); if(e.clientY < b.top + 36) scroller.scrollTop -= 10; else if(e.clientY > b.bottom - 36) scroller.scrollTop += 10; }
+  document.querySelectorAll('.ro-into').forEach(x => x.classList.remove('ro-into'));
+  ro.drop = null; ro.line.hidden = true;
+  if(ro.kind === 'page'){
+    const under = document.elementFromPoint(e.clientX, e.clientY), sr = under && under.closest('#nbList .sec-row[data-sec]');
+    if(sr){ const p = getDoc(ro.id); if(p && sr.dataset.sec !== p.data.sec){ sr.classList.add('ro-into'); ro.drop = {into: sr.dataset.sec}; } return; }
+  }
+  const rows = roRows().filter(r => r !== ro.el);
+  let best = null, bd = Infinity;
+  for(const r of rows){
+    const b = r.getBoundingClientRect(); if(!b.height) continue;
+    const d = e.clientY < b.top ? b.top - e.clientY : e.clientY > b.bottom ? e.clientY - b.bottom : 0;
+    if(d < bd){ bd = d; best = {r, b}; }
+  }
+  if(!best || bd > 60) return;
+  const add = !!best.r.dataset.addsec, before = add || e.clientY < best.b.top + best.b.height / 2;
+  ro.drop = {ref: best.r, before};
+  const lb = (ro.kind === 'nb' ? best.r.closest('.nb') || best.r : best.r).getBoundingClientRect();
+  ro.line.style.left = best.b.left + 'px'; ro.line.style.width = best.b.width + 'px';
+  ro.line.style.top = ((before ? best.b.top : (ro.kind === 'nb' ? lb.bottom : best.b.bottom)) - 1.5) + 'px';
+  ro.line.hidden = false;
+}
+// orders 0, 1, 2 … for the list as shown; only changed docs are written (and synced)
+async function roRenumber(list, extra){
+  for(let i = 0; i < list.length; i++){
+    const d = list[i], more = extra && extra.doc === d ? extra.patch : null;
+    if((d.data.order || 0) !== i || more) await patchDoc(d, Object.assign({order: i}, more || {}));
+  }
+}
+async function roDrop(st){
+  const me = getDoc(st.id), dr = st.drop; if(!me || !dr) return;
+  if(dr.into){   // page onto a section in the left column
+    const s = getDoc(dr.into); if(!s) return;
+    const top = pagesOf(s.id).reduce((m, p) => Math.min(m, p.data.order || 0), 1);
+    await patchDoc(me, {sec: s.id, order: top - 1});
+    toast('Moved to ' + s.data.name);
+  } else {
+    const r = dr.ref;
+    if(st.kind === 'nb'){
+      const list = notebooks().filter(d => d !== me), at = list.findIndex(d => d.id === r.dataset.nb);
+      list.splice(at + (dr.before ? 0 : 1), 0, me); await roRenumber(list);
+    } else if(st.kind === 'sec'){
+      const nbId = r.dataset.addsec || (getDoc(r.dataset.sec) || {data: {}}).data.nb; if(!nbId) return;
+      const list = sectionsOf(nbId).filter(d => d !== me);
+      const at = r.dataset.addsec ? list.length : list.findIndex(d => d.id === r.dataset.sec) + (dr.before ? 0 : 1);
+      list.splice(at, 0, me);
+      const moved = me.data.nb !== nbId;
+      await roRenumber(list, moved ? {doc: me, patch: {nb: nbId}} : null);
+      if(moved){ if(ui.sec === me.id){ ui.nb = nbId; saveUi(); } prefs.open[nbId] = true; savePrefs(); toast('Moved to ' + getDoc(nbId).data.name); }
+    } else {
+      const list = pagesOf(me.data.sec).filter(d => d !== me), at = list.findIndex(d => d.id === r.dataset.page);
+      list.splice(at + (dr.before ? 0 : 1), 0, me); await roRenumber(list);
+    }
+  }
+  ensureUi(); renderNav(); renderList();
+}
+function roEnd(e, cancel){
+  if(!ro || e.pointerId !== ro.pid) return;
+  const st = ro; ro = null; clearTimeout(st.t);
+  if(!st.on) return;
+  roClickBlock = Date.now();
+  st.ghost.remove(); st.line.remove(); st.el.classList.remove('ro-drag'); document.body.classList.remove('ro-on');
+  document.querySelectorAll('.ro-into').forEach(x => x.classList.remove('ro-into'));
+  if(!cancel) roDrop(st).catch(err => { console.warn('reorder', err); toast('Could not move it'); });
+}
+for(const id of ['nbList', 'pageList']){
+  const box = $(id);
+  box.addEventListener('pointerdown', roDown);
+  box.addEventListener('click', e => { if(Date.now() - roClickBlock < 500){ e.stopPropagation(); e.preventDefault(); } }, true);
+  // once something is picked up the finger drags it instead of scrolling the list
+  box.addEventListener('touchmove', e => { if(ro && ro.on) e.preventDefault(); }, {passive: false});
+  box.addEventListener('contextmenu', e => { if(ro) e.preventDefault(); });
+}
+addEventListener('pointermove', roMove, {passive: false});
+addEventListener('pointerup', e => roEnd(e, false));
+addEventListener('pointercancel', e => roEnd(e, true));
 $('newPage').addEventListener('click', () => newPage());
 $('newMore').addEventListener('click', e => { renderTemplates(); openPop('newPop', e.currentTarget); });
 function renderTemplates(){

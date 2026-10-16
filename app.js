@@ -3050,7 +3050,7 @@ function wheelItems(){
   const names = {pen: 'Pen', hl: 'Highlighter', mark: 'Mark for later', eraser: 'Eraser', lasso: 'Lasso'};
   const undoSvg = '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>';
   const inner = [{w: 'undo', label: 'Undo', icon: undoSvg, cls: 'wh-undo'}]
-    .concat(['pen', 'hl', 'mark', 'eraser', 'lasso'].map(v => ({w: 'tool', v, label: names[v], icon: wheelIcon(v), on: v === t, cls: 'wh-tool'})));
+    .concat(['pen', 'hl', 'eraser', 'lasso'].map(v => ({w: 'tool', v, label: names[v], icon: wheelIcon(v), on: v === t, cls: 'wh-tool'})));
   const outer = favs.map(c => ({w: 'c', v: c, label: inkT === 'hl' ? 'Highlighter colour' : 'Pen colour', cls: 'wh-col' + (inkT === 'hl' ? ' hl' : ''),
     icon: `<span style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>`, on: (t === 'pen' || t === 'hl') && prefs[inkT].c === c}));
   const sv = prefs[sizeT].s, best = WHEEL_SIZES.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);

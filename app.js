@@ -1117,6 +1117,7 @@ function zoomAt(sx, sy, z){
   cam.z = z; cam.ox = sx - wx * z; cam.oy = sy - wy * z;
   invalidate(); saveCamSoon();
 }
+const ZOOM_STEP = 1.04;   // 4 % per mouse-wheel click
 stage.addEventListener('wheel', e => {
   e.preventDefault();
   if(!cur) return;
@@ -1127,7 +1128,15 @@ stage.addEventListener('wheel', e => {
   let dx = e.deltaX * k, dy = e.deltaY * k;
   // trackpad drivers and mice that send sideways scrolling as Shift + wheel
   if(e.shiftKey && !dx){ dx = dy; dy = 0; }
-  if(e.ctrlKey || e.metaKey) zoomAt(sx, sy, cam.z * Math.exp(-dy * 0.0085));
+  if(e.ctrlKey || e.metaKey){
+    // a mouse wheel click (about 100 px or a few lines) zooms a small fixed step;
+    // trackpad pinches send many tiny deltas and keep the smooth curve
+    const raw = Math.abs(e.deltaY), notch = e.deltaMode !== 0 || raw >= 50;
+    if(notch){
+      const n = Math.min(3, Math.max(1, Math.round(raw / (e.deltaMode === 1 ? 3 : e.deltaMode === 2 ? 1 : 100))));
+      zoomAt(sx, sy, cam.z * Math.pow(ZOOM_STEP, -Math.sign(e.deltaY) * n));
+    } else zoomAt(sx, sy, cam.z * Math.exp(-dy * 0.0085));
+  }
   else { cam.ox -= dx; cam.oy -= dy; invalidate(); saveCamSoon(); if(Math.abs(dy) > Math.abs(dx)) wakeSlider(); }
 }, {passive: false});
 let gz0 = 1;

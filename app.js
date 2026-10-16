@@ -5152,6 +5152,8 @@ function inkImage(strokes, maxPx){
   c.width = c.height = 1;
   return {url, box: b};
 }
+// Anthropic's API refuses to copy out some printed material (e.g. published books): not an error to retry
+const jobBlocked = e => /content filter|output blocked/i.test(String((e && (e.code || e.message)) || ''));
 const jobWhy = code => ({not_allowed: 'This account is not allowed to use Claude (ASK_ALLOWED_EMAILS in Supabase).', no_key: 'The Anthropic API key is missing in Supabase.', not_signed_in: 'Sign in to sync first.', no_sync: 'Sync is not set up on this device.', offline: 'No internet connection.'}[code] || 'Claude could not be reached (' + code + ').');
 
 /* =====================================================================
@@ -5327,7 +5329,7 @@ const HW = {
       changed = true;
       let n = 0; for(const it of list) n += it.p.length / 3;
       let t = '';
-      if(n >= 25){ const img = inkImage(list, 1500); if(img) t = (await claudeJob('read', img.url, 'Transcribe the handwriting.')).slice(0, 4000); }
+      if(n >= 25){ const img = inkImage(list, 1500); if(img){ try { t = (await claudeJob('read', img.url, 'Transcribe the handwriting.')).slice(0, 4000); } catch(e){ if(!jobBlocked(e)) throw e; } } }
       next[k] = {s: sig, t};
       this.done++;
     }
@@ -5342,8 +5344,10 @@ function renderHwStatus(){
   if(prefs.hwSearch === false){ el.textContent = 'Handwriting and scans are not read. Search finds typed text and the text of PDFs.'; return; }
   if(!Sync.sb || !Sync.user){ el.textContent = 'Needs sync sign-in: Claude reads your handwriting and scans through your account.'; return; }
   const pages = [...docs.values()].filter(d => d.kind === 'page' && live(d) && d.data.hw).length;
-  const pics = [...docs.values()].filter(d => d.kind === 'ptxt' && live(d)).length, wait = PT.queue.length + (PT.busy ? 1 : 0);
-  el.textContent = HW.state || PT.state ? (HW.state || PT.state) : `Claude reads your handwriting and scanned pages in the background so search finds them (about CHF 0.01 for 20 pages). PDF text is searchable without it. ${pages} page${pages === 1 ? '' : 's'} of handwriting read` + (HW.busy || HW.queue.length ? `, ${HW.queue.length + (HW.busy ? 1 : 0)} waiting` : '') + `; ${pics} imported page${pics === 1 ? '' : 's'} searchable` + (wait ? `, ${wait} being read.` : '.');
+  const pts = [...docs.values()].filter(d => d.kind === 'ptxt' && live(d)), nb = pts.filter(d => d.data && d.data.nb).length;
+  const pics = pts.length - nb, wait = PT.queue.length + (PT.busy ? 1 : 0);
+  el.textContent = HW.state || PT.state ? (HW.state || PT.state) : `Claude reads your handwriting and scanned pages in the background so search finds them (about CHF 0.01 for 20 pages). PDF text is searchable without it. ${pages} page${pages === 1 ? '' : 's'} of handwriting read` + (HW.busy || HW.queue.length ? `, ${HW.queue.length + (HW.busy ? 1 : 0)} waiting` : '') + `; ${pics} imported page${pics === 1 ? '' : 's'} searchable` + (wait ? `, ${wait} being read.` : '.')
+    + (nb ? ` ${nb} page${nb === 1 ? '' : 's'} skipped: Claude does not copy out text from some published books.` : '');
 }
 // the open page is read a little after you stop writing, and when you leave it
 let hwPageT = 0;
@@ -5401,9 +5405,9 @@ async function pdfLines(page){
 }
 // enough real text to be worth keeping (otherwise it is a scan and Claude reads the picture)
 const hasRealText = l => l.reduce((n, x) => n + (x[1].match(/[\p{L}\p{N}]/gu) || []).length, 0) >= 20;
-async function savePtxt(a, src, l){
+async function savePtxt(a, src, l, extra){
   const id = 'pt_' + a, old = docs.get(id);
-  const data = {a, src, l};
+  const data = Object.assign({a, src, l}, extra);   // extra {nb: 1} = Claude would not read it (not retried)
   if(old){ old.data = data; old.deleted = false; await writeDoc(old); }
   else await newDoc('ptxt', data, id);
   searchCache = null;
@@ -5463,6 +5467,7 @@ const PT = {
     try { await savePtxt(a, 'ocr', await ocrAsset(a)); this.done++; this.state = ''; }
     catch(e){
       const c = e.code || '';
+      if(jobBlocked(e)){ try { await savePtxt(a, 'ocr', [], {nb: 1}); } catch {} this.state = ''; this.busy = false; renderHwStatus(); if(this.queue.length) this.timer = setTimeout(() => this.work(), 1200); return; }
       if(c === 'offline'){ this.queue.unshift(a); this.busy = false; this.timer = setTimeout(() => this.work(), 30000); renderHwStatus(); return; }
       if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
       else if(c !== 'missing'){ this.state = 'Last try failed: ' + jobWhy(c || e.message); console.warn('ocr', e); }

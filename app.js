@@ -4188,8 +4188,20 @@ function clampLeft(){
    Box picking: draw a box on the page to place a shape or scan a question
    ===================================================================== */
 let pick = null;   // {kind: 'shape', shape} | {kind: 'scan'}
-function startPick(p, msg){ if(!cur){ toast('Open a page first'); return; } clearSel(); pick = p; stage.classList.add('picking'); if(msg) toast(msg); }
-function endPick(){ pick = null; stage.classList.remove('picking'); }
+function startPick(p, msg){
+  if(!cur){ toast('Open a page first'); return; }
+  clearSel(); pick = p; stage.classList.add('picking');
+  if(p.kind === 'scan'){
+    // the Claude panel steps aside so the whole page is visible; a bar at the bottom says what to do
+    $('askPanel').classList.add('away'); document.body.classList.add('scanning');
+    $('scanBarText').textContent = msg || 'Drag a box around the question';
+    $('scanBar').hidden = false; $('toast').hidden = true;
+  } else if(msg) toast(msg);
+}
+function endPick(){
+  pick = null; stage.classList.remove('picking');
+  $('askPanel').classList.remove('away'); document.body.classList.remove('scanning'); $('scanBar').hidden = true;
+}
 function pickBox(a){
   const [x0, y0] = a.w0, [x1, y1] = a.w1 || a.w0;
   return {x0, y0, x1, y1, tap: Math.abs(x1 - x0) * cam.z < 10 && Math.abs(y1 - y0) * cam.z < 10};
@@ -4204,7 +4216,7 @@ function finishPick(a){
   const b = pickBox(a);
   if(p.kind === 'shape') insertShape(p.shape, b);
   else if(p.kind === 'scan'){
-    if(b.tap){ toast('Drag a box around the question'); startPick(p); return; }
+    if(b.tap){ startPick(p, 'Drag a box, not just a tap, around the question'); return; }
     Ask.scan(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.max(b.x0, b.x1), Math.max(b.y0, b.y1));
   }
 }
@@ -4833,9 +4845,10 @@ function renderMd(src){
 $('askBtn').addEventListener('click', () => {
   if(!cur){ Ask.open(); return; }
   Ask.open();
-  startPick({kind: 'scan'}, 'Draw a box around the question');
+  startPick({kind: 'scan'}, 'Drag a box around the question');
 });
-$('askScan').addEventListener('click', () => startPick({kind: 'scan'}, 'Draw a box around the question'));
+$('askScan').addEventListener('click', () => startPick({kind: 'scan'}, 'Drag a box around the question'));
+$('scanBarX').addEventListener('click', () => endPick());
 $('askClose').addEventListener('click', () => { if(pick && pick.kind === 'scan') endPick(); Ask.close(); });
 $('askMin').addEventListener('click', () => $('askPanel').classList.toggle('min'));
 $('askNew').addEventListener('click', () => Ask.reset());

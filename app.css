@@ -365,7 +365,7 @@ select.pf-ls option:checked{background:#9fbbe8}
 @media print{
   @page{size:A4;margin:0}
   html,body{height:auto;overflow:visible;background:#fff}
-  .app,.pop,.modal,.toast{display:none!important}
+  .app,.pop,.modal,.toast,.scan-bar{display:none!important}
   #printRoot{display:block}
   .print-sheet{position:relative;width:210mm;height:297mm;overflow:hidden;contain:size layout paint;page-break-after:always;break-after:page;background:#fff}
   .print-sheet:last-child{page-break-after:auto;break-after:auto}
@@ -406,6 +406,14 @@ select.pf-ls option:checked{background:#9fbbe8}
 .ask-tb{color:var(--accent)}
 .ask{position:fixed;z-index:30;right:16px;bottom:calc(16px + var(--sab));width:min(430px,calc(100vw - 24px));max-height:min(72vh,680px);display:flex;flex-direction:column;background:var(--raise);border-radius:16px;box-shadow:var(--shadow),0 0 0 1px var(--line);overflow:hidden}
 .ask.min .ask-log,.ask.min .ask-foot{display:none}
+.ask{transition:opacity .18s ease,transform .18s ease,visibility 0s}
+.ask.away{opacity:0;transform:translateY(16px);pointer-events:none;visibility:hidden;transition:opacity .18s ease,transform .18s ease,visibility 0s .18s}
+.scan-bar{position:fixed;left:50%;bottom:calc(18px + var(--sab));transform:translateX(-50%);z-index:41;display:flex;align-items:center;gap:10px;background:var(--fg);color:var(--paper);padding:8px 8px 8px 14px;border-radius:14px;font-size:15px;box-shadow:var(--shadow);max-width:calc(100% - 32px);white-space:nowrap}
+.scan-bar svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;flex:none}
+.scan-bar span{overflow:hidden;text-overflow:ellipsis}
+.scan-bar button{flex:none;color:var(--fg);background:var(--paper);font-weight:600;padding:7px 14px;border-radius:10px;min-height:36px}
+.scan-bar button:active{opacity:.75}
+body.scanning .toast{bottom:calc(76px + var(--sab))}
 .ask-head{display:flex;align-items:center;gap:6px;padding:8px 8px 8px 14px;border-bottom:1px solid var(--line);touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
 .ask-title{display:flex;align-items:center;gap:6px;font-family:var(--f-display);font-weight:600;font-size:16px;margin-right:auto;color:var(--accent)}
 .ask-head .seg{flex:none;width:auto}

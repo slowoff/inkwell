@@ -243,6 +243,17 @@ select.pf-ls option:checked{background:#9fbbe8}
 .ruler-ticks i{position:absolute;top:0;width:1px;background:var(--muted)}
 .ruler-ticks b{position:absolute;top:22px;font:500 10px var(--f-mono);color:var(--muted);transform:translateX(-50%)}
 .ruler-angle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:600 13px var(--f-mono);color:var(--fg);background:var(--raise);padding:2px 8px;border-radius:6px}
+/* computer (mouse): a hand grip in the middle to move the ruler, turn handles at both ends */
+.ruler-grip,.ruler-turn{display:none}
+@media (hover:hover) and (pointer:fine){
+  .ruler-grip,.ruler-turn{position:absolute;top:50%;display:grid;place-items:center;width:30px;height:30px;margin-top:-15px;border-radius:50%;background:var(--raise);border:1.5px solid var(--accent);color:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.25);pointer-events:auto;touch-action:none}
+  .ruler-grip{left:50%;margin-left:-15px;cursor:grab}
+  .ruler-turn{cursor:alias}
+  #rulerTurnL{left:calc(50% - var(--turn-off,400px) - 15px)} #rulerTurnR{left:calc(50% + var(--turn-off,400px) - 15px)}
+  .ruler-grip:active{cursor:grabbing}
+  .ruler-grip svg,.ruler-turn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+  .ruler-angle{transform:translate(calc(-50% + 46px),-50%)}
+}
 
 .t-handle{position:absolute;width:12px;height:32px;border-radius:6px;background:var(--accent);box-shadow:0 0 0 3px var(--paper);cursor:ew-resize;z-index:4;touch-action:none}
 .sel{position:absolute;inset:0;pointer-events:none}

@@ -541,7 +541,7 @@ function resize(){
     c.width = Math.max(1, Math.round(W * dpr)); c.height = Math.max(1, Math.round(H * dpr));
     c.style.width = W + 'px'; c.style.height = H + 'px';
   }
-  if(prefs.ruler.cx == null || prefs.ruler.cx > W || prefs.ruler.cy > H){ prefs.ruler.cx = W / 2; prefs.ruler.cy = H / 2; }
+  if(W > 0 && H > 0 && !rulerVisible()) centerRuler(false);
   renderRuler();
   invalidate();
 }
@@ -1580,13 +1580,47 @@ function rulerMove(){
   }
   renderRuler();
 }
+// ruler centre inside the visible stage (it used to be saved as 0,0 = top left when the stage had no size yet)
+function rulerVisible(){ const r = prefs.ruler; return r.cx != null && r.cx > 20 && r.cy > 20 && r.cx < W - 20 && r.cy < H - 20; }
+function centerRuler(straight){
+  if(!(W > 0 && H > 0)) return;
+  prefs.ruler.cx = W / 2; prefs.ruler.cy = H / 2;
+  if(straight) prefs.ruler.a = 0;
+}
+// mouse: move with the hand grip, turn with the arrows at the ends
+let rulerDrag = null;
+for(const h of ['rulerGrip', 'rulerTurnL', 'rulerTurnR']){
+  const el = $(h);
+  el.addEventListener('pointerdown', e => {
+    if(e.button !== 0 || !prefs.ruler.on) return;
+    e.stopPropagation(); e.preventDefault();
+    const [sx, sy] = pt(e), r = prefs.ruler;
+    rulerDrag = {id: e.pointerId, turn: !!el.dataset.turn, sx, sy, r0: {...r}, m0: Math.atan2(sy - r.cy, sx - r.cx)};
+    try { el.setPointerCapture(e.pointerId); } catch {}
+  });
+  el.addEventListener('pointermove', e => {
+    const d = rulerDrag; if(!d || d.id !== e.pointerId) return;
+    e.stopPropagation();
+    const [sx, sy] = pt(e), r = prefs.ruler;
+    if(d.turn){
+      let a = d.r0.a + Math.atan2(sy - d.r0.cy, sx - d.r0.cx) - d.m0;
+      const step = Math.PI / 12, snapA = Math.round(a / step) * step;   // clicks into 15° steps
+      if(Math.abs(a - snapA) < 0.05) a = snapA;
+      r.a = Math.atan2(Math.sin(a), Math.cos(a));
+    } else { r.cx = d.r0.cx + sx - d.sx; r.cy = d.r0.cy + sy - d.sy; }
+    renderRuler();
+  });
+  const end = e => { if(!rulerDrag || rulerDrag.id !== e.pointerId) return; e.stopPropagation(); rulerDrag = null; savePrefs(); };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+}
 function renderRuler(){
   const el = $('ruler'), r = prefs.ruler;
   el.hidden = !r.on || !cur;
   $('rulerBtn').classList.toggle('on', !!r.on);
   if(!r.on) return;
   el.style.transform = `translate(${r.cx}px,${r.cy}px) rotate(${r.a}rad)`;
-  let deg = Math.round(-r.a * 180 / Math.PI) % 180; if(deg < 0) deg += 180;
+  el.style.setProperty('--turn-off', Math.round(Math.max(110, Math.min(RULER_HALF_W - 27, W / 2 - 50))) + 'px');   // turn handles stay on narrow screens
+  let deg = ((Math.round(r.a * 180 / Math.PI) % 180) + 180) % 180; if(deg > 90) deg -= 180;   // same as shape rotation: clockwise positive, -89 … 90
   $('rulerAngle').textContent = deg + '°';
   if(rulerZ !== cam.z) renderRulerTicks();
 }
@@ -1701,7 +1735,7 @@ function computeSel(){
 }
 function clearSel(){ sel = null; $('selBox').hidden = true; }
 function transformItem(it, tf){
-  if(tf.r) return rotateItem(it, tf.r, tf.ax, tf.ay);
+  if(tf.r !== undefined) return rotateItem(it, tf.r, tf.ax, tf.ay);   // r can be 0 (back to start)
   const m = (x, y) => [tf.ax + (x - tf.ax) * tf.s + tf.dx, tf.ay + (y - tf.ay) * tf.s + tf.dy];
   const o = Object.assign({}, it);
   if(it.t === 's'){
@@ -1716,8 +1750,11 @@ function transformItem(it, tf){
   }
   return o;
 }
+// Angle in whole degrees, -179 … 180 (positive = clockwise on screen).
+const normDeg = d => { let v = ((Math.round(d) % 360) + 360) % 360; return v > 180 ? v - 360 : v; };
 // Rotate by r radians around (ax, ay). Ink and shapes turn; text, formulas, pictures and tape
 // move with the selection but stay upright (they have no rotation of their own).
+// Strokes remember their total turn in optional field ra (degrees) so the angle shown is the real one.
 function rotateItem(it, r, ax, ay){
   const c = Math.cos(r), s = Math.sin(r), rot = (x, y) => [ax + (x - ax) * c - (y - ay) * s, ay + (x - ax) * s + (y - ay) * c];
   const o = Object.assign({}, it);
@@ -1725,6 +1762,8 @@ function rotateItem(it, r, ax, ay){
     const p = it.p.slice();
     for(let i = 0; i < p.length; i += 3){ const [x, y] = rot(p[i], p[i+1]); p[i] = x; p[i+1] = y; }
     o.p = p;
+    const ra = normDeg((it.ra || 0) + r * 180 / Math.PI);
+    if(ra) o.ra = ra; else delete o.ra;
   } else {
     const b = itemBox(it), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, [nx, ny] = rot(cx, cy);
     o.x = it.x + nx - cx; o.y = it.y + ny - cy;
@@ -1737,7 +1776,13 @@ selRect.addEventListener('pointerdown', e => {
   e.stopPropagation(); e.preventDefault();
   const [sx, sy] = pt(e);
   selDrag = {id: e.pointerId, sx, sy, handle: e.target.id === 'selHandle', rot: !!e.target.closest('#selRot'), orig: sel.ids.map(id => cur.items.get(id)), b: sel.b.slice(), moved: false};
-  if(selDrag.rot){ const b = sel.b; selDrag.cx = (b[0] + b[2]) / 2; selDrag.cy = (b[1] + b[3]) / 2; const [wx, wy] = toWorld(sx, sy); selDrag.a0 = Math.atan2(wy - selDrag.cy, wx - selDrag.cx); }
+  if(selDrag.rot){
+    const b = sel.b; selDrag.cx = (b[0] + b[2]) / 2; selDrag.cy = (b[1] + b[3]) / 2; const [wx, wy] = toWorld(sx, sy); selDrag.a0 = Math.atan2(wy - selDrag.cy, wx - selDrag.cx);
+    // angle the selection already has (shown and snapped as a total); mixed angles count from 0
+    const ras = new Set(selDrag.orig.filter(it => it && it.t === 's').map(it => it.ra || 0));
+    selDrag.base = ras.size === 1 ? [...ras][0] : 0;
+    const lab = $('selAng'); lab.hidden = false; lab.textContent = selDrag.base + '°';
+  }
   try { selRect.setPointerCapture(e.pointerId); } catch {}
 });
 selRect.addEventListener('pointermove', e => {
@@ -1747,12 +1792,14 @@ selRect.addEventListener('pointermove', e => {
   let tf;
   if(selDrag.rot){
     const [wx, wy] = toWorld(sx, sy);
-    let deg = (Math.atan2(wy - selDrag.cy, wx - selDrag.cx) - selDrag.a0) * 180 / Math.PI;
-    deg = ((deg % 360) + 540) % 360 - 180;
-    const snap = Math.round(deg / 15) * 15;
-    if(Math.abs(deg - snap) < 4) deg = snap;   // clicks into 15° steps (0, 45, 90 ...)
-    const lab = $('selAng'); lab.hidden = false; lab.textContent = Math.round(deg) + '°';
-    tf = {r: deg * Math.PI / 180, ax: selDrag.cx, ay: selDrag.cy};
+    const delta = (Math.atan2(wy - selDrag.cy, wx - selDrag.cx) - selDrag.a0) * 180 / Math.PI;
+    let tot = selDrag.base + delta;
+    tot = ((tot % 360) + 540) % 360 - 180;
+    const snap = Math.round(tot / 15) * 15;
+    if(Math.abs(tot - snap) < 4) tot = snap;   // clicks into 15° steps (0, 45, 90 ...) of the total angle
+    tot = normDeg(tot);                          // whole degrees: what is shown is what is applied
+    const lab = $('selAng'); lab.hidden = false; lab.textContent = tot + '°';
+    tf = {r: normDeg(tot - selDrag.base) * Math.PI / 180, ax: selDrag.cx, ay: selDrag.cy};
   } else if(selDrag.handle){
     const b = selDrag.b, w0 = (b[2] - b[0]) * cam.z, h0 = (b[3] - b[1]) * cam.z;
     const s = Math.max(0.1, 1 + ((sx - selDrag.sx) + (sy - selDrag.sy)) / Math.max(20, w0 + h0));
@@ -2777,9 +2824,11 @@ $('palette').addEventListener('click', e => {
 $('customColor').addEventListener('input', () => { const t = prefs.tool === 'hl' ? 'hl' : 'pen'; prefs[t].c = $('customColor').value; savePrefs(); renderOpts(); });
 $('rulerBtn').addEventListener('click', () => {
   prefs.ruler.on = !prefs.ruler.on;
-  if(prefs.ruler.on && (prefs.ruler.cx == null || prefs.ruler.cx > W)){ prefs.ruler.cx = W / 2; prefs.ruler.cy = H / 2; }
+  if(prefs.ruler.on) centerRuler(true);   // always appears in the middle of the screen, straight
   savePrefs(); renderRuler();
-  if(prefs.ruler.on) toast('Drag the ruler with one finger, turn it with two. Draw along an edge for a straight line.');
+  if(prefs.ruler.on) toast(matchMedia('(hover:hover) and (pointer:fine)').matches
+    ? 'Drag the hand to move the ruler, the round arrows to turn it. Draw along an edge for a straight line.'
+    : 'Drag the ruler with one finger, turn it with two. Draw along an edge for a straight line.');
 });
 $('fingerBtn').addEventListener('click', () => { prefs.finger = !prefs.finger; savePrefs(); $('fingerBtn').classList.toggle('on', prefs.finger); });
 $('zoomBtn').addEventListener('click', () => zoomAt(W / 2, H / 2, 1));
@@ -6216,6 +6265,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {get cur(){ return cur; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

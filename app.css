@@ -506,30 +506,29 @@ body.scanning .toast{bottom:calc(76px + var(--sab))}
 @keyframes markFlash{0%{opacity:0;transform:scale(1.25)}15%{opacity:1;transform:scale(1)}70%{opacity:1}100%{opacity:0}}
 
 /* Pencil menu (v17) */
-.wheel{position:fixed;z-index:40;width:232px;height:232px;margin:-116px 0 0 -116px;border-radius:50%;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none}
+.wheel{position:fixed;z-index:40;width:0;height:0;pointer-events:none;touch-action:none;-webkit-user-select:none;user-select:none}
 .wheel.in{animation:wheelIn .14s ease-out}
-@keyframes wheelIn{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:none}}
-.wh-ring{position:absolute;inset:0;border-radius:50%;background:var(--raise);box-shadow:var(--shadow),0 0 0 1px var(--line);opacity:.97;pointer-events:auto}
-.wh-ring::after{content:"";position:absolute;inset:66px;border-radius:50%;box-shadow:0 0 0 1px var(--line)}
-.wh-b{position:absolute;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;display:grid;place-items:center;color:var(--fg);pointer-events:auto}
-.wh-b svg{width:20px;height:20px}
-.wh-b{transition:transform .09s ease-out,background-color .09s,box-shadow .09s}
-@media (hover:hover){.wh-b:hover{background:var(--accent-soft)}}
-.wheel.picking .wh-b:not(.hover){opacity:.55}
-.wh-b.hover{transform:scale(1.35);background:var(--accent);color:var(--accent-fg);box-shadow:0 0 0 3px var(--raise),0 0 0 5px var(--accent),0 4px 14px rgba(0,0,0,.25);z-index:2;opacity:1}
-.wh-col.hover{background:var(--raise)}
-.wh-label{position:absolute;left:50%;bottom:calc(100% + 10px);transform:translateX(-50%);white-space:nowrap;padding:6px 12px;border-radius:999px;background:var(--fg);color:var(--raise);font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px;box-shadow:var(--shadow);pointer-events:none}
+@keyframes wheelIn{from{opacity:0;transform:translate(var(--wdx,0),var(--wdy,0)) scale(.85)}to{opacity:1;transform:none}}
+.wh-svg{position:absolute;overflow:visible;pointer-events:none}
+.wh-bg{fill:var(--raise);opacity:.97;filter:drop-shadow(0 4px 14px rgba(0,0,0,.22));stroke:var(--line);stroke-width:1}
+.wh-seg{fill:var(--panel2);stroke:var(--line);stroke-width:1;pointer-events:auto;transition:fill .09s}
+.wh-seg.on{fill:var(--accent-soft)}
+.wh-seg.hover{fill:var(--accent)}
+.wheel.picking .wh-i:not(.hover){opacity:.55}
+.wh-i{position:absolute;width:36px;height:36px;margin:-18px 0 0 -18px;display:grid;place-items:center;color:var(--fg);pointer-events:none;transition:transform .09s ease-out}
+.wh-i svg{width:20px;height:20px}
+.wh-i.on{color:var(--accent)}
+.wh-i.hover{transform:scale(1.25);color:var(--accent-fg)}
+.wh-tool[data-v="mark"]:not(.on){color:#8B5CF6}
+.wh-col span{width:22px;height:22px;border-radius:50%;background:var(--c);box-shadow:0 0 0 1px var(--line)}
+.wh-col.on span{box-shadow:0 0 0 2px var(--raise),0 0 0 4px var(--accent)}
+.wh-col.hl span{border-radius:5px;height:14px;width:24px;opacity:.75}
+.wh-size span{width:var(--d);height:var(--d);border-radius:50%;background:currentColor}
+.wh-em{width:54px;margin-left:-27px;font-size:11px;font-weight:600}
+.wh-tip{position:absolute;left:-4px;top:-4px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--raise)}
+.wh-label{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;padding:6px 12px;border-radius:999px;background:var(--fg);color:var(--raise);font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px;box-shadow:var(--shadow);pointer-events:none}
 .wh-label[hidden]{display:none}
 .wh-dot{width:14px;height:14px;border-radius:50%;background:var(--c);box-shadow:0 0 0 1.5px var(--raise)}
-.wh-b.on{background:var(--accent);color:var(--accent-fg)}
-.wh-tool[data-v="mark"]:not(.on){color:#8B5CF6}
-.wh-undo{width:44px;height:44px;margin:-22px 0 0 -22px;background:var(--panel2);box-shadow:0 0 0 1px var(--line)}
-.wh-col span{width:24px;height:24px;border-radius:50%;background:var(--c);box-shadow:0 0 0 1px var(--line)}
-.wh-col.hl span{border-radius:5px;height:15px;width:26px;opacity:.75}
-.wh-col.on{background:none;box-shadow:0 0 0 2.5px var(--accent)}
-.wh-size span{width:var(--d);height:var(--d);border-radius:50%;background:currentColor}
-.wh-em{width:54px;margin-left:-27px;border-radius:12px;font-size:11px;font-weight:600;background:var(--panel2);box-shadow:0 0 0 1px var(--line)}
-.wheel.lab-below .wh-label{bottom:auto;top:calc(100% + 10px)}
 
 /* Ask Claude: history and "Put on page" (v21) */
 .am-acts{display:flex;gap:6px;margin-top:8px}

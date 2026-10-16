@@ -3035,46 +3035,79 @@ const WHEEL_HOLD = 480;
 const WHEEL_SIZES = [15, 40, 75];
 let wheelDrag = null, wheelPress = null;
 function wheelIcon(tool){ const s = document.querySelector(`.tool[data-tool="${tool}"] svg`); return s ? s.outerHTML : ''; }
-function buildWheel(){
+// Half-moon menu (like a game weapon wheel) centred on the Pencil tip, opening away from the hand.
+// Inner ring: undo and tools; outer ring: colours, thickness (and eraser mode). Picked by direction.
+const WH_R0 = 34, WH_R1 = 92, WH_R2 = 152, WH_SPAN = Math.PI * 200 / 180;
+let wheelGeo = null;   // {x, y, dir, segs: [{ring, a0, a1, el}]}
+function wheelItems(){
   const t = prefs.tool, inkT = t === 'hl' ? 'hl' : 'pen';
   const favs = inkT === 'hl' ? prefs.hlFavs : prefs.penFavs;
   const sizeT = ['pen', 'hl', 'eraser', 'mark'].includes(t) ? t : 'pen';
-  const inner = ['pen', 'hl', 'mark', 'eraser', 'lasso'];
   const names = {pen: 'Pen', hl: 'Highlighter', mark: 'Mark for later', eraser: 'Eraser', lasso: 'Lasso'};
-  const outer = favs.map(c => ({k: 'c', v: c})).concat(WHEEL_SIZES.map(s => ({k: 's', v: s})));
-  if(t === 'eraser') outer.push({k: 'em'});
-  const at = (r, i, n, off) => { const a = -Math.PI / 2 + off + i * 2 * Math.PI / n; return `left:${(116 + r * Math.cos(a)).toFixed(1)}px;top:${(116 + r * Math.sin(a)).toFixed(1)}px`; };
-  let h = '<div class="wh-ring"></div><div class="wh-label" id="whLabel" hidden></div>';
-  h += `<button class="wh-b wh-undo" data-w="undo" style="left:116px;top:116px" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>`;
-  inner.forEach((tool, i) => { h += `<button class="wh-b wh-tool ${tool === t ? 'on' : ''}" data-w="tool" data-v="${tool}" style="${at(52, i, inner.length, 0)}" title="${names[tool]}" aria-label="${names[tool]}">${wheelIcon(tool)}</button>`; });
-  outer.forEach((o, i) => {
-    const pos = at(96, i, outer.length, Math.PI / outer.length);
-    if(o.k === 'c'){
-      const on = (t === 'pen' || t === 'hl') && prefs[inkT].c === o.v;
-      h += `<button class="wh-b wh-col ${inkT === 'hl' ? 'hl' : ''} ${on ? 'on' : ''}" data-w="c" data-v="${o.v}" style="${pos}" aria-label="${inkT === 'hl' ? 'Highlighter colour' : 'Pen colour'}"><span style="--c:${o.v === 'auto' ? 'var(--fg)' : o.v}"></span></button>`;
-    } else if(o.k === 's'){
-      const sv = prefs[sizeT].s, best = WHEEL_SIZES.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);
-      h += `<button class="wh-b wh-size ${best === o.v ? 'on' : ''}" data-w="s" data-v="${o.v}" style="${pos}" title="Thickness" aria-label="${['Thin', 'Medium', 'Thick'][WHEEL_SIZES.indexOf(o.v)]}"><span style="--d:${4 + o.v / 7}px"></span></button>`;
-    } else {
-      const area = prefs.eraser.mode === 'area';
-      h += `<button class="wh-b wh-em" data-w="em" style="${pos}" title="Switch eraser mode" aria-label="Eraser: switch to ${area ? 'Stroke' : 'Partial'}">${area ? 'Partial' : 'Stroke'}</button>`;
-    }
+  const undoSvg = '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>';
+  const inner = [{w: 'undo', label: 'Undo', icon: undoSvg, cls: 'wh-undo'}]
+    .concat(['pen', 'hl', 'mark', 'eraser', 'lasso'].map(v => ({w: 'tool', v, label: names[v], icon: wheelIcon(v), on: v === t, cls: 'wh-tool'})));
+  const outer = favs.map(c => ({w: 'c', v: c, label: inkT === 'hl' ? 'Highlighter colour' : 'Pen colour', cls: 'wh-col' + (inkT === 'hl' ? ' hl' : ''),
+    icon: `<span style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>`, on: (t === 'pen' || t === 'hl') && prefs[inkT].c === c}));
+  const sv = prefs[sizeT].s, best = WHEEL_SIZES.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);
+  WHEEL_SIZES.forEach((v, i) => outer.push({w: 's', v, label: ['Thin', 'Medium', 'Thick'][i], cls: 'wh-size', icon: `<span style="--d:${4 + v / 7}px"></span>`, on: best === v}));
+  if(t === 'eraser'){ const area = prefs.eraser.mode === 'area'; outer.push({w: 'em', label: 'Eraser: switch to ' + (area ? 'Stroke' : 'Partial'), cls: 'wh-em', icon: area ? 'Partial' : 'Stroke'}); }
+  return [inner, outer];
+}
+const arcPt = (r, a) => `${(r * Math.cos(a)).toFixed(2)} ${(r * Math.sin(a)).toFixed(2)}`;
+function wedge(r0, r1, a0, a1){
+  const big = a1 - a0 > Math.PI ? 1 : 0;
+  return `M${arcPt(r1, a0)}A${r1} ${r1} 0 ${big} 1 ${arcPt(r1, a1)}L${arcPt(r0, a1)}A${r0} ${r0} 0 ${big} 0 ${arcPt(r0, a0)}Z`;
+}
+function buildWheel(){
+  if(!wheelGeo) return;
+  const dir = wheelGeo.dir, A0 = dir - WH_SPAN / 2, gap = 0.035;
+  const [inner, outer] = wheelItems(), segs = [];
+  let svg = `<svg class="wh-svg" viewBox="${-WH_R2 - 4} ${-WH_R2 - 4} ${2 * WH_R2 + 8} ${2 * WH_R2 + 8}" style="left:${-WH_R2 - 4}px;top:${-WH_R2 - 4}px;width:${2 * WH_R2 + 8}px;height:${2 * WH_R2 + 8}px">`;
+  svg += `<path class="wh-bg" d="${wedge(WH_R0 - 4, WH_R2 + 4, A0 - 0.04, A0 + WH_SPAN + 0.04)}"/>`;
+  let icons = '';
+  [[inner, WH_R0, WH_R1], [outer, WH_R1 + 3, WH_R2]].forEach(([list, r0, r1], ring) => {
+    const step = WH_SPAN / list.length;
+    list.forEach((o, i) => {
+      const a0 = A0 + i * step, a1 = a0 + step, m = (a0 + a1) / 2, rm = (r0 + r1) / 2, k = segs.length;
+      const data = `data-w="${o.w}"${o.v !== undefined ? ` data-v="${esc(String(o.v))}"` : ''} data-i="${k}" aria-label="${esc(o.label)}"`;
+      svg += `<path class="wh-b wh-seg ${o.on ? 'on' : ''}" ${data} d="${wedge(r0, r1, a0 + gap / 2, a1 - gap / 2)}"/>`;
+      icons += `<span class="wh-i ${o.cls} ${o.on ? 'on' : ''}" data-i="${k}" style="left:${(rm * Math.cos(m)).toFixed(1)}px;top:${(rm * Math.sin(m)).toFixed(1)}px">${o.icon}</span>`;
+      segs.push({ring, a0, a1});
+    });
   });
-  $('wheel').innerHTML = h;
+  svg += '</svg>';
+  const lr = WH_R2 + 48, lx = clamp(wheelGeo.x + lr * Math.cos(dir), 90, innerWidth - 90) - wheelGeo.x, ly = clamp(wheelGeo.y + lr * Math.sin(dir), 24, innerHeight - 24) - wheelGeo.y;
+  $('wheel').innerHTML = svg + icons + `<div class="wh-label" id="whLabel" hidden style="left:${lx.toFixed(0)}px;top:${ly.toFixed(0)}px"></div><span class="wh-tip"></span>`;
+  wheelGeo.segs = segs;
+}
+// the wedge in the direction of (cx, cy) from the Pencil tip; the middle (under the Pencil) is "nothing"
+function wheelAt(cx, cy){
+  const g = wheelGeo, w = $('wheel'); if(!g || w.hidden) return null;
+  const dx = cx - g.x, dy = cy - g.y, d = Math.hypot(dx, dy);
+  if(d < WH_R0 - 6 || d > WH_R2 + 70) return null;
+  let a = Math.atan2(dy, dx); const A0 = g.dir - WH_SPAN / 2;
+  while(a < A0) a += 2 * Math.PI; while(a >= A0 + 2 * Math.PI) a -= 2 * Math.PI;
+  if(a > A0 + WH_SPAN) return null;
+  const ring = d < WH_R1 + 1 ? 0 : 1, k = g.segs.findIndex(s => s.ring === ring && a >= s.a0 && a < s.a1);
+  return k < 0 ? null : w.querySelector(`.wh-seg[data-i="${k}"]`);
 }
 function openWheel(x, y, pointerId){
   if(!cur) return;
   closePops(); clearSel();
+  // right-handed: the hand rests to the right of and below the Pencil, so the half-moon opens left and a little up
+  const base = prefs.wheel === 'left' ? -20 * Math.PI / 180 : 200 * Math.PI / 180, m = 6;
+  const fitScore = dir => { let n = 0; for(let i = 0; i <= 12; i++){ const a = dir - WH_SPAN / 2 + i * WH_SPAN / 12, px = x + (WH_R2 + 4) * Math.cos(a), py = y + (WH_R2 + 4) * Math.sin(a); if(px >= m && px <= innerWidth - m && py >= m && py <= innerHeight - m) n++; } return n; };
+  let dir = base, best = -1;
+  for(const off of [0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180]){
+    const d = base + off * Math.PI / 180, sc = fitScore(d);
+    if(sc > best){ best = sc; dir = d; } if(sc === 13) break;
+  }
+  wheelGeo = {x, y, dir, segs: []};
   buildWheel();
-  const w = $('wheel'), R = 124, gap = 18;
-  // right-handed: the hand rests to the right of and below the Pencil, so the menu goes left (and a bit up)
-  const s = prefs.wheel === 'left' ? 1 : -1;
-  const fits = (cx, cy) => cx >= R && cx <= innerWidth - R && cy >= R && cy <= innerHeight - R;
-  const cands = [[x + s * (R + gap), y - 40], [x + s * (R * 0.7 + gap), y - R * 0.7 - gap], [x, y - R - gap], [x + s * (R + gap), y + 40], [x, y + R + gap]];
-  let c = cands.find(([cx, cy]) => fits(cx, cy)) || cands[0];
-  c = [clamp(c[0], R, Math.max(R, innerWidth - R)), clamp(c[1], R, Math.max(R, innerHeight - R))];
-  w.style.left = c[0] + 'px'; w.style.top = c[1] + 'px';
-  w.classList.toggle('lab-below', c[1] - 116 < 52);
+  const w = $('wheel');
+  w.style.left = x + 'px'; w.style.top = y + 'px';
+  w.style.setProperty('--wdx', (Math.cos(dir) * -14).toFixed(1) + 'px'); w.style.setProperty('--wdy', (Math.sin(dir) * -14).toFixed(1) + 'px');
   w.hidden = false; w.classList.remove('in'); void w.offsetWidth; w.classList.add('in');
   wheelDrag = pointerId != null ? {id: pointerId, x, y, far: false} : null;
 }
@@ -3083,13 +3116,15 @@ function wheelHover(b){
   const w = $('wheel');
   w.querySelectorAll('.wh-b.hover').forEach(x => { if(x !== b) x.classList.remove('hover'); });
   const L = $('whLabel'); if(!L) return;
+  w.querySelectorAll('.wh-i.hover').forEach(x => { if(!b || x.dataset.i !== b.dataset.i) x.classList.remove('hover'); });
   if(!b){ L.hidden = true; w.classList.remove('picking'); return; }
   b.classList.add('hover'); w.classList.add('picking');
+  const ic = w.querySelector(`.wh-i[data-i="${b.dataset.i}"]`); if(ic) ic.classList.add('hover');
   const c = b.dataset.w === 'c' ? b.dataset.v : null;
   L.innerHTML = (c ? `<span class="wh-dot" style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>` : '') + esc(b.getAttribute('aria-label') || '');
   L.hidden = false;
 }
-function closeWheel(){ const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; }
+function closeWheel(){ const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; wheelGeo = null; }
 function wheelPick(b){
   const k = b.dataset.w, v = b.dataset.v;
   if(k === 'undo'){ undo(); closeWheel(); return; }
@@ -3106,23 +3141,22 @@ function wheelPick(b){
   }
   closeWheel();
 }
-$('wheel').addEventListener('click', e => { const b = e.target.closest('.wh-b'); if(b) wheelPick(b); });
+$('wheel').addEventListener('click', e => { const b = wheelAt(e.clientX, e.clientY); if(b) wheelPick(b); });
 $('wheel').addEventListener('contextmenu', e => e.preventDefault());
 $('wheel').addEventListener('pointerdown', e => {
-  const b = e.target.closest('.wh-b'); if(!b) return;
+  const b = wheelAt(e.clientX, e.clientY); if(!b) return;
   wheelPress = {id: e.pointerId, b}; wheelHover(b);
   // touches are captured by the button they started on; release so lifting over another option counts there
   try { if(e.target.hasPointerCapture && e.target.hasPointerCapture(e.pointerId)) e.target.releasePointerCapture(e.pointerId); } catch {}
 });
 $('wheel').addEventListener('pointermove', e => {
   if(!wheelPress || wheelPress.id !== e.pointerId) return;
-  const el = document.elementFromPoint(e.clientX, e.clientY);
-  wheelHover(el && el.closest('#wheel .wh-b'));
+  wheelHover(wheelAt(e.clientX, e.clientY));
 });
 $('wheel').addEventListener('pointerup', e => {
   if(!wheelPress || wheelPress.id !== e.pointerId) return;
   const start = wheelPress.b; wheelPress = null;
-  const el = document.elementFromPoint(e.clientX, e.clientY), b = el && el.closest('#wheel .wh-b');
+  const b = wheelAt(e.clientX, e.clientY);
   wheelHover(null);
   // slid from one option to another: choose where the Pencil was lifted (a plain tap is handled by click)
   if(b && b !== start) wheelPick(b);
@@ -3132,13 +3166,12 @@ $('wheel').addEventListener('pointercancel', () => { wheelPress = null; wheelHov
 addEventListener('pointermove', e => {
   if(!wheelDrag || e.pointerId !== wheelDrag.id) return;
   if(!wheelDrag.far && Math.hypot(e.clientX - wheelDrag.x, e.clientY - wheelDrag.y) > 18) wheelDrag.far = true;
-  const el = document.elementFromPoint(e.clientX, e.clientY), b = el && el.closest('#wheel .wh-b');
-  wheelHover(b);
+  wheelHover(wheelAt(e.clientX, e.clientY));
 }, true);
 addEventListener('pointerup', e => {
   if(!wheelDrag || e.pointerId !== wheelDrag.id) return;
   const d = wheelDrag; wheelDrag = null;
-  const el = document.elementFromPoint(e.clientX, e.clientY), b = el && el.closest('#wheel .wh-b');
+  const b = wheelAt(e.clientX, e.clientY);
   wheelHover(null);
   if(d.far && b) wheelPick(b);
 }, true);
@@ -4011,7 +4044,7 @@ function renderPrefSettings(){
   $('setHw').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.hwSearch === false ? 'off' : 'on')));
   renderHwStatus();
   $('setWheel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.wheel || 'right')));
-  $('setWheelHint').textContent = prefs.wheel === 'off' ? 'Holding the Pencil still does nothing special.' : `Press the Pencil on the page and hold it still to open a quick menu for tools, colours and thickness. It opens ${prefs.wheel === 'left' ? 'to the right of' : 'to the left of'} the Pencil, away from your hand.`;
+  $('setWheelHint').textContent = prefs.wheel === 'off' ? 'Holding the Pencil still does nothing special.' : `Press the Pencil on the page and hold it still to open a quick menu for tools, colours and thickness. It opens as a half circle around the Pencil tip, ${prefs.wheel === 'left' ? 'to the right' : 'to the left'}, away from your hand. Slide towards an option and lift, or tap it.`;
   $('setModelHint').textContent = {auto: 'A quick check picks the cheap model for easy questions and the smart one for worksheets, handwriting and calculations.', fast: 'Always Haiku: cheapest and fastest, weaker at handwriting and long calculations.', smart: 'Always Sonnet: best answers, about 20 times the price of Haiku.'}[prefs.askModel || 'auto'];
   $('setHoldHint').textContent = hold ? `Hold the pen still for ${(hold / 1000).toFixed(2).replace(/0$/, '')} s at the end of a stroke to turn it into a straight line or shape.` : 'Strokes are never straightened.';
 }

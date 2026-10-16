@@ -1236,6 +1236,7 @@ function endTool(e){
     const before = a.removed.map(it => [it.id, it]).concat([...a.added.keys()].filter(id => !was.has(id)).map(id => [id, null]));
     const after = a.removed.filter(it => !a.added.has(it.id)).map(it => [it.id, null]).concat([...a.added.values()].map(it => [it.id, it]));
     if(before.length) commit(before, after);
+    if(eraseOnce){ const back = eraseOnce; setTool(back); }
   } else if(a.kind === 'lasso'){
     finishLasso(a);
   } else if(a.kind === 'tape'){
@@ -2748,7 +2749,10 @@ document.querySelectorAll('.side-grip').forEach(g => {
    Toolbar
    ===================================================================== */
 const PALETTE = ['auto', '#5D6B79', '#8A97A4', '#1F4FCF', '#3BA5F0', '#0E8C8C', '#167A3C', '#4CC26B', '#9BC53D', '#F5C400', '#E07A10', '#C2362B', '#FF6FA3', '#CC3F66', '#7B3FBF', '#A04FBD', '#8B5A2B', '#FFFFFF'];
+// eraser picked in the Pencil menu: one erase, then back to the tool from before (set in wheelPick)
+let eraseOnce = null;
 function setTool(t){
+  eraseOnce = null;
   prefs.tool = t; savePrefs();
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
   stage.className = 'stage tool-' + t;
@@ -3128,7 +3132,11 @@ function closeWheel(){ const w = $('wheel'); if(w && !w.hidden){ w.hidden = true
 function wheelPick(b){
   const k = b.dataset.w, v = b.dataset.v;
   if(k === 'undo'){ undo(); closeWheel(); return; }
-  if(k === 'tool') setTool(v);
+  if(k === 'tool'){
+    const was = prefs.tool;
+    setTool(v);
+    if(v === 'eraser' && was !== 'eraser') eraseOnce = ['pen', 'hl', 'mark'].includes(was) ? was : 'pen';
+  }
   else if(k === 'c'){
     if(prefs.tool !== 'pen' && prefs.tool !== 'hl') setTool('pen');
     prefs[prefs.tool].c = v; savePrefs(); renderOpts();
@@ -4044,7 +4052,7 @@ function renderPrefSettings(){
   $('setHw').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.hwSearch === false ? 'off' : 'on')));
   renderHwStatus();
   $('setWheel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.wheel || 'right')));
-  $('setWheelHint').textContent = prefs.wheel === 'off' ? 'Holding the Pencil still does nothing special.' : `Press the Pencil on the page and hold it still to open a quick menu for tools, colours and thickness. It opens as a half circle around the Pencil tip, ${prefs.wheel === 'left' ? 'to the right' : 'to the left'}, away from your hand. Slide towards an option and lift, or tap it.`;
+  $('setWheelHint').textContent = prefs.wheel === 'off' ? 'Holding the Pencil still does nothing special.' : `Press the Pencil on the page and hold it still to open a quick menu for tools, colours and thickness. It opens as a half circle around the Pencil tip, ${prefs.wheel === 'left' ? 'to the right' : 'to the left'}, away from your hand. Slide towards an option and lift, or tap it. The eraser picked here erases once, then you are back to your pen.`;
   $('setModelHint').textContent = {auto: 'A quick check picks the cheap model for easy questions and the smart one for worksheets, handwriting and calculations.', fast: 'Always Haiku: cheapest and fastest, weaker at handwriting and long calculations.', smart: 'Always Sonnet: best answers, about 20 times the price of Haiku.'}[prefs.askModel || 'auto'];
   $('setHoldHint').textContent = hold ? `Hold the pen still for ${(hold / 1000).toFixed(2).replace(/0$/, '')} s at the end of a stroke to turn it into a straight line or shape.` : 'Strokes are never straightened.';
 }

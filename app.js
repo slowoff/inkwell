@@ -549,7 +549,12 @@ const GD = {
       await Files.on(true);
       toast('Google Drive connected' + (j.email ? ' (' + j.email + ')' : '') + '. New pictures go to your Drive.');
       openSettings();
-    } catch(e){ toast('Google Drive: ' + (e.message || e)); }
+    } catch(e){
+      const m = String(e.message || e);
+      if(/client secret|invalid_client|unauthorized_client/i.test(m)) toast('Google Drive is not set up right on the server yet. Your pictures keep using the shared storage.');
+      else if(/invalid_grant|expired|already (been )?(used|redeemed)/i.test(m)) toast('The Google sign-in took too long. Tap Connect again.', 'Settings', () => openSettings());
+      else toast('Google Drive could not connect: ' + m);
+    }
   },
   async token(force){
     if(!force && this.tok && this.tok.exp > Date.now() + 60000) return this.tok;

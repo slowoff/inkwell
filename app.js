@@ -243,6 +243,7 @@ const Sync = {
     if(this.running){ this.again = true; return; }
     this.running = true; this.state = 'syncing'; setStatus();
     try {
+      await seedBases();
       await this.pull();
       const sent = await this.push();
       await this.pushAssets();
@@ -270,15 +271,46 @@ const Sync = {
     }
     if(changed) remoteChanged();
   },
+  // Right before uploading: if another device changed one of these docs since this device last saw it,
+  // fetch that version and merge it in first, so the upload does not overwrite it.
+  async checkStale(){
+    const cand = (await IDB.all('docs')).filter(d => d.dirty && !d.deleted && d.data && MERGE_KINDS.has(d.kind));
+    let merged = 0;
+    for(let i = 0; i < cand.length; i += 100){
+      const part = cand.slice(i, i + 100), bases = new Map();
+      for(const d of part){ const b = await baseGet(d.id); if(b) bases.set(d.id, b); }
+      const ids = part.filter(d => bases.has(d.id)).map(d => d.id);
+      if(!ids.length) continue;
+      const {data, error} = await this.sb.from('docs').select('id,server_ts').in('id', ids);
+      if(error) throw error;
+      const stale = (data || []).filter(r => r.server_ts !== bases.get(r.id).ts).map(r => r.id);
+      if(!stale.length) continue;
+      const full = await this.sb.from('docs').select('id,kind,data,deleted,updated_at,server_ts').in('id', stale);
+      if(full.error) throw full.error;
+      for(const row of full.data || []){
+        const b = bases.get(row.id);
+        if(!b.ts && stable(b.d) === stable(row.data)){ await baseSet(row.id, b.d, row.server_ts); continue; }   // seeded base, server unchanged
+        if(await applyRemote(row)) merged++;
+      }
+    }
+    if(merged) remoteChanged();
+  },
   async push(){
+    await this.checkStale();
     const all = await IDB.all('docs');
     const dirty = all.filter(d => d.dirty);
     let batch = [], size = 0;
     const flush = async () => {
       if(!batch.length) return;
       const rows = batch.map(d => ({user_id: this.user.id, id: d.id, kind: d.kind, data: d.data ?? null, deleted: !!d.deleted, updated_at: d.updated}));
-      const {error} = await this.sb.from('docs').upsert(rows, {onConflict: 'user_id,id'});
+      const {data: back, error} = await this.sb.from('docs').upsert(rows, {onConflict: 'user_id,id'}).select('id,server_ts');
       if(error) throw error;
+      const ts = new Map((back || []).map(r => [r.id, r.server_ts]));
+      for(const d of batch){
+        if(!MERGE_KINDS.has(d.kind)) continue;
+        if(d.deleted || !d.data) await baseDel(d.id);
+        else await baseSet(d.id, d.data, ts.get(d.id));
+      }
       for(const d of batch){
         const now = await IDB.get('docs', d.id);
         if(now && now.updated === d.updated){
@@ -330,15 +362,157 @@ function syncError(e){
   return 'Sync problem: ' + m.slice(0, 60);
 }
 let pendingCurrentReload = false, lastLocalEdit = 0;
+/* Merging (since 1.26): when a page, section or notebook changed on two devices before they synced,
+   both sides' changes are kept instead of the newer device overwriting the other.
+   The base is the last version this device and the server agreed on: meta 'base:<id>' = {d: data, ts: server_ts}
+   (ts null = seeded from an already synced copy, server time unknown).
+   Pages (content docs) merge item by item; page/section/notebook docs merge field by field.
+   Both sides changed the same item: the newer side wins, except text boxes, where the other version is kept as a copy. */
+const MERGE_KINDS = new Set(['content', 'page', 'sec', 'nb']);
+function stable(v){
+  if(Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+  if(v && typeof v === 'object') return '{' + Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+  return v === undefined ? 'null' : JSON.stringify(v);
+}
+const baseGet = id => IDB.get('meta', 'base:' + id);
+const baseSet = (id, d, ts) => IDB.put('meta', {d, ts: ts || null}, 'base:' + id);
+const baseDel = id => IDB.del('meta', 'base:' + id);
+function mergeKeys(b, l, r, lNew){
+  b = b || {}; l = l || {}; r = r || {};
+  const out = {};
+  for(const k of new Set([...Object.keys(l), ...Object.keys(r)])){
+    const sb = stable(b[k]), sl = stable(l[k]), sr = stable(r[k]);
+    const v = sl === sr ? l[k] : sl === sb ? r[k] : sr === sb ? l[k] : lNew ? l[k] : r[k];
+    if(v !== undefined) out[k] = v;
+  }
+  return out;
+}
+// b, l, r: content data with serialised items. lNew: the local side was edited more recently.
+function mergeContent(b, l, r, lNew){
+  const map = d => new Map(((d && d.items) || []).filter(it => it && it.id).map(it => [it.id, it]));
+  const bi = map(b), li = map(l), ri = map(r);
+  const pick = new Map(), extra = [];
+  let copies = 0;
+  for(const id of new Set([...li.keys(), ...ri.keys()])){
+    const B = bi.get(id), L = li.get(id), R = ri.get(id);
+    const kb = B ? stable(B) : null, kl = L ? stable(L) : null, kr = R ? stable(R) : null;
+    let v;
+    if(kl === kr) v = L;
+    else if(kl === kb) v = R;          // changed (or deleted) only on the other device
+    else if(kr === kb) v = L;          // changed (or deleted) only here
+    else if(!L) v = R;                 // deleted here, changed there: keep the change
+    else if(!R) v = L;
+    else {
+      v = lNew ? L : R;
+      const o = lNew ? R : L;
+      if(o.t === 'x'){                 // two different edits of one text box: keep both
+        const cp = Object.assign({}, o, {id: (o.id[0] || 'x') + newId(), x: (o.x || 0) + 24, y: (o.y || 0) + 24});
+        delete cp.g;
+        extra.push(cp); copies++;
+      }
+    }
+    if(v) pick.set(id, v);
+  }
+  // drawing order: this device's order, with the other device's new items slotted in after their neighbour there
+  const order = [...li.keys()].filter(id => pick.has(id));
+  const pos = new Set(order);
+  let prev = null;
+  for(const id of ri.keys()){
+    if(!pick.has(id)) continue;
+    if(!pos.has(id)){ order.splice(prev === null ? 0 : order.indexOf(prev) + 1, 0, id); pos.add(id); }
+    prev = id;
+  }
+  const strip = d => { const o = Object.assign({}, d || {}); delete o.items; return o; };
+  const data = mergeKeys(strip(b), strip(l), strip(r), lNew);
+  data.items = order.map(id => pick.get(id)).concat(extra);
+  return {data, copies};
+}
+let mergeToastT = 0;
+function mergeNote(copies){
+  if(!copies) return;
+  clearTimeout(mergeToastT);
+  mergeToastT = setTimeout(() => toast(copies === 1 ? 'A text box was edited on two devices: both versions are on the page' : `${copies} text boxes were edited on two devices: both versions are on the page`), 300);
+}
+// The open page: merge into what is on screen, so the next save does not drop the other device's changes.
+async function mergeCurrent(row, base){
+  const c = cur;
+  if(editing) syncEditingHTML();
+  const lrec = await IDB.get('docs', row.id);
+  const busy = !!((lrec && lrec.dirty) || saveContentSoon.pending() || editing || (c.crec && c.crec.dirty));
+  let data, copies = 0;
+  if(!busy){
+    if(!base && lrec && lrec.updated >= row.updated_at) return false;
+    data = row.data;
+  } else {
+    const local = {bg: c.bg, items: [...c.items.values()].map(ser)};
+    if(c.lastId) local.last = c.lastId;
+    if(lrec && lrec.data) for(const k of Object.keys(lrec.data)) if(!(k in local)) local[k] = lrec.data[k];
+    const m = mergeContent(base && base.d, local, row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing);
+    data = m.data; copies = m.copies;
+  }
+  const next = new Map();
+  for(const s of data.items || []){ const it = deser(s); if(it && it.id) next.set(it.id, it); }
+  if(editing && c.items.has(editing.id)) next.set(editing.id, c.items.get(editing.id));   // never pull the box being typed in
+  for(const [id, it] of next){
+    const old = c.items.get(id);
+    if(old && stable(ser(old)) === stable(ser(it))) next.set(id, old);
+  }
+  for(const id of c.items.keys()) if(!next.has(id)){ geo.delete(id); dropEl(id); }
+  c.items = next;
+  for(const it of next.values()) if(it.t !== 's') itemEl(it);
+  if(stable(data.bg) !== stable(c.bg)){ c.bg = normBg(data.bg); renderPaper(); }
+  if(typeof data.last === 'string') c.lastId = data.last;
+  c.lx = undefined; slPages = null;
+  if(sel){ computeSel(); if(sel) positionOverlays(); }
+  invalidate(); refreshPaper();
+  if(!busy){
+    const rec = {id: row.id, kind: row.kind, data: row.data, deleted: false, updated: row.updated_at, dirty: 0};
+    await IDB.put('docs', rec);
+    c.crec = rec;
+  } else {
+    await saveContent();
+  }
+  await baseSet(row.id, row.data, row.server_ts);
+  searchCache = null;
+  mergeNote(copies);
+  return true;
+}
 async function applyRemote(row){
   const local = await IDB.get('docs', row.id);
-  if(local && local.updated >= row.updated_at) return false;
+  const mk = MERGE_KINDS.has(row.kind);
+  const base = mk ? await baseGet(row.id) : null;
+  if(base && base.ts && base.ts === row.server_ts) return false;   // this device's own upload
+  if(mk && local && local.data && row.data && !local.deleted && !row.deleted){
+    if(row.kind === 'content' && cur && row.id === 'c_' + cur.id) return mergeCurrent(row, base);
+    if(local.dirty){
+      const lNew = local.updated > row.updated_at;
+      const m = row.kind === 'content' ? mergeContent(base && base.d, local.data, row.data, lNew) : {data: mergeKeys(base && base.d, local.data, row.data, lNew), copies: 0};
+      const rec = {id: row.id, kind: row.kind, data: m.data, deleted: false, updated: Math.max(local.updated, row.updated_at) + 1, dirty: 1};
+      await IDB.put('docs', rec);
+      if(rec.kind !== 'content') docs.set(rec.id, rec);
+      await baseSet(row.id, row.data, row.server_ts);
+      searchCache = null;
+      mergeNote(m.copies);
+      return true;
+    }
+    if(!base && local.updated >= row.updated_at) return false;
+  } else if(local && local.updated >= row.updated_at) return false;
   const rec = {id: row.id, kind: row.kind, data: row.data ?? null, deleted: !!row.deleted, updated: row.updated_at, dirty: 0};
   await IDB.put('docs', rec);
   if(rec.kind !== 'content') docs.set(rec.id, rec);
   else if(cur && rec.id === 'c_' + cur.id) pendingCurrentReload = true;
+  if(mk){ if(rec.data && !rec.deleted) await baseSet(row.id, rec.data, row.server_ts); else await baseDel(row.id); }
   searchCache = null;
   return true;
+}
+// once per device: docs already in sync get their current copy as the base for later merges
+async function seedBases(){
+  if(await IDB.get('meta', 'baseSeed')) return;
+  for(const d of await IDB.all('docs')){
+    if(!MERGE_KINDS.has(d.kind) || d.dirty || d.deleted || !d.data) continue;
+    if(!(await baseGet(d.id))) await baseSet(d.id, d.data, null);
+  }
+  await IDB.put('meta', 1, 'baseSeed');
 }
 function remoteChanged(){
   renderNav(); renderList(); renderTemplates(); scanMarks().catch(() => {});
@@ -671,20 +845,42 @@ function unloadImg(el, visible){
 }
 
 /* DOM items: text boxes, formulas, imported pages/photos, tape */
-function cleanHTML(html){
-  const t = document.createElement('template');
-  t.innerHTML = html || '';
-  t.content.querySelectorAll('script,style,iframe,object,embed,link,meta,img,video,audio,form,input,button').forEach(n => n.remove());
-  t.content.querySelectorAll('*').forEach(n => {
+// Text box HTML (since 1.26 an allowlist): known formatting tags stay, unknown tags are unwrapped (their text stays),
+// anything that can run code, load something or embed another document is removed with its contents.
+const CLEAN_KEEP = new Set('A B STRONG I EM U S STRIKE DEL INS SUB SUP BR P DIV SPAN H1 H2 H3 H4 H5 H6 UL OL LI FONT MARK SMALL BIG TT TABLE THEAD TBODY TFOOT TR TD TH CAPTION COLGROUP COL BLOCKQUOTE PRE CODE HR Q CITE ABBR KBD SAMP VAR DFN CENTER WBR'.split(' '));
+const CLEAN_DROP = new Set('SCRIPT STYLE IFRAME FRAME FRAMESET OBJECT EMBED APPLET LINK META BASE IMG PICTURE SOURCE VIDEO AUDIO TRACK CANVAS SVG MATH FORM INPUT BUTTON SELECT OPTION OPTGROUP TEXTAREA TEMPLATE NOSCRIPT NOEMBED NOFRAMES PORTAL TITLE HEAD XMP PLAINTEXT DIALOG SLOT'.split(' '));
+const CLEAN_ATTR = new Set(['class', 'style', 'colspan', 'rowspan', 'color', 'face', 'size', 'align', 'valign', 'dir', 'title', 'start', 'type']);
+const HTML_NS = 'http://www.w3.org/1999/xhtml';
+function cleanStyle(n){
+  const keep = (n.getAttribute('style') || '').split(';').filter(d => d.trim() && !/url\s*\(|expression\s*\(|javascript:|behaviou?r\s*:|-moz-binding|^\s*position\s*:/i.test(d));
+  if(keep.length) n.setAttribute('style', keep.join(';')); else n.removeAttribute('style');
+}
+function cleanNode(parent){
+  for(const n of [...parent.childNodes]){
+    if(n.nodeType === 8){ n.remove(); continue; }
+    if(n.nodeType !== 1) continue;
+    const tag = n.tagName.toUpperCase();
+    if(n.namespaceURI !== HTML_NS || CLEAN_DROP.has(tag)){ n.remove(); continue; }
+    cleanNode(n);
+    if(!CLEAN_KEEP.has(tag) || (tag === 'A' && !n.classList.contains('pl'))){ n.replaceWith(...n.childNodes); continue; }
     for(const a of [...n.attributes]){
       const k = a.name.toLowerCase();
-      if(k.startsWith('on') || k === 'href' || k === 'src' || k === 'contenteditable') n.removeAttribute(a.name);
+      if(k.startsWith('data-') ? !/^data-[a-z0-9-]+$/.test(k) : !CLEAN_ATTR.has(k)) n.removeAttribute(a.name);
     }
-    if(n.tagName === 'A' && !n.classList.contains('pl')) n.replaceWith(...n.childNodes);
-  });
+    if(n.hasAttribute('style')) cleanStyle(n);
+  }
+}
+function cleanHTML(html){
+  const t = document.createElement('template');   // template content is inert: nothing loads or runs while cleaning
+  t.innerHTML = html || '';
+  cleanNode(t.content);
   return t.innerHTML;
 }
-function htmlText(html){ const d = document.createElement('div'); d.innerHTML = html || ''; d.querySelectorAll('li,p,h1,h2,div,br').forEach(n => n.after(' ')); return d.textContent.replace(/\s+/g, ' ').trim(); }
+function htmlText(html){
+  const t = document.createElement('template'); t.innerHTML = html || '';
+  t.content.querySelectorAll('li,p,h1,h2,h3,h4,h5,h6,div,br,tr,td,th').forEach(n => n.after(' '));
+  return t.content.textContent.replace(/\s+/g, ' ').trim();
+}
 function prepTextEl(el){
   el.querySelectorAll('a.pl').forEach(a => { a.setAttribute('contenteditable', 'false'); a.classList.toggle('broken', !getDoc(a.dataset.page)); });
 }
@@ -3943,7 +4139,7 @@ async function cleanScan(){
     for(const k in v){ const x = v[k]; if(k === 'a' && typeof x === 'string') used.add(x); else if(x && typeof x === 'object') walk(x); }
   };
   for(const d of await IDB.all('docs')) if(d.kind !== 'ptxt' && d.data) walk(d.data);
-  if(cur) for(const it of cur.items.values()) walk(it);
+  if(cur){ for(const it of cur.items.values()) walk(it); walk(cur.undo); walk(cur.redo); }   // Undo can still bring a deleted picture back
   walk(Ask.msgs);
   for(const id of (await IDB.get('meta', 'pendingAssets')) || []) used.add(id);
   const local = (await IDB.all('assets')).filter(r => r && r.id && !used.has(r.id)).map(r => ({id: r.id, size: r.blob ? r.blob.size : 0}));
@@ -6980,6 +7176,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc};
+window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

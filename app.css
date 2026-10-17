@@ -680,3 +680,29 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .on-copy.ok{color:var(--ok)}
 .on-paste{display:flex;gap:8px;margin-top:6px}
 .on-paste .text-in{flex:1;min-width:0}
+
+/* ---------- 1.26: touch targets at least 44 pt on touch screens (Apple's minimum); mouse layouts unchanged ---------- */
+@media (any-pointer:coarse){
+  .icon-btn{width:44px;height:44px}
+  .tb{min-width:44px;height:44px}
+  .title-in{height:44px}
+  .tool{width:44px;height:44px}
+  .swatch{width:44px;height:44px}
+  .sel-colors .swatch{width:40px}
+  .nb-main,.sec-row,.add-sec,.status{min-height:44px}
+  .search input{height:44px}
+  .search svg{top:13px}
+  .new-page{height:44px}
+  .new-more{height:44px;width:36px;position:relative}
+  .new-more::after{content:'';position:absolute;top:0;bottom:0;left:0;right:-8px}   /* 44 pt to tap, reaching into the bar's edge padding */
+  .list-head{gap:2px}
+  .size,.toggle{height:44px}
+  .size input[type=range]{height:44px}
+  .seg button{height:38px}
+  .fmt .tb{min-width:44px;height:44px}
+  .ask-head .icon-btn{width:44px;height:44px}
+  .ask-mode select{height:44px}
+  .btn,.trash-item .btn,.ask-foot .btn,.on-copy{height:44px}
+  .math-keys button{min-width:44px;height:44px}
+  .scan-bar button{min-height:44px}
+}

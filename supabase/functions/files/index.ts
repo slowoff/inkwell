@@ -133,6 +133,8 @@ Deno.serve(async (req) => {
         if (!r.ok || !j.access_token) return json(req, 400, { error: "g_signin", message: j.error_description || j.error || "Google sign-in failed" });
         const refresh = j.refresh_token || (gd && gd.refresh_token);
         if (!refresh) return json(req, 400, { error: "g_signin", message: "Google did not give Inkwell lasting access. Try again." });
+        if (j.scope && !String(j.scope).includes("auth/drive.file"))
+          return json(req, 400, { error: "g_scope", message: "Inkwell was not allowed to use Google Drive. Tap Connect again and leave the Google Drive box ticked." });
         let email = "";
         try { const u = await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: "Bearer " + j.access_token } })).json(); email = u.email || ""; } catch { /* optional */ }
         let folder = gd && gd.folder_id;
@@ -145,7 +147,16 @@ Deno.serve(async (req) => {
           const fr = await fetch(GDRIVE + "?fields=id", { method: "POST", headers: { Authorization: "Bearer " + j.access_token, "Content-Type": "application/json" },
             body: JSON.stringify({ name: "Inkwell pictures", mimeType: "application/vnd.google-apps.folder", description: "Pictures, scans and imported pages from Inkwell. Deleting them here removes them from your notes." }) });
           const fj = await fr.json().catch(() => ({}));
-          if (!fr.ok || !fj.id) return json(req, 502, { error: "g_error", message: "Could not make the folder in Google Drive" });
+          if (!fr.ok || !fj.id) {
+            const why = (fj.error && (fj.error.errors?.[0]?.reason || fj.error.status)) || String(fr.status);
+            const msg = (fj.error && fj.error.message) || "";
+            console.log("gdrive folder", fr.status, why, msg);
+            if (/accessNotConfigured|SERVICE_DISABLED/i.test(why + msg))
+              return json(req, 502, { error: "g_error", message: "Google Drive is still being switched on for Inkwell. Try again in a few minutes." });
+            if (/insufficient|scope|PERMISSION_DENIED/i.test(why + msg) || fr.status === 403)
+              return json(req, 400, { error: "g_scope", message: "Inkwell was not allowed to use Google Drive. Tap Connect again and leave the Google Drive box ticked. (" + why + ")" });
+            return json(req, 502, { error: "g_error", message: "Could not make the folder in Google Drive (" + why + ")" });
+          }
           folder = fj.id;
         }
         const { error } = await admin.from("gdrive").upsert({ user_id: user.id, refresh_token: refresh, folder_id: folder, email, on_new: true, broken: false }, { onConflict: "user_id" });

@@ -724,3 +724,5 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .cu-list input[type=checkbox]{width:22px;height:22px;flex:none;accent-color:var(--accent)}
 .cu-size{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted);font-size:13.5px}
 #cuSort{margin:4px 0 8px;max-width:320px}
+/* 1.29: text snapped into a table cell (fits inside, shrinks as it grows) */
+.it-text.cell{min-height:0;min-width:0;white-space:normal}

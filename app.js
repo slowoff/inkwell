@@ -1061,6 +1061,7 @@ function itemEl(it){
     el.style.fontSize = (17 * (it.fs || 1)) + 'px';
     el.style.lineHeight = it.lh ? it.lh + 'px' : '';   // lh: text placed on a worksheet's answer lines
     el.classList.toggle('lh', !!it.lh);
+    el.classList.toggle('cell', !!it.ch);
     if(!(editing && editing.id === it.id) && el._html !== it.html){
       el.innerHTML = cleanHTML(it.html);
       el._html = it.html;
@@ -2314,7 +2315,7 @@ async function detectLines(aId){
     if(b){ b.y2 = g.y; b.x1 = Math.min(b.x1, g.x1); b.x2 = Math.max(b.x2, g.x2); if(!g.d) b.d = 0; } else bands.push({y1: g.y, y2: g.y, x1: g.x1, x2: g.x2, d: g.d ? 1 : 0});
   }
   const clear = (y, x1, x2, lim = 0.3) => { if(y < 0 || y >= h) return true; let n = 0; for(let x = x1; x <= x2; x++) n += ink[y * w + x]; return n / (x2 - x1 + 1) < lim; };
-  const maxT = Math.max(3, Math.round(h * 0.004)), out = [];
+  const maxT = Math.max(3, Math.round(Math.max(w, h) * 0.0065)), out = [];   // thickest line that still counts as a line
   for(const b of bands){
     if(b.y2 - b.y1 + 1 > maxT) continue;
     if(!clear(b.y1 - 3, b.x1, b.x2) || !clear(b.y2 + 3, b.x1, b.x2)) continue;
@@ -2322,7 +2323,67 @@ async function detectLines(aId){
     if(b.d){ const m = Math.max(4, Math.round(h * 0.003)); let ok = true; for(let k = 2; k <= m && ok; k++) ok = clear(b.y1 - k, b.x1, b.x2, 0.04) && clear(b.y2 + k, b.x1, b.x2, 0.04); if(!ok) continue; }
     out.push({y: (b.y1 + b.y2 + 1) / 2 / h, x1: b.x1 / w, x2: (b.x2 + 1) / w});
   }
-  return out.sort((a, b) => a.y - b.y);
+  out.sort((a, b) => a.y - b.y);
+  // table borders (since 1.29): thin solid vertical lines, for snapping text into table cells
+  const vmin = Math.max(14, Math.round(h * 0.009)), vgap = Math.max(2, Math.round(h * 0.002)), vsegs = [];
+  for(let x = 0; x < w; x++){
+    let s = -1, last = -1, n = 0;
+    const flush = () => { if(s >= 0 && last - s + 1 >= vmin && n / (last - s + 1) >= 0.85) vsegs.push({x, y1: s, y2: last}); };
+    for(let y = 0; y < h; y++){
+      if(ink[y * w + x]){ if(s < 0 || y - last > vgap){ flush(); s = y; n = 0; } last = y; n++; }
+    }
+    flush();
+  }
+  const vb = [];
+  for(const g of vsegs){
+    const b = vb.find(b => g.x - b.x2 <= 1 && Math.min(b.y2, g.y2) - Math.max(b.y1, g.y1) > 0.5 * Math.min(b.y2 - b.y1, g.y2 - g.y1));
+    if(b){ b.x2 = g.x; b.y1 = Math.min(b.y1, g.y1); b.y2 = Math.max(b.y2, g.y2); } else vb.push({x1: g.x, x2: g.x, y1: g.y1, y2: g.y2});
+  }
+  const vclear = (x, y1, y2) => { if(x < 0 || x >= w) return true; let n = 0; for(let y = y1; y <= y2; y++) n += ink[y * w + x]; return n / (y2 - y1 + 1) < 0.3; };
+  out.v = vb.filter(b => b.x2 - b.x1 + 1 <= maxT && vclear(b.x1 - 3, b.y1, b.y2) && vclear(b.x2 + 3, b.y1, b.y2))
+    .map(b => ({x: (b.x1 + b.x2 + 1) / 2 / w, y1: b.y1 / h, y2: (b.y2 + 1) / h}));
+  return out;
+}
+// The table cell (four border lines around it) at world point (wx, wy) on an imported page, or null.
+function snapCellAt(wx, wy){
+  if(!cur) return null;
+  const imgs = [...cur.items.values()].filter(it => it.t === 'i' && wx >= it.x && wx <= it.x + it.w && wy >= it.y && wy <= it.y + it.h);
+  for(const it of imgs.reverse()){
+    const fr = lineReady.get(it.a);
+    if(!fr){ pageLines(it.a); continue; }
+    if(!fr.v || !fr.v.length) continue;
+    const tol = 4;
+    const H = fr.map(l => ({y: it.y + l.y * it.h, x1: it.x + l.x1 * it.w, x2: it.x + l.x2 * it.w})).filter(l => wx >= l.x1 - tol && wx <= l.x2 + tol);
+    const top = H.filter(l => l.y <= wy).sort((a, b) => b.y - a.y)[0], bot = H.filter(l => l.y > wy).sort((a, b) => a.y - b.y)[0];
+    if(!top || !bot) continue;
+    const V = fr.v.map(l => ({x: it.x + l.x * it.w, y1: it.y + l.y1 * it.h, y2: it.y + l.y2 * it.h})).filter(l => l.y1 <= top.y + tol && l.y2 >= bot.y - tol);
+    const left = V.filter(l => l.x <= wx).sort((a, b) => b.x - a.x)[0], right = V.filter(l => l.x > wx).sort((a, b) => a.x - b.x)[0];
+    if(!left || !right) continue;
+    const ch = bot.y - top.y, cw = right.x - left.x;
+    if(ch < 8 || ch > 200 || cw < 16) continue;
+    if(top.x1 > left.x + tol || top.x2 < right.x - tol || bot.x1 > left.x + tol || bot.x2 < right.x - tol) continue;
+    return {x1: left.x, x2: right.x, y1: top.y, y2: bot.y};
+  }
+  return null;
+}
+// Text in a table cell shrinks (and wraps onto up to 3 lines) so it always fits inside the cell.
+function fitCell(id){
+  const it = cur && cur.items.get(id), el = elMap.get(id);
+  if(!it || !it.ch || !el) return;
+  const ch = it.ch, F0 = (it.fs0 || it.fs) * 17;
+  let best = null;
+  for(const k of [1, 2, 3]){
+    const lh = ch / k;
+    for(let F = Math.min(F0, lh * 0.82); F >= 6; F *= 0.92){
+      el.style.fontSize = F + 'px'; el.style.lineHeight = lh + 'px';
+      if(el.scrollHeight <= ch + 4.5){ best = {fs: F / 17, lh}; break; }
+      if(k < 3 && F < lh * 0.6) break;   // rather another line than tiny letters
+    }
+    if(best) break;
+  }
+  if(!best){ best = {fs: 6 / 17, lh: ch / 3}; el.style.fontSize = '6px'; el.style.lineHeight = best.lh + 'px'; }
+  const r = n => Math.round(n * 1000) / 1000;
+  if(r(best.fs) !== r(it.fs) || r(best.lh) !== r(it.lh || 0)) cur.items.set(id, Object.assign({}, it, {fs: r(best.fs), lh: r(best.lh)}));
 }
 // The answer line to write on for a tap/click at world point (wx, wy), or null.
 function snapLineAt(wx, wy){
@@ -2370,8 +2431,13 @@ function placeAt(a){
     if(it && it.t === 'm'){ openMath(it); return; }
     const fs = clamp(1 / cam.z, 0.25, 6);
     let nt = {t: 'x', id: 'x' + newId(), x: a.w0[0] - 4 * fs, y: a.w0[1] - 16 * fs, w: clamp((W - a.sx - 16) / cam.z, 160 * fs, 460 * fs), fs, html: ''};
-    const sn = prefs.snapLines ? snapLineAt(a.w0[0], a.w0[1]) : null;
-    if(sn){
+    const cell = prefs.snapLines ? snapCellAt(a.w0[0], a.w0[1]) : null;
+    const sn = !cell && prefs.snapLines ? snapLineAt(a.w0[0], a.w0[1]) : null;
+    if(cell){
+      // inside a table cell: one line filling the cell, text shrinks to fit as it is typed (fitCell)
+      const ch = Math.round((cell.y2 - cell.y1 - 2) * 100) / 100, F = clamp(ch * 0.62, 7, 28);
+      nt = {t: 'x', id: nt.id, x: cell.x1 - 3, y: cell.y1 - 1, w: Math.max(30, cell.x2 - cell.x1 + 6), fs: F / 17, fs0: F / 17, lh: ch, ch, html: ''};
+    } else if(sn){
       // sit on the answer line; every further line of text lands on the next ruled line
       const F = clamp(sn.d * 0.55, 8, 40), lh = Math.round(sn.d * 100) / 100;
       nt = {t: 'x', id: nt.id, x: sn.x1 - 6, y: sn.y - 2 - baselineOf(F, lh) - F * 0.2, w: Math.max(60, sn.x2 - sn.x1 + 12), fs: F / 17, lh, html: ''};
@@ -2439,6 +2505,7 @@ function finishEditing(){
 worldFront.addEventListener('input', e => {
   if(!editing) return;
   syncEditingHTML();
+  fitCell(editing.id);
   lastLocalEdit = Date.now();
   saveContentSoon();
   invalidate(0, 0, 1);
@@ -7554,6 +7621,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud};
+window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

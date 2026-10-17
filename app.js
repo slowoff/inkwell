@@ -547,7 +547,8 @@ const GD = {
       const j = await Files.call('gconnect', {code: r.code, verifier: r.v, redirect: this.redirect()});
       this.tok = null;
       await Files.on(true);
-      toast('Google Drive connected' + (j.email ? ' (' + j.email + ')' : '') + '. New pictures go to your Drive.');
+      toast('Google Drive connected' + (j.email ? ' (' + j.email + ')' : '') + '. Your notes and new pictures now also go to your Drive.');
+      this.saveNotes(true);
       openSettings();
     } catch(e){
       const m = String(e.message || e);
@@ -594,6 +595,54 @@ const GD = {
     toast('Google Drive is no longer connected, so new pictures go to the shared storage. Reconnect in Settings → Google Drive.', 'Settings', () => openSettings());
   },
   async setOn(on){ await Files.call('gset', {on}); await Files.on(true); renderCloud(); },
+  /* (1.33) A full copy of all notes in the Drive folder as "Inkwell notes.json" (same format as the backup's notes.json,
+     so Settings → Restore backup reads it). Updated a few minutes after changes and when the app goes to the background.
+     Sync itself still runs through Inkwell's server; this copy is so everything is also in the person's own Drive. */
+  notesBusy: false,
+  notesState(){ return LSget('inkwell.gdNotes', null) || {}; },
+  async saveNotes(force){
+    const g = Files.info && Files.info.gdrive;
+    if(!g || g.broken || this.notesBusy || !navigator.onLine || !Sync.user) return;
+    const st = this.notesState();
+    if(st.fail && Date.now() - st.fail < 60000) return;          // after a failure, wait a minute
+    this.notesBusy = true;
+    try {
+      await flushSaves();
+      const docsAll = (await IDB.all('docs')).filter(d => !d.deleted && d.data).map(d => ({id: d.id, kind: d.kind, data: d.data, updated: d.updated}));
+      const sig = docsAll.length + ':' + docsAll.reduce((m, d) => Math.max(m, d.updated || 0), 0) + ':' + Sync.user.id;
+      if(sig === st.sig && st.id) return;                         // nothing changed since the last copy
+      if(!force && st.saved && Date.now() - st.saved < 3 * 60000) return;   // while writing: at most every 3 minutes
+      const body = JSON.stringify({app: 'Inkwell', version: 2, exported: new Date().toISOString(), parts: 1, docs: docsAll});
+      let id = st.uid === Sync.user.id ? st.id : null;
+      for(let k = 0; k < 2; k++){
+        const t = await this.token(k > 0), H = {Authorization: 'Bearer ' + t.at};
+        if(!id){
+          const q = `name='Inkwell notes.json' and trashed=false` + (t.folder ? ` and '${t.folder}' in parents` : '');
+          const r = await fetch(GD_FILES + '?fields=files(id)&q=' + encodeURIComponent(q), {headers: H});
+          if(r.status === 401 && k === 0) continue;
+          const j = await r.json().catch(() => ({}));
+          id = j.files && j.files[0] && j.files[0].id || null;
+        }
+        let r;
+        if(id){
+          r = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + encodeURIComponent(id) + '?uploadType=media&fields=id', {method: 'PATCH', headers: {...H, 'Content-Type': 'application/json'}, body});
+          if(r.status === 404){ id = null; k--; continue; }   // the file was deleted in Drive: make it again
+        } else {
+          const b = 'inkwell' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+          const meta = JSON.stringify({name: 'Inkwell notes.json', mimeType: 'application/json', description: 'A copy of all your Inkwell notes, kept up to date. Settings → Restore backup can read it.', parents: t.folder ? [t.folder] : undefined});
+          r = await fetch(GD_UPLOAD, {method: 'POST', headers: {...H, 'Content-Type': 'multipart/related; boundary=' + b},
+            body: `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`});
+        }
+        if(r.status === 401 && k === 0) continue;
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || !j.id) throw new Error('Google Drive (' + r.status + ')');
+        LSset('inkwell.gdNotes', {id: j.id, uid: Sync.user.id, sig, saved: Date.now()});
+        if(!$('settingsDlg').hidden) renderGD();
+        return;
+      }
+    } catch(e){ console.warn('gdrive notes', e); LSset('inkwell.gdNotes', {...st, fail: Date.now()}); }
+    finally { this.notesBusy = false; }
+  },
   // move this person's pictures from the shared storage into their Drive (frees shared space)
   async move(){
     if(this.moving) return;
@@ -4535,8 +4584,10 @@ function renderGD(){
   $('gdMove').hidden = !g || g.broken || !g.on || !(i.used_mb > 0.05);
   $('gdWhy').hidden = !!(g && !g.broken);
   if(GD.moving) return;
+  const ns = GD.notesState(), nt = ns.saved && ns.uid === (Sync.user && Sync.user.id) ? new Date(ns.saved) : null;
+  const when = nt ? (nt.toDateString() === new Date().toDateString() ? pad2(nt.getHours()) + ':' + pad2(nt.getMinutes()) : nt.toLocaleDateString()) : '';
   $('gdState').textContent = !g ? '' : g.broken ? 'The Google sign-in has expired. New pictures go to the shared storage until you connect again.'
-    : `Connected${g.email ? ' as ' + g.email : ''} · ${fmtMB(g.mb || 0)} in your Drive · new pictures go to ${g.on ? 'your Drive' : 'the shared storage'}`;
+    : `Connected${g.email ? ' as ' + g.email : ''} · notes copied to your Drive ${when ? 'at ' + when : 'shortly'} · pictures: ${fmtMB(g.mb || 0)} in your Drive, new ones go to ${g.on ? 'your Drive' : 'the shared storage'}`;
 }
 function renderCloud(){
   const i = Files.info, row = $('cloudRow');
@@ -7723,7 +7774,8 @@ function themeChanged(){
 }
 darkMQ.addEventListener && darkMQ.addEventListener('change', themeChanged);
 // leaving the app: save, then upload right away (iOS gives a few seconds), so another device sees the latest strokes
-document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') flushSaves().then(() => Sync.run()).catch(() => {}); else Sync.run(); });
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') flushSaves().then(() => Sync.run()).then(() => GD.saveNotes(true)).catch(() => {}); else Sync.run(); });
+setInterval(() => { if(document.visibilityState === 'visible') GD.saveNotes(); }, 60000);
 // a normal close or reload is not a crash: clear the guard so the page reopens next time
 addEventListener('pagehide', () => { LSset('inkwell.opening', null); flushSaves(); });
 

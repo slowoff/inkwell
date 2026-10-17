@@ -726,3 +726,8 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 #cuSort{margin:4px 0 8px;max-width:320px}
 /* 1.29: text snapped into a table cell (fits inside, shrinks as it grows) */
 .it-text.cell{min-height:0;min-width:0;white-space:normal}
+/* 1.30: Google Drive option */
+.gd-box{display:flex;flex-direction:column;gap:6px;padding:4px 0 8px}
+.gd-head{display:flex;flex-direction:column;gap:2px}
+.gd-btns{display:flex;flex-wrap:wrap;gap:8px}
+.gd-box p{margin:0}

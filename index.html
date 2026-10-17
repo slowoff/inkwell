@@ -333,6 +333,11 @@
       <div class="cloud-meter"><span class="cloud-label">Cloud storage</span><div class="cloud-bar" id="cloudBar" role="meter" aria-label="Cloud storage used"><i id="cloudAll"></i><i id="cloudMine"></i></div><span class="hint" id="cloudInfo"></span></div>
       <button class="btn ghost" id="cleanupBtn">Clean up</button>
     </div>
+    <div class="gd-box" id="gdBox" hidden>
+      <div class="gd-head"><span class="cloud-label">Google Drive</span><span class="hint" id="gdState"></span></div>
+      <p class="hint" id="gdWhy">Your pictures, scans and imported PDFs can go to your own Google Drive instead of the shared Inkwell storage. Worth it if you import a lot: it uses your own Google space (15 GB free, more with Google One) and never fills up the shared storage. Notes still sync through Inkwell, and you sign in to Google only once; your other devices use it too. The pictures go into a folder called "Inkwell pictures"; don't delete it, or they disappear from your pages.</p>
+      <div class="gd-btns"><button class="btn ghost" id="gdConnect">Use my Google Drive</button><button class="btn ghost" id="gdMove" hidden>Move my pictures there</button><button class="btn ghost" id="gdToggle" hidden>Use shared storage instead</button></div>
+    </div>
     <div class="set-row clean-row"><span class="hint" id="cleanInfo">Images nothing uses any more</span><button class="btn ghost" id="cleanBtn">Free up space</button></div>
     <div class="set-row clean-row"><span class="hint">Bring over your OneNote notebooks</span><button class="btn ghost" id="onBtn">Import from OneNote</button></div>
     <hr>

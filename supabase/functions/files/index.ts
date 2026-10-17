@@ -14,6 +14,13 @@
 //   del  {ids}                 -> {removed}
 //   list                       -> {files: [{id, bytes, created_at}]}
 //   migrate {n}                -> copies up to n pictures from Supabase storage to R2 -> {copied, left}
+// Google Drive (since 1.30; secrets GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET; scope drive.file = only files Inkwell made):
+//   gconnect {code, verifier, redirect} -> saves the refresh token, makes the folder "Inkwell pictures" -> {email}
+//   gtoken                      -> {access_token, expires_in, folder}: the app uploads/downloads straight to/from Drive
+//   gset {on}                   -> new pictures to Drive (true) or to the shared cloud (false)
+//   gdone {id, gid, size}       -> records a picture the app put in Drive
+//   gmove {n}                   -> moves up to n of the person's pictures from the shared cloud to their Drive -> {moved, left}
+//   put answers {drive: true} when new pictures go to Drive; get answers {g: driveFileId} for pictures in Drive
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { AwsClient } from "npm:aws4fetch@1.0.20";
 
@@ -34,6 +41,19 @@ const DEFAULTS = { storage_mb: null as number | null, claude_usd_month: 2 };
 const CAP_MB = Number(Deno.env.get("R2_TOTAL_MB")) || 9000;
 const MAX_FILE = 15 * 1048576;
 const ID = /^a-[A-Za-z0-9_-]{1,64}$/;
+const GTOKEN = "https://oauth2.googleapis.com/token";
+const GDRIVE = "https://www.googleapis.com/drive/v3/files";
+const GUPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id";
+// a picture as a Drive file in the folder (multipart/related upload)
+async function driveUpload(at: string, folder: string, name: string, blob: Blob): Promise<string> {
+  const b = "inkwell" + crypto.randomUUID().replace(/-/g, "");
+  const meta = JSON.stringify({ name, parents: folder ? [folder] : undefined });
+  const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: ${blob.type || "image/jpeg"}\r\n\r\n`, blob, `\r\n--${b}--`]);
+  const r = await fetch(GUPLOAD, { method: "POST", headers: { Authorization: "Bearer " + at, "Content-Type": "multipart/related; boundary=" + b }, body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.id) throw new Error("Drive upload failed (" + r.status + "): " + JSON.stringify(j).slice(0, 200));
+  return j.id;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
@@ -70,7 +90,7 @@ Deno.serve(async (req) => {
   const usedBytes = async () => {
     let total = 0;
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await admin.from("files").select("bytes").eq("user_id", user.id).range(from, from + 999);
+      const { data, error } = await admin.from("files").select("bytes").eq("user_id", user.id).eq("place", "r2").range(from, from + 999);
       if (error) throw error;
       for (const r of data || []) total += Number(r.bytes) || 0;
       if (!data || data.length < 1000) break;
@@ -78,8 +98,94 @@ Deno.serve(async (req) => {
     return total;
   };
 
+  const GID = Deno.env.get("GOOGLE_CLIENT_ID") || "", GSECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
+  const { data: gd } = await admin.from("gdrive").select("refresh_token, folder_id, email, on_new, broken").eq("user_id", user.id).maybeSingle();
+  // a fresh Google access token from the saved refresh token (Google keeps it valid while it is used at least every 6 months)
+  const gAccess = async (): Promise<{ at: string; exp: number }> => {
+    if (!gd || !GID || !GSECRET) throw Object.assign(new Error("Google Drive is not connected"), { code: "g_none" });
+    const r = await fetch(GTOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: GID, client_secret: GSECRET, refresh_token: gd.refresh_token, grant_type: "refresh_token" }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.access_token) {
+      if (j.error === "invalid_grant") { await admin.from("gdrive").update({ broken: true, on_new: false }).eq("user_id", user.id); throw Object.assign(new Error("Google Drive was disconnected"), { code: "g_revoked" }); }
+      throw Object.assign(new Error("Google: " + (j.error_description || j.error || r.status)), { code: "g_error" });
+    }
+    if (gd.broken) await admin.from("gdrive").update({ broken: false }).eq("user_id", user.id);
+    return { at: j.access_token, exp: Number(j.expires_in) || 3600 };
+  };
+  const driveBytes = async () => {
+    let t = 0;
+    for (let from = 0; ; from += 1000) {
+      const { data } = await admin.from("files").select("bytes").eq("user_id", user.id).eq("place", "gdrive").range(from, from + 999);
+      for (const r of data || []) t += Number(r.bytes) || 0;
+      if (!data || data.length < 1000) break;
+    }
+    return t;
+  };
+
   try {
     switch (body.action) {
+      case "gconnect": {
+        if (!GID || !GSECRET) return json(req, 503, { error: "g_not_set_up" });
+        const r = await fetch(GTOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ client_id: GID, client_secret: GSECRET, code: String(body.code || ""), code_verifier: String(body.verifier || ""), redirect_uri: String(body.redirect || ""), grant_type: "authorization_code" }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.access_token) return json(req, 400, { error: "g_signin", message: j.error_description || j.error || "Google sign-in failed" });
+        const refresh = j.refresh_token || (gd && gd.refresh_token);
+        if (!refresh) return json(req, 400, { error: "g_signin", message: "Google did not give Inkwell lasting access. Try again." });
+        let email = "";
+        try { const u = await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: "Bearer " + j.access_token } })).json(); email = u.email || ""; } catch { /* optional */ }
+        let folder = gd && gd.folder_id;
+        if (folder) {   // still there and not in the bin?
+          const fr = await fetch(`${GDRIVE}/${folder}?fields=id,trashed`, { headers: { Authorization: "Bearer " + j.access_token } });
+          const fj = await fr.json().catch(() => ({}));
+          if (!fr.ok || fj.trashed) folder = null;
+        }
+        if (!folder) {
+          const fr = await fetch(GDRIVE + "?fields=id", { method: "POST", headers: { Authorization: "Bearer " + j.access_token, "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "Inkwell pictures", mimeType: "application/vnd.google-apps.folder", description: "Pictures, scans and imported pages from Inkwell. Deleting them here removes them from your notes." }) });
+          const fj = await fr.json().catch(() => ({}));
+          if (!fr.ok || !fj.id) return json(req, 502, { error: "g_error", message: "Could not make the folder in Google Drive" });
+          folder = fj.id;
+        }
+        const { error } = await admin.from("gdrive").upsert({ user_id: user.id, refresh_token: refresh, folder_id: folder, email, on_new: true, broken: false }, { onConflict: "user_id" });
+        if (error) throw error;
+        return json(req, 200, { email });
+      }
+      case "gtoken": {
+        const t = await gAccess();
+        return json(req, 200, { access_token: t.at, expires_in: t.exp, folder: gd!.folder_id });
+      }
+      case "gset": {
+        if (!gd) return json(req, 400, { error: "g_none" });
+        await admin.from("gdrive").update({ on_new: !!body.on }).eq("user_id", user.id);
+        return json(req, 200, { on: !!body.on });
+      }
+      case "gdone": {
+        const id = String(body.id || ""), gid = String(body.gid || ""), size = Number(body.size) || 0;
+        if (!ID.test(id) || !/^[A-Za-z0-9_-]{10,200}$/.test(gid)) return json(req, 400, { error: "bad_id" });
+        const { error } = await admin.from("files").upsert({ user_id: user.id, id, bytes: size, place: "gdrive", gid }, { onConflict: "user_id,id" });
+        if (error) throw error;
+        return json(req, 200, { ok: true });
+      }
+      case "gmove": {
+        if (!r2) return json(req, 503, { error: "no_r2" });
+        const n = Math.max(1, Math.min(10, Number(body.n) || 5));
+        const t = await gAccess();
+        const { data: rows } = await admin.from("files").select("id, bytes").eq("user_id", user.id).eq("place", "r2").limit(n);
+        let moved = 0;
+        for (const f of rows || []) {
+          const g = await r2.fetch(objUrl(f.id));
+          if (!g.ok) continue;
+          const blob = await g.blob();
+          const gid = await driveUpload(t.at, gd!.folder_id || "", f.id + ".jpg", blob);
+          await admin.from("files").update({ place: "gdrive", gid, bytes: blob.size }).eq("user_id", user.id).eq("id", f.id);
+          await r2.fetch(objUrl(f.id), { method: "DELETE" });   // the person asked to move: the shared-cloud copy goes
+          moved++;
+        }
+        const { count } = await admin.from("files").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("place", "r2");
+        return json(req, 200, { moved, left: count || 0 });
+      }
       case "info": {
         const month = new Date().toISOString().slice(0, 7);
         const { data: u } = await admin.from("usage_month").select("claude_usd").eq("user_id", user.id).eq("month", month).maybeSingle();
@@ -91,6 +197,8 @@ Deno.serve(async (req) => {
           cap_mb: CAP_MB,
           claude_usd: u ? Number(u.claude_usd) : 0,
           claude_limit: lim ? lim.claude_usd_month : DEFAULTS.claude_usd_month,
+          google_client_id: GID && GSECRET ? GID : null,
+          gdrive: gd ? { email: gd.email, on: gd.on_new, broken: gd.broken, mb: Math.round((await driveBytes()) / 104857.6) / 10 } : null,
         });
       }
       case "put": {
@@ -98,32 +206,46 @@ Deno.serve(async (req) => {
         const id = String(body.id || ""), size = Number(body.size) || 0;
         if (!ID.test(id)) return json(req, 400, { error: "bad_id" });
         if (size <= 0 || size > MAX_FILE) return json(req, 413, { error: "file_too_big" });
+        if (gd && gd.on_new && !gd.broken && GID && GSECRET) return json(req, 200, { drive: true });
         const total = await totalBytes();
         if (total + size > CAP_MB * 1048576) return json(req, 413, { error: "cloud_full", total_mb: Math.round(total / 1048576), cap_mb: CAP_MB });
         if (storageMb !== null) {
           const used = await usedBytes();
           if (used + size > storageMb * 1048576) return json(req, 413, { error: "storage_full", used_mb: Math.round(used / 1048576), limit_mb: storageMb });
         }
-        const { error } = await admin.from("files").upsert({ user_id: user.id, id, bytes: size }, { onConflict: "user_id,id" });
+        const { error } = await admin.from("files").upsert({ user_id: user.id, id, bytes: size, place: "r2", gid: null }, { onConflict: "user_id,id" });
         if (error) throw error;
         return json(req, 200, { url: await presign(id, "PUT") });
       }
       case "get": {
         const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x: string) => ID.test(x)).slice(0, 100);
-        const urls: Record<string, string | null> = {};
-        if (!r2 || !ids.length) return json(req, 200, { urls });
-        const { data, error } = await admin.from("files").select("id").eq("user_id", user.id).in("id", ids);
+        const urls: Record<string, string | { g: string } | null> = {};
+        if (!ids.length) return json(req, 200, { urls });
+        const { data, error } = await admin.from("files").select("id, place, gid").eq("user_id", user.id).in("id", ids);
         if (error) throw error;
-        const have = new Set((data || []).map((r: any) => r.id));
-        for (const id of ids) urls[id] = have.has(id) ? await presign(id, "GET") : null;
+        const have = new Map((data || []).map((r: any) => [r.id, r]));
+        for (const id of ids) {
+          const f: any = have.get(id);
+          urls[id] = !f ? null : f.place === "gdrive" && f.gid ? { g: f.gid } : r2 ? await presign(id, "GET") : null;
+        }
         return json(req, 200, { urls });
       }
       case "del": {
         const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x: string) => ID.test(x)).slice(0, 100);
-        if (!r2) return json(req, 503, { error: "no_r2" });
+        const { data: rows } = await admin.from("files").select("id, place, gid").eq("user_id", user.id).in("id", ids);
+        const where = new Map((rows || []).map((r: any) => [r.id, r]));
+        let gt: string | null = null;
         let removed = 0;
         for (const id of ids) {
-          const r = await r2.fetch(objUrl(id), { method: "DELETE" });
+          const f: any = where.get(id);
+          let r: Response;
+          if (f && f.place === "gdrive" && f.gid) {
+            if (!gt) gt = (await gAccess()).at;
+            r = await fetch(`${GDRIVE}/${f.gid}`, { method: "DELETE", headers: { Authorization: "Bearer " + gt } });
+          } else {
+            if (!r2) return json(req, 503, { error: "no_r2" });
+            r = await r2.fetch(objUrl(id), { method: "DELETE" });
+          }
           if (r.ok || r.status === 404) {
             await admin.from("files").delete().eq("user_id", user.id).eq("id", id);
             removed++;
@@ -134,7 +256,7 @@ Deno.serve(async (req) => {
       case "list": {
         const files: any[] = [];
         for (let from = 0; ; from += 1000) {
-          const { data, error } = await admin.from("files").select("id, bytes, created_at").eq("user_id", user.id).range(from, from + 999);
+          const { data, error } = await admin.from("files").select("id, bytes, created_at, place").eq("user_id", user.id).range(from, from + 999);
           if (error) throw error;
           files.push(...(data || []));
           if (!data || data.length < 1000) break;
@@ -175,6 +297,8 @@ Deno.serve(async (req) => {
         return json(req, 400, { error: "bad_action" });
     }
   } catch (e) {
+    const code = (e as any)?.code;
+    if (code === "g_revoked" || code === "g_none") return json(req, 409, { error: code, message: (e as Error).message });
     return json(req, 500, { error: "server", message: String((e as Error)?.message || e).slice(0, 300) });
   }
 });

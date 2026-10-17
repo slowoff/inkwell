@@ -365,7 +365,7 @@ const Sync = {
         if(r2){
           try { await Files.upload(id, a.blob); Files.full = null; }
           catch(e){
-            if(e.code === 'cloud_full' || e.code === 'storage_full'){ Files.full = Object.assign({at: Date.now(), code: e.code}, e.j || {}); Files.localOnly = pend.length; Files.notice(); renderSyncInfo(); return; }
+            if(e.code === 'cloud_full' || e.code === 'storage_full' || e.code === 'gdrive_full'){ Files.full = Object.assign({at: Date.now(), code: e.code}, e.j || {}); Files.localOnly = pend.length; Files.notice(); renderSyncInfo(); return; }
             throw e;
           }
         } else {
@@ -406,6 +406,8 @@ const Files = {
   share(){ const i = this.info; return i && i.r2 && i.cap_mb ? Math.min(1, (i.total_mb || 0) / i.cap_mb) : null; },
   // a friendly heads-up at most once a day: nearly full, or full (new pictures stay on the device)
   notice(){
+    const g = this.info && this.info.gdrive;
+    if(g && g.broken && LSget('inkwell.gdNote', '') !== new Date().toDateString()){ LSset('inkwell.gdNote', new Date().toDateString()); GD.lost(); return; }
     const sh = this.share(), full = !!(this.full && this.full.code === 'cloud_full') || (sh !== null && sh >= 0.995);
     const kind = full ? 'full' : sh !== null && sh >= 0.8 ? 'near' : '';
     if(!kind) return;
@@ -441,8 +443,21 @@ const Files = {
     }
     return !!(this.info && this.info.r2);
   },
-  async upload(id, blob){
-    const {url} = await this.call('put', {id, size: blob.size});
+  async upload(id, blob, again){
+    const res = await this.call('put', {id, size: blob.size});
+    if(res.drive){
+      try {
+        const gid = await GD.upload(id, blob);
+        await this.call('gdone', {id, gid, size: blob.size});
+        if(this.info && this.info.gdrive) this.info.gdrive.mb = (this.info.gdrive.mb || 0) + blob.size / 1048576;
+        return;
+      } catch(e){
+        // Google sign-in no longer valid: the server switched this account back to the shared storage
+        if(e.code === 'g_revoked' && !again){ GD.lost(); return this.upload(id, blob, true); }
+        throw e;
+      }
+    }
+    const url = res.url;
     let r;
     try { r = await fetch(url, {method: 'PUT', body: blob, headers: {'Content-Type': blob.type || 'image/jpeg'}}); }
     catch { throw Object.assign(new Error('Failed to fetch'), {code: 'offline'}); }
@@ -467,6 +482,7 @@ const Files = {
   },
   async download(id){
     const u = await this.url(id); if(!u) return null;
+    if(typeof u === 'object' && u.g) return GD.download(u.g);
     const r = await fetch(u); if(!r.ok) return null;
     return await r.blob();
   },
@@ -488,7 +504,108 @@ const Files = {
     } finally { this.migrating = false; renderSyncInfo(); }
   }
 };
+/* =====================================================================
+   Google Drive for pictures (since 1.30), optional per account. The person signs in to Google once (redirect, PKCE,
+   scope drive.file = only files Inkwell made); the server keeps the refresh token (table gdrive) and hands out short
+   access tokens, so their other devices use Drive without signing in. Pictures go into the folder "Inkwell pictures".
+   ===================================================================== */
+const GD_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GD_FILES = 'https://www.googleapis.com/drive/v3/files';
+const GD_UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id';
+const GD = {
+  ret: null, tok: null, moving: false,
+  redirect(){ return location.origin + location.pathname.replace(/index\.html$/, ''); },
+  catchRedirect(){
+    const q = new URLSearchParams(location.search), st = q.get('state') || '';
+    if(!st.startsWith('gd-')) return;
+    history.replaceState(null, '', location.pathname + location.hash);
+    const saved = LSget('inkwell.gdrive.auth', null);
+    LSset('inkwell.gdrive.auth', null);
+    if(q.get('error')) this.ret = {error: q.get('error') === 'access_denied' ? 'Google sign-in was cancelled.' : 'Google sign-in failed (' + q.get('error') + ').'};
+    else if(!saved || saved.s !== st || !q.get('code')) this.ret = {error: 'The Google sign-in did not finish. Try again.'};
+    else this.ret = {code: q.get('code'), v: saved.v};
+  },
+  async connect(){
+    const cid = Files.info && Files.info.google_client_id;
+    if(!cid){ toast('Google Drive is not set up on the server yet.'); return; }
+    const v = b64url(crypto.getRandomValues(new Uint8Array(48)));
+    const ch = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)));
+    const s = 'gd-' + b64url(crypto.getRandomValues(new Uint8Array(16)));
+    LSset('inkwell.gdrive.auth', {v, s, at: Date.now()});
+    await flushSaves();
+    const p = new URLSearchParams({client_id: cid, response_type: 'code', redirect_uri: this.redirect(), scope: 'https://www.googleapis.com/auth/drive.file openid email',
+      state: s, code_challenge: ch, code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true'});
+    location.assign(GD_AUTH + '?' + p);
+  },
+  // back from Google: hand the code to the server (it keeps the lasting access)
+  async finish(){
+    const r = this.ret; if(!r) return;
+    for(let i = 0; i < 40 && !(Sync.sb && Sync.user); i++) await new Promise(res => setTimeout(res, 250));
+    this.ret = null;
+    if(r.error){ toast(r.error); return; }
+    try {
+      const j = await Files.call('gconnect', {code: r.code, verifier: r.v, redirect: this.redirect()});
+      this.tok = null;
+      await Files.on(true);
+      toast('Google Drive connected' + (j.email ? ' (' + j.email + ')' : '') + '. New pictures go to your Drive.');
+      openSettings();
+    } catch(e){ toast('Google Drive: ' + (e.message || e)); }
+  },
+  async token(force){
+    if(!force && this.tok && this.tok.exp > Date.now() + 60000) return this.tok;
+    const j = await Files.call('gtoken');
+    this.tok = {at: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000, folder: j.folder};
+    return this.tok;
+  },
+  async upload(id, blob){
+    for(let k = 0; k < 2; k++){
+      const t = await this.token(k > 0);
+      const b = 'inkwell' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const meta = JSON.stringify({name: id + '.jpg', parents: t.folder ? [t.folder] : undefined});
+      const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: ${blob.type || 'image/jpeg'}\r\n\r\n`, blob, `\r\n--${b}--`]);
+      let r;
+      try { r = await fetch(GD_UPLOAD, {method: 'POST', headers: {Authorization: 'Bearer ' + t.at, 'Content-Type': 'multipart/related; boundary=' + b}, body}); }
+      catch { throw Object.assign(new Error('Failed to fetch'), {code: 'offline'}); }
+      if(r.status === 401 && k === 0) continue;
+      const j = await r.json().catch(() => ({}));
+      if(r.status === 403 && /storageQuota|quota/i.test(JSON.stringify(j))) throw Object.assign(new Error('Your Google Drive is full'), {code: 'gdrive_full'});
+      if(!r.ok || !j.id) throw new Error('Google Drive upload failed (' + r.status + ')');
+      return j.id;
+    }
+  },
+  async download(gid){
+    for(let k = 0; k < 2; k++){
+      const t = await this.token(k > 0);
+      const r = await fetch(GD_FILES + '/' + encodeURIComponent(gid) + '?alt=media', {headers: {Authorization: 'Bearer ' + t.at}});
+      if(r.status === 401 && k === 0) continue;
+      return r.ok ? await r.blob() : null;
+    }
+    return null;
+  },
+  lost(){
+    this.tok = null;
+    LSset('inkwell.gdNote', new Date().toDateString());
+    if(Files.info && Files.info.gdrive){ Files.info.gdrive.broken = true; Files.info.gdrive.on = false; }
+    toast('Google Drive is no longer connected, so new pictures go to the shared storage. Reconnect in Settings → Google Drive.', 'Settings', () => openSettings());
+  },
+  async setOn(on){ await Files.call('gset', {on}); await Files.on(true); renderCloud(); },
+  // move this person's pictures from the shared storage into their Drive (frees shared space)
+  async move(){
+    if(this.moving) return;
+    this.moving = true;
+    try {
+      for(let guard = 0; guard < 2000; guard++){
+        const r = await Files.call('gmove', {n: 5});
+        $('gdState').textContent = r.left ? `Moving pictures to your Drive: ${r.left} left. Keep Inkwell open.` : 'All your pictures are in your Google Drive now.';
+        if(!r.left || !r.moved) break;
+      }
+    } catch(e){ toast('Moving stopped: ' + (e.message || e) + '. Tap Move again to continue.'); }
+    this.moving = false;
+    await Files.on(true).catch(() => {}); renderCloud();
+  }
+};
 function syncError(e){
+  if(e && e.code === 'gdrive_full') return 'Your Google Drive is full: new pictures stay on this device';
   if(e && e.code === 'storage_full'){ const j = (e.j || Files.full || {}); return `Picture storage full (${j.used_mb ?? '?'} of ${j.limit_mb ?? '?'} MB): new pictures stay on this device`; }
   const m = String((e && (e.message || e.error_description || e.msg)) || e || '');
   if(/relation .*docs.* does not exist|Could not find the table/i.test(m)) return 'Run setup.sql in Supabase';
@@ -4401,8 +4518,24 @@ async function renderSettings(){
    One shared cloud total (R2, kept under the free 10 GB by the files function). The bar shows everyone's use
    (light) and yours (dark); orange from 80 %, red when full. Clean up lists pages by the size of their pictures. */
 const fmtMB = mb => mb >= 1000 ? (mb / 1024).toFixed(1) + ' GB' : mb > 0 && mb < 1 ? 'under 1 MB' : Math.round(mb) + ' MB';
+function renderGD(){
+  const i = Files.info, box = $('gdBox');
+  if(!i || !i.r2 || !i.google_client_id){ box.hidden = true; return; }
+  box.hidden = false;
+  const g = i.gdrive;
+  $('gdConnect').hidden = !!(g && !g.broken);
+  $('gdConnect').textContent = g && g.broken ? 'Connect again' : 'Use my Google Drive';
+  $('gdToggle').hidden = !g || g.broken;
+  $('gdToggle').textContent = g && g.on ? 'Use shared storage instead' : 'Send new pictures to Drive';
+  $('gdMove').hidden = !g || g.broken || !g.on || !(i.used_mb > 0.05);
+  $('gdWhy').hidden = !!(g && !g.broken);
+  if(GD.moving) return;
+  $('gdState').textContent = !g ? '' : g.broken ? 'The Google sign-in has expired. New pictures go to the shared storage until you connect again.'
+    : `Connected${g.email ? ' as ' + g.email : ''} · ${fmtMB(g.mb || 0)} in your Drive · new pictures go to ${g.on ? 'your Drive' : 'the shared storage'}`;
+}
 function renderCloud(){
   const i = Files.info, row = $('cloudRow');
+  renderGD();
   if(!i || !i.r2 || !i.cap_mb){ row.hidden = true; return; }
   row.hidden = false;
   const sh = Files.share(), mine = Math.min(1, (i.used_mb || 0) / i.cap_mb), full = sh >= 0.995 || !!(Files.full && Files.full.code === 'cloud_full');
@@ -4414,6 +4547,9 @@ function renderCloud(){
   $('cloudInfo').textContent = `You ${fmtMB(i.used_mb || 0)} · everyone ${fmtMB(i.total_mb || 0)} of ${fmtMB(i.cap_mb)}` +
     (full ? ' · full: new pictures stay on this device' : sh >= 0.8 ? ' · nearly full' : '');
 }
+$('gdConnect').addEventListener('click', () => GD.connect());
+$('gdToggle').addEventListener('click', () => { const g = Files.info && Files.info.gdrive; GD.setOn(!(g && g.on)).catch(e => toast(e.message || String(e))); });
+$('gdMove').addEventListener('click', () => GD.move());
 let cuSort = 'big', cuRows = [];
 $('cleanupBtn').addEventListener('click', () => openCleanup());
 async function openCleanup(){
@@ -7528,6 +7664,7 @@ $('onStop').addEventListener('click', () => { ON.stop = true; $('onProg').textCo
 
 async function boot(){
   ON.catchRedirect();
+  GD.catchRedirect();
   readTokens();
   await IDB.open();
   await loadDocs();
@@ -7564,6 +7701,8 @@ async function boot(){
   setTimeout(() => HW.scanAll().catch(() => {}), 20000);
   setTimeout(() => PT.scanAll().catch(() => {}), 26000);
   setInterval(() => { if(document.visibilityState === 'visible'){ HW.scanAll().catch(() => {}); PT.scanAll().catch(() => {}); } }, 10 * 60000);
+  // back from the Google sign-in (Google Drive for pictures)
+  if(GD.ret) GD.finish().catch(e => console.warn('gdrive', e));
   // back from the Microsoft sign-in (Import from OneNote)
   if(ON.ret){
     showModal('onenoteDlg');
@@ -7621,6 +7760,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }};
+window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

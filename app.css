@@ -706,3 +706,6 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
   .math-keys button{min-width:44px;height:44px}
   .scan-bar button{min-height:44px}
 }
+
+/* ---------- 1.27: page history ---------- */
+.hist-item canvas{width:96px;height:64px;border-radius:6px;background:var(--paper);box-shadow:0 0 0 1px var(--line);flex:none}

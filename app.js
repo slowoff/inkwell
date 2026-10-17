@@ -118,6 +118,7 @@ const IDB = {
 const docs = new Map();   // every doc except page contents
 let searchCache = null;
 const live = d => !!(d && !d.deleted && d.data);
+const inMap = kind => kind !== 'content' && kind !== 'ver';   // page contents and page versions stay in IndexedDB only
 const byOrder = (a, b) => ((a.data.order || 0) - (b.data.order || 0)) || (a.id < b.id ? -1 : 1);
 const notebooks = () => [...docs.values()].filter(d => d.kind === 'nb' && live(d)).sort(byOrder);
 const sectionsOf = nb => [...docs.values()].filter(d => d.kind === 'sec' && live(d) && d.data.nb === nb).sort(byOrder);
@@ -129,7 +130,7 @@ async function writeDoc(rec){
   rec.updated = Math.max(Date.now(), (rec.updated || 0) + 1);
   rec.dirty = 1;
   rec.deleted = !!rec.deleted;
-  if(rec.kind !== 'content') docs.set(rec.id, rec);
+  if(inMap(rec.kind)) docs.set(rec.id, rec);
   searchCache = null;
   await IDB.put('docs', rec);
   Sync.soon();
@@ -146,6 +147,29 @@ async function removeDoc(id, kind, group, purge){
   rec.kind = rec.kind || kind; rec.deleted = true;
   rec.data = purge || !rec.data ? null : Object.assign({}, rec.data, {_del: {at: Date.now(), g: group || id}});
   return writeDoc(rec);
+}
+
+/* Page history (since 1.27). Doc kind 'ver', id v_<pageId>_<time base36>, data {page, at, why, n, bg, items}.
+   A version keeps a page as it was before an editing session (at most one per VER_GAP of editing), before changes
+   from another device are merged in and before a restore. The newest VER_KEEP per page are kept; older ones are purged.
+   Versions sync like other docs (so they are on the server too) but stay out of the in-memory docs map. */
+const VER_GAP = 30 * 60000, VER_KEEP = 30;
+async function versionsOf(pid){
+  const lo = 'v_' + pid + '_', hi = lo + '\uffff';
+  const list = IDB.mem ? [...IDB.mem.docs.values()].filter(d => d.id >= lo && d.id < hi)
+    : await IDB.req('docs', 'readonly', st => st.getAll(IDBKeyRange.bound(lo, hi)));
+  return (list || []).filter(d => d.kind === 'ver' && !d.deleted && d.data && d.data.page === pid).sort((a, b) => b.data.at - a.data.at);
+}
+async function saveVersion(pid, data, why){
+  if(!pid || !data || !Array.isArray(data.items) || !data.items.length) return null;   // an empty page is not worth keeping
+  const list = await versionsOf(pid);
+  const same = v => stable({bg: v.bg || null, items: v.items}) === stable({bg: data.bg || null, items: data.items});
+  if(list[0] && same(list[0].data)) return null;   // unchanged since the last version
+  const at = Math.max(Date.now(), list[0] ? list[0].data.at + 1 : 0);
+  const rec = await writeDoc({id: 'v_' + pid + '_' + at.toString(36), kind: 'ver', deleted: false,
+    data: {page: pid, at, why: why || 'edit', n: data.items.length, bg: data.bg || null, items: data.items}});
+  for(const old of list.slice(VER_KEEP - 1)) await removeDoc(old.id, 'ver', null, true);
+  return rec;
 }
 
 /* Imported PDF pages and photos */
@@ -330,12 +354,18 @@ const Sync = {
   },
   async pushAssets(){
     let pend = (await IDB.get('meta', 'pendingAssets')) || [];
+    const r2 = pend.length ? await Files.on() : false;
     while(pend.length){
       const id = pend[0];
       const a = await IDB.get('assets', id);
       if(a){
-        const {error} = await this.sb.storage.from('assets').upload(this.user.id + '/' + id, a.blob, {contentType: a.type || 'image/jpeg', upsert: true});
-        if(error) throw error;
+        if(r2){
+          try { await Files.upload(id, a.blob); Files.full = null; }
+          catch(e){ if(e.code === 'storage_full') Files.full = e.j || {}; throw e; }
+        } else {
+          const {error} = await this.sb.storage.from('assets').upload(this.user.id + '/' + id, a.blob, {contentType: a.type || 'image/jpeg', upsert: true});
+          if(error) throw error;
+        }
       }
       pend = ((await IDB.get('meta', 'pendingAssets')) || []).filter(x => x !== id);
       await IDB.put('meta', pend, 'pendingAssets');
@@ -344,15 +374,101 @@ const Sync = {
   async fetchAsset(id){
     if(!this.sb || !this.user || !navigator.onLine) return null;
     try {
-      const {data, error} = await this.sb.storage.from('assets').download(this.user.id + '/' + id);
-      if(error || !data) return null;
+      let data = null;
+      if(await Files.on()){ try { data = await Files.download(id); } catch(e){ console.warn('r2 get', e); } }
+      if(!data){
+        const r = await this.sb.storage.from('assets').download(this.user.id + '/' + id);
+        if(r.error || !r.data) return null;
+        data = r.data;
+      }
       const rec = {id, blob: data, type: data.type};
       await IDB.put('assets', rec);
       return rec;
     } catch { return null; }
   }
 };
+/* =====================================================================
+   Pictures in Cloudflare R2 (since 1.27), through the server function 'files' (supabase/functions/files).
+   The R2 key stays on the server; the app gets short-lived links to its own folder. When the function is
+   missing or R2 is not set up (info.r2 false), pictures keep going to Supabase storage as before.
+   Old pictures in Supabase storage are copied over in the background (migrate) and still read from there until then.
+   ===================================================================== */
+const Files = {
+  info: null, infoAt: 0, migrating: false, migLeft: null, full: null, pend: new Map(), timer: null,
+  async call(action, body){
+    const {data} = await Sync.sb.auth.getSession(); const s = data && data.session;
+    if(!s) throw Object.assign(new Error('Sign in first'), {code: 'not_signed_in'});
+    let res;
+    try {
+      res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/files', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + s.access_token, apikey: CFG.SUPABASE_ANON_KEY},
+        body: JSON.stringify(Object.assign({action}, body || {}))
+      });
+    } catch { throw Object.assign(new Error('Failed to fetch'), {code: 'offline'}); }
+    let j = {}; try { j = await res.json(); } catch {}
+    if(!res.ok) throw Object.assign(new Error(j.message || j.error || 'Server error ' + res.status), {code: j.error || 'http_' + res.status, status: res.status, j});
+    return j;
+  },
+  // true when pictures go to R2; info (usage and limits) refreshed at most every 10 minutes
+  async on(force){
+    if(!Sync.sb || !Sync.user || !navigator.onLine) return false;
+    if(force || !this.info || Date.now() - this.infoAt > 600000){
+      try { this.info = await this.call('info'); }
+      catch(e){ if(e.status === 404) this.info = {r2: false}; else if(!this.info) return false; }
+      this.infoAt = Date.now();
+      if(this.info && this.info.r2) this.migrateSoon();
+    }
+    return !!(this.info && this.info.r2);
+  },
+  async upload(id, blob){
+    const {url} = await this.call('put', {id, size: blob.size});
+    let r;
+    try { r = await fetch(url, {method: 'PUT', body: blob, headers: {'Content-Type': blob.type || 'image/jpeg'}}); }
+    catch { throw Object.assign(new Error('Failed to fetch'), {code: 'offline'}); }
+    if(!r.ok) throw new Error('Picture upload failed (' + r.status + ')');
+    if(this.info) this.info.used_mb = (this.info.used_mb || 0) + blob.size / 1048576;
+  },
+  // links are asked for in batches: pictures near the view load together
+  url(id){
+    return new Promise((res, rej) => {
+      this.pend.set(id, (this.pend.get(id) || []).concat([[res, rej]]));
+      clearTimeout(this.timer); this.timer = setTimeout(() => this.flushGet(), 30);
+    });
+  },
+  async flushGet(){
+    const batch = this.pend; this.pend = new Map();
+    const ids = [...batch.keys()];
+    for(let i = 0; i < ids.length; i += 100){
+      const part = ids.slice(i, i + 100);
+      try { const {urls} = await this.call('get', {ids: part}); for(const id of part) for(const [r] of batch.get(id)) r((urls || {})[id] || null); }
+      catch(e){ for(const id of part) for(const [, j] of batch.get(id)) j(e); }
+    }
+  },
+  async download(id){
+    const u = await this.url(id); if(!u) return null;
+    const r = await fetch(u); if(!r.ok) return null;
+    return await r.blob();
+  },
+  migrateSoon(){ setTimeout(() => this.migrate().catch(e => console.warn('migrate', e)), 4000); },
+  async migrate(){
+    if(this.migrating || !Sync.user) return;
+    const key = 'r2Migrated:' + Sync.user.id;
+    if(await IDB.get('meta', key)) return;
+    this.migrating = true;
+    try {
+      for(let guard = 0; guard < 500; guard++){
+        if(!navigator.onLine || document.visibilityState !== 'visible' || !Sync.user) break;
+        const r = await this.call('migrate', {n: 6});
+        this.migLeft = r.left; renderSyncInfo();
+        if(!r.left){ await IDB.put('meta', 1, key); break; }
+        await new Promise(res => setTimeout(res, 300));
+      }
+    } finally { this.migrating = false; renderSyncInfo(); }
+  }
+};
 function syncError(e){
+  if(e && e.code === 'storage_full'){ const j = (e.j || Files.full || {}); return `Picture storage full (${j.used_mb ?? '?'} of ${j.limit_mb ?? '?'} MB): new pictures stay on this device`; }
   const m = String((e && (e.message || e.error_description || e.msg)) || e || '');
   if(/relation .*docs.* does not exist|Could not find the table/i.test(m)) return 'Run setup.sql in Supabase';
   if(/Bucket not found/i.test(m)) return 'Run setup.sql in Supabase (storage)';
@@ -447,6 +563,7 @@ async function mergeCurrent(row, base){
     const local = {bg: c.bg, items: [...c.items.values()].map(ser)};
     if(c.lastId) local.last = c.lastId;
     if(lrec && lrec.data) for(const k of Object.keys(lrec.data)) if(!(k in local)) local[k] = lrec.data[k];
+    await saveVersion(c.id, local, 'merge').catch(e => console.warn('version', e));
     const m = mergeContent(base && base.d, local, row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing);
     data = m.data; copies = m.copies;
   }
@@ -486,10 +603,11 @@ async function applyRemote(row){
     if(row.kind === 'content' && cur && row.id === 'c_' + cur.id) return mergeCurrent(row, base);
     if(local.dirty){
       const lNew = local.updated > row.updated_at;
+      if(row.kind === 'content') await saveVersion(row.id.slice(2), local.data, 'merge').catch(e => console.warn('version', e));
       const m = row.kind === 'content' ? mergeContent(base && base.d, local.data, row.data, lNew) : {data: mergeKeys(base && base.d, local.data, row.data, lNew), copies: 0};
       const rec = {id: row.id, kind: row.kind, data: m.data, deleted: false, updated: Math.max(local.updated, row.updated_at) + 1, dirty: 1};
       await IDB.put('docs', rec);
-      if(rec.kind !== 'content') docs.set(rec.id, rec);
+      if(inMap(rec.kind)) docs.set(rec.id, rec);
       await baseSet(row.id, row.data, row.server_ts);
       searchCache = null;
       mergeNote(m.copies);
@@ -499,7 +617,7 @@ async function applyRemote(row){
   } else if(local && local.updated >= row.updated_at) return false;
   const rec = {id: row.id, kind: row.kind, data: row.data ?? null, deleted: !!row.deleted, updated: row.updated_at, dirty: 0};
   await IDB.put('docs', rec);
-  if(rec.kind !== 'content') docs.set(rec.id, rec);
+  if(inMap(rec.kind)) docs.set(rec.id, rec);
   else if(cur && rec.id === 'c_' + cur.id) pendingCurrentReload = true;
   if(mk){ if(rec.data && !rec.deleted) await baseSet(row.id, rec.data, row.server_ts); else await baseDel(row.id); }
   searchCache = null;
@@ -1123,6 +1241,8 @@ async function saveContent(){
   const c = cur;
   const items = [...c.items.values()].map(ser);
   const rec = c.crec || {id: 'c_' + c.id, kind: 'content', deleted: false};
+  const prev = rec.data;
+  if(prev && c.verAt !== undefined && Date.now() - c.verAt > VER_GAP){ c.verAt = Date.now(); saveVersion(c.id, prev).catch(e => console.warn('version', e)); }
   rec.data = {bg: c.bg, items};
   if(c.lastId) rec.data.last = c.lastId;
   c.crec = rec;
@@ -2533,6 +2653,7 @@ async function openPage(id, opts = {}){
   const ok = crec && !crec.deleted && crec.data;
   const data = ok ? crec.data : {bg: Object.assign({}, prefs.bg), items: []};
   cur = {id, crec: ok ? crec : null, bg: normBg(data.bg), items: new Map(), undo: [], redo: [], lastId: typeof data.last === 'string' ? data.last : null};
+  { const c = cur; versionsOf(id).then(l => { c.verAt = l[0] ? l[0].data.at : 0; }).catch(() => { c.verAt = 0; }); }
   for(const s of data.items || []){ const it = deser(s); if(it && it.id) cur.items.set(it.id, it); }
   ui.page = id; ui.sec = page.data.sec;
   const sec = getDoc(page.data.sec); if(sec) ui.nb = sec.data.nb;
@@ -3555,6 +3676,72 @@ $('tmplSave').addEventListener('click', async () => {
   hideModal('tmplDlg'); renderTemplates(); toast(`Template “${name}” saved`);
 });
 $('mExport').addEventListener('click', () => { closePops(); exportPdfFile(); });
+/* ---------- Page history (1.27): list, small previews, restore as one undo step ---------- */
+$('mHistory').addEventListener('click', () => { closePops(); openHistory(); });
+function verWhen(at){
+  const d = new Date(at), today = new Date().toDateString() === d.toDateString();
+  return (today ? 'Today' : d.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric'})) + ', ' + hhmm(at);
+}
+async function openHistory(){
+  if(!cur) return;
+  if(editing) finishEditing();
+  await flushSaves();
+  const pid = cur.id, list = await versionsOf(pid), box = $('histList');
+  if(!list.length) box.innerHTML = '<p class="hint">No earlier versions yet. From now on Inkwell keeps one each time you come back to this page and change it.</p>';
+  else box.innerHTML = list.map((v, i) => {
+    const why = v.data.why === 'merge' ? 'before changes from another device' : v.data.why === 'restore' ? 'before a restore' : 'before editing';
+    return `<div class="trash-item hist-item" data-i="${i}"><canvas width="192" height="128"></canvas><div class="ti-text"><div class="ti-name">${esc(verWhen(v.data.at))}</div><div class="hint">${v.data.n} item${v.data.n === 1 ? '' : 's'}, ${why}</div></div><button class="btn ghost" data-act="restore">Restore</button></div>`;
+  }).join('');
+  box.onclick = async e => {
+    const b = e.target.closest('[data-act="restore"]'); if(!b) return;
+    const v = list[+b.closest('.hist-item').dataset.i];
+    hideModal('histDlg');
+    await restoreVersion(v);
+  };
+  showModal('histDlg');
+  // previews, one at a time so a long history stays responsive
+  const cvs = [...box.querySelectorAll('canvas')];
+  for(let i = 0; i < cvs.length; i++){
+    await new Promise(r => setTimeout(r, 0));
+    if($('histDlg').hidden) break;
+    try { drawVersion(cvs[i], list[i].data); } catch(e){ console.warn('preview', e); }
+  }
+}
+function drawVersion(cv, data){
+  const items = (data.items || []).map(deser).filter(Boolean);
+  const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  if(!items.length) return;
+  const boxOf = it => it.t === 's' ? strokeBox(it) : [it.x || 0, it.y || 0, (it.x || 0) + (it.w || 120), (it.y || 0) + (it.h || (it.t === 'x' ? 26 * (it.fs || 1) : 40))];
+  let b = null;
+  for(const it of items){ const q = boxOf(it); b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q; }
+  const sc = Math.min((W - 12) / Math.max(1, b[2] - b[0]), (H - 12) / Math.max(1, b[3] - b[1]), 1);
+  ctx.setTransform(sc, 0, 0, sc, 6 - b[0] * sc, 6 - b[1] * sc);
+  for(const it of items){
+    if(it.t === 's'){ ctx.globalAlpha = it.hl ? 0.35 : 1; ctx.fillStyle = inkColor(it.c, true); ctx.fill(strokePath(it, false)); ctx.globalAlpha = 1; }
+    else { const q = boxOf(it); ctx.fillStyle = it.t === 'i' ? '#e4e6ea' : it.t === 'tp' ? '#e8b23a' : '#c3c8d0'; ctx.fillRect(q[0], q[1], q[2] - q[0], it.t === 'x' ? Math.min(q[3] - q[1], 10 / sc) : q[3] - q[1]); }
+  }
+}
+async function restoreVersion(v){
+  const pid = v.data.page;
+  if(!cur || cur.id !== pid) await openPage(pid);
+  if(!cur || cur.id !== pid) return;
+  if(editing) finishEditing();
+  await saveVersion(pid, {bg: cur.bg, items: [...cur.items.values()].map(ser)}, 'restore');
+  cur.verAt = Date.now();
+  const target = new Map();
+  for(const sItem of v.data.items || []){ const it = deser(sItem); if(it && it.id) target.set(it.id, it); }
+  const after = [], before = [];
+  for(const id of new Set([...cur.items.keys(), ...target.keys()])){
+    const o = cur.items.get(id) || null, n = target.get(id) || null;
+    if(o && n && stable(ser(o)) === stable(ser(n))) continue;
+    after.push([id, n]); before.push([id, o]);
+  }
+  clearSel();
+  if(after.length) apply(after, before);
+  if(v.data.bg && stable(v.data.bg) !== stable(cur.bg)){ cur.bg = normBg(v.data.bg); renderPaper(); invalidate(); saveContentSoon(); }
+  toast('Restored the version from ' + verWhen(v.data.at) + '. Undo brings back what you had.');
+}
 
 /* =====================================================================
    Popovers and dialogs
@@ -4115,6 +4302,7 @@ async function renderSettings(){
   if(Sync.user){
     $('whoami').textContent = Sync.user.email || 'your account';
     renderSyncInfo();
+    Files.on(true).then(renderSyncInfo).catch(() => {});
   }
   try {
     const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
@@ -4146,6 +4334,14 @@ async function cleanScan(){
   const server = [];
   if(Sync.user){
     const dayAgo = Date.now() - 864e5;
+    if(await Files.on(true)){
+      const {files} = await Files.call('list');
+      for(const f of files || []){
+        if(!f || !f.id || used.has(f.id)) continue;
+        const t = Date.parse(f.created_at || '');
+        if(isFinite(t) && t < dayAgo) server.push({id: f.id, size: +f.bytes || 0, r2: true});
+      }
+    }
     for(let off = 0; off < 200000; off += 1000){
       const {data, error} = await Sync.sb.storage.from('assets').list(Sync.user.id, {limit: 1000, offset: off});
       if(error) throw error;
@@ -4165,10 +4361,13 @@ async function cleanRun(plan){
     await IDB.del('assets', r.id);
     const u = assetURLs.get(r.id); if(u){ URL.revokeObjectURL(u); assetURLs.delete(r.id); }
   }
-  for(let i = 0; i < plan.server.length; i += 100){
-    const {error} = await Sync.sb.storage.from('assets').remove(plan.server.slice(i, i + 100).map(r => Sync.user.id + '/' + r.id));
+  const r2 = plan.server.filter(r => r.r2), sb = plan.server.filter(r => !r.r2);
+  for(let i = 0; i < r2.length; i += 100) await Files.call('del', {ids: r2.slice(i, i + 100).map(r => r.id)});
+  for(let i = 0; i < sb.length; i += 100){
+    const {error} = await Sync.sb.storage.from('assets').remove(sb.slice(i, i + 100).map(r => Sync.user.id + '/' + r.id));
     if(error) throw error;
   }
+  if(r2.length) Files.on(true).catch(() => {});
   // their searchable text goes too
   for(const id of new Set(plan.local.concat(plan.server).map(r => r.id))){ const d = docs.get('pt_' + id); if(d && live(d)) await removeDoc(d.id, 'ptxt', null, true); }
 }
@@ -4213,7 +4412,14 @@ $('authSignup').addEventListener('click', async () => {
 });
 function renderSyncInfo(){
   const el = $('syncInfo'); if(!el || !Sync.user) return;
-  el.textContent = (Sync.state === 'warn' ? Sync.msg : Sync.lastOk ? 'Last synced ' + hhmm(Sync.lastOk) : 'Not synced yet') + (Sync.liveOk ? ' · instant sync on' : ' · checks every 20 s');
+  let t = (Sync.state === 'warn' ? Sync.msg : Sync.lastOk ? 'Last synced ' + hhmm(Sync.lastOk) : 'Not synced yet') + (Sync.liveOk ? ' · instant sync on' : ' · checks every 20 s');
+  const i = Files.info;
+  if(i && i.r2){
+    t += ` · Pictures ${Math.round(i.used_mb || 0)} MB` + (i.limit_mb == null ? '' : ` of ${i.limit_mb} MB`);
+    if(Files.migLeft) t += ` (moving ${Files.migLeft} older pictures to the new storage)`;
+  }
+  if(i && i.claude_usd != null && (i.claude_usd > 0 || i.claude_limit != null)) t += ` · Claude this month USD ${(+i.claude_usd).toFixed(2)}` + (i.claude_limit == null ? '' : ` of ${(+i.claude_limit).toFixed(2)}`);
+  el.textContent = t;
 }
 $('signOut').addEventListener('click', async () => {
   Sync.unlisten();
@@ -4532,20 +4738,83 @@ $('updBtn').addEventListener('click', async () => {
 });
 
 function blobToDataURL(b){ return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(b); }); }
+/* ---------- Backup (1.27): zip files in parts of up to BACKUP_PART_MB, with every picture, also the ones only online.
+   Part 1 holds notes.json (all notes) plus pictures; the other parts hold pictures. Each part is saved with its own tap
+   (iPad Safari only shares a file right after a tap). Pictures from the server are not kept on the device. ---------- */
+const BACKUP_PART_MB = 80;
+let backupPlan = null;
+async function assetBlob(id){
+  const a = await IDB.get('assets', id); if(a && a.blob) return a.blob;
+  if(!Sync.sb || !Sync.user || !navigator.onLine) return null;
+  if(await Files.on()){ try { const b = await Files.download(id); if(b) return b; } catch {} }
+  const r = await Sync.sb.storage.from('assets').download(Sync.user.id + '/' + id);
+  return r.error ? null : r.data;
+}
+async function backupScan(){
+  await flushSaves();
+  const docsAll = (await IDB.all('docs')).filter(d => !d.deleted && d.data).map(d => ({id: d.id, kind: d.kind, data: d.data, updated: d.updated}));
+  const sizes = new Map();
+  for(const a of await IDB.all('assets')) if(a && a.id) sizes.set(a.id, a.blob ? a.blob.size : 0);
+  if(Sync.user && navigator.onLine){
+    if(await Files.on()){ const {files} = await Files.call('list'); for(const f of files || []) if(!sizes.has(f.id)) sizes.set(f.id, +f.bytes || 0); }
+    for(let off = 0; off < 200000; off += 1000){
+      const {data, error} = await Sync.sb.storage.from('assets').list(Sync.user.id, {limit: 1000, offset: off});
+      if(error) break;
+      for(const o of data || []) if(o && /^a-/.test(o.name || '') && !sizes.has(o.name)) sizes.set(o.name, (o.metadata && +o.metadata.size) || 0);
+      if(!data || data.length < 1000) break;
+    }
+  }
+  const notesSize = JSON.stringify(docsAll).length;
+  const parts = [{ids: [], size: notesSize}];
+  for(const [id, size] of [...sizes].sort((a, b) => a[0] < b[0] ? -1 : 1)){
+    let p = parts[parts.length - 1];
+    if(p.ids.length && p.size + size > BACKUP_PART_MB * 1048576){ p = {ids: [], size: 0}; parts.push(p); }
+    p.ids.push(id); p.size += size;
+  }
+  return {docs: docsAll, parts, total: [...sizes.values()].reduce((a, b) => a + b, 0) + notesSize, pics: sizes.size, at: new Date()};
+}
+function backupName(plan, i){
+  const d = plan.at;
+  return `inkwell-backup-${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` + (plan.parts.length > 1 ? `-part${i + 1}of${plan.parts.length}` : '') + '.zip';
+}
+function renderBackup(){
+  const plan = backupPlan, mb = x => (x / 1048576).toFixed(x < 10485760 ? 1 : 0);
+  $('backupInfo').textContent = `${plan.docs.length} notes items and ${plan.pics} pictures, ${mb(plan.total)} MB in ${plan.parts.length} file${plan.parts.length === 1 ? '' : 's'}. Save ${plan.parts.length === 1 ? 'it' : 'each part'} (to Files or iCloud Drive, for example). To restore, choose all the parts together in Settings → Restore backup.`;
+  $('backupParts').innerHTML = plan.parts.map((p, i) => `<button class="btn ghost${p.done ? ' done' : ''}" data-bpart="${i}">${p.done ? '✓ ' : ''}Save ${plan.parts.length === 1 ? 'backup' : 'part ' + (i + 1)} <span class="hint">${mb(p.size)} MB${i === 0 ? ', with all notes' : ''}</span></button>`).join('');
+}
+async function saveFile(file){
+  if(navigator.canShare && navigator.canShare({files: [file]})){ try { await navigator.share({files: [file], title: file.name}); return true; } catch(e){ return e && e.name === 'AbortError' ? false : (dl(), true); } }
+  return dl(), true;
+  function dl(){ const u = URL.createObjectURL(file); const a = document.createElement('a'); a.href = u; a.download = file.name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000); }
+}
 $('backupBtn').addEventListener('click', async () => {
   const btn = $('backupBtn'); btn.disabled = true; btn.textContent = 'Preparing';
   try {
-    await flushSaves();
-    const all = (await IDB.all('docs')).filter(d => !d.deleted).map(d => ({id: d.id, kind: d.kind, data: d.data, updated: d.updated}));
-    const assets = [];
-    for(const a of await IDB.all('assets')) assets.push({id: a.id, type: a.type, data: await blobToDataURL(a.blob)});
-    const d = new Date();
-    const name = `inkwell-backup-${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}.json`;
-    const file = new File([JSON.stringify({app: 'Inkwell', version: 1, exported: d.toISOString(), docs: all, assets})], name, {type: 'application/json'});
-    if(navigator.canShare && navigator.canShare({files: [file]})) await navigator.share({files: [file], title: name}).catch(() => {});
-    else { const u = URL.createObjectURL(file); const a = document.createElement('a'); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 5000); }
+    backupPlan = await backupScan();
+    hideModal('settingsDlg'); $('backupMsg').textContent = ''; renderBackup(); showModal('backupDlg');
   } catch(e){ toast('Backup failed: ' + (e.message || e)); }
   btn.disabled = false; btn.textContent = 'Download backup';
+});
+$('backupParts').addEventListener('click', async e => {
+  const b = e.target.closest('[data-bpart]'); if(!b || !backupPlan || b.disabled) return;
+  const i = +b.dataset.bpart, plan = backupPlan, part = plan.parts[i], msg = $('backupMsg');
+  b.disabled = true;
+  try {
+    if(!window.JSZip) await loadScript('lib/docx/jszip.min.js');
+    const zip = new JSZip(), missing = [];
+    if(i === 0) zip.file('notes.json', JSON.stringify({app: 'Inkwell', version: 2, exported: plan.at.toISOString(), parts: plan.parts.length, docs: plan.docs}));
+    for(let k = 0; k < part.ids.length; k++){
+      msg.textContent = `Collecting pictures ${k + 1} of ${part.ids.length}…`;
+      const id = part.ids[k], blob = await assetBlob(id);
+      if(blob) zip.file('pictures/' + id, blob, {binary: true}); else missing.push(id);
+    }
+    msg.textContent = 'Packing…';
+    const out = await zip.generateAsync({type: 'blob', compression: 'STORE'});
+    const ok = await saveFile(new File([out], backupName(plan, i), {type: 'application/zip'}));
+    if(ok){ part.done = true; renderBackup(); }
+    msg.textContent = missing.length ? `${missing.length} picture${missing.length === 1 ? '' : 's'} could not be fetched (offline?). Try this part again later.` : (plan.parts.every(p => p.done) ? 'All parts saved.' : '');
+  } catch(err){ msg.textContent = 'This part failed: ' + (err.message || err); }
+  b.disabled = false;
 });
 {
   const rb = document.createElement('button');
@@ -4554,26 +4823,40 @@ $('backupBtn').addEventListener('click', async () => {
   rb.addEventListener('click', () => $('restoreFile').click());
 }
 $('restoreFile').addEventListener('change', async () => {
-  const f = $('restoreFile').files[0]; if(!f) return;
+  const files = [...$('restoreFile').files]; if(!files.length) return;
   try {
-    const j = JSON.parse(await f.text());
-    if(!j || !Array.isArray(j.docs)) throw new Error('Not an Inkwell backup');
-    let n = 0;
-    for(const d of j.docs){
+    let docsIn = null; const pics = [];
+    for(const f of files){
+      if(/\.zip$/i.test(f.name) || f.type === 'application/zip'){
+        if(!window.JSZip) await loadScript('lib/docx/jszip.min.js');
+        const zip = await JSZip.loadAsync(f);
+        const nj = zip.file('notes.json');
+        if(nj){ const j = JSON.parse(await nj.async('string')); if(j && Array.isArray(j.docs)) docsIn = (docsIn || []).concat(j.docs); }
+        zip.forEach((path, entry) => { const m = /^pictures\/(a-[A-Za-z0-9_-]+)$/.exec(path); if(m && !entry.dir) pics.push({id: m[1], get: () => entry.async('blob')}); });
+      } else {
+        const j = JSON.parse(await f.text());
+        if(!j || !Array.isArray(j.docs)) throw new Error(f.name + ' is not an Inkwell backup');
+        docsIn = (docsIn || []).concat(j.docs);
+        for(const a of j.assets || []) pics.push({id: a.id, type: a.type, get: async () => (await fetch(a.data)).blob()});
+      }
+    }
+    if(!docsIn && !pics.length) throw new Error('Not an Inkwell backup');
+    let n = 0, p = 0;
+    for(const d of docsIn || []){
       const local = await IDB.get('docs', d.id);
       if(local && local.updated >= d.updated && !local.deleted) continue;
       await IDB.put('docs', {id: d.id, kind: d.kind, data: d.data, deleted: false, updated: Math.max(d.updated, local ? local.updated + 1 : 0), dirty: 1});
       n++;
     }
     const pend = (await IDB.get('meta', 'pendingAssets')) || [];
-    for(const a of j.assets || []){
+    for(const a of pics){
       if(await IDB.get('assets', a.id)) continue;
-      const blob = await (await fetch(a.data)).blob();
-      await IDB.put('assets', {id: a.id, blob, type: a.type}); pend.push(a.id);
+      const blob = await a.get();
+      await IDB.put('assets', {id: a.id, blob, type: a.type || blob.type || 'image/jpeg'}); pend.push(a.id); p++;
     }
     await IDB.put('meta', pend, 'pendingAssets');
     await loadDocs(); ensureUi(); renderNav(); renderList(); Sync.soon();
-    toast(`Restored ${n} item${n === 1 ? '' : 's'}`);
+    toast(`Restored ${n} item${n === 1 ? '' : 's'} and ${p} picture${p === 1 ? '' : 's'}` + (docsIn ? '' : ' (choose part 1 too for the notes)'));
     hideModal('settingsDlg');
   } catch(e){ toast('Restore failed: ' + (e.message || e)); }
   $('restoreFile').value = '';
@@ -5195,7 +5478,7 @@ const Ask = {
       });
       if(!res.ok){
         let j = {}; try { j = await res.json(); } catch {}
-        const why = {not_allowed: 'This account is not allowed to use Claude yet. Your email has to be added to ASK_ALLOWED_EMAILS in Supabase (Edge Functions → Secrets).', no_key: 'Claude is not set up yet: the Anthropic API key is missing in Supabase (Edge Functions → Secrets → ANTHROPIC_API_KEY).', too_big: 'That was too much at once. Start a new chat (+) and scan a smaller part.'}[j.error];
+        const why = {not_allowed: 'This account is not allowed to use Claude yet. Your email has to be added to ASK_ALLOWED_EMAILS in Supabase (Edge Functions → Secrets).', no_key: 'Claude is not set up yet: the Anthropic API key is missing in Supabase (Edge Functions → Secrets → ANTHROPIC_API_KEY).', too_big: 'That was too much at once. Start a new chat (+) and scan a smaller part.', limit_reached: j.message || 'This month\'s Claude limit is used up.'}[j.error];
         throw new Error(why || (res.status === 404 ? 'The Claude helper is not installed on the server yet.' : (j.message || j.error || 'Server error ' + res.status)));
       }
       const used = res.headers.get('x-ask-model') || '';
@@ -5509,7 +5792,7 @@ function inkImage(strokes, maxPx){
 }
 // Anthropic's API refuses to copy out some printed material (e.g. published books): not an error to retry
 const jobBlocked = e => /content filter|output blocked/i.test(String((e && (e.code || e.message)) || ''));
-const jobWhy = code => ({not_allowed: 'This account is not allowed to use Claude (ASK_ALLOWED_EMAILS in Supabase).', no_key: 'The Anthropic API key is missing in Supabase.', not_signed_in: 'Sign in to sync first.', no_sync: 'Sync is not set up on this device.', offline: 'No internet connection.'}[code] || 'Claude could not be reached (' + code + ').');
+const jobWhy = code => ({not_allowed: 'This account is not allowed to use Claude (ASK_ALLOWED_EMAILS in Supabase).', no_key: 'The Anthropic API key is missing in Supabase.', not_signed_in: 'Sign in to sync first.', no_sync: 'Sync is not set up on this device.', offline: 'No internet connection.', limit_reached: 'This month\'s Claude limit is used up; it resets on the 1st.'}[code] || 'Claude could not be reached (' + code + ').');
 
 /* =====================================================================
    Put an Ask Claude answer on the page
@@ -5665,7 +5948,7 @@ const HW = {
     catch(e){
       const c = e.code || '';
       if(c === 'offline'){ this.queue.unshift(pid); this.busy = false; this.timer = setTimeout(() => this.work(), 30000); renderHwStatus(); return; }
-      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
+      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync', 'limit_reached'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
       else { this.state = 'Last try failed: ' + jobWhy(c || e.message); console.warn('hw', e); }
     }
     this.busy = false; renderHwStatus();
@@ -5824,7 +6107,7 @@ const PT = {
       const c = e.code || '';
       if(jobBlocked(e)){ try { await savePtxt(a, 'ocr', [], {nb: 1}); } catch {} this.state = ''; this.busy = false; renderHwStatus(); if(this.queue.length) this.timer = setTimeout(() => this.work(), 1200); return; }
       if(c === 'offline'){ this.queue.unshift(a); this.busy = false; this.timer = setTimeout(() => this.work(), 30000); renderHwStatus(); return; }
-      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
+      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync', 'limit_reached'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
       else if(c !== 'missing'){ this.state = 'Last try failed: ' + jobWhy(c || e.message); console.warn('ocr', e); }
     }
     this.busy = false; renderHwStatus();
@@ -6515,7 +6798,7 @@ document.addEventListener('keyup', e => { if(e.key === ' ') spaceDown = false; }
    ===================================================================== */
 async function loadDocs(){
   docs.clear();
-  for(const d of await IDB.all('docs')) if(d.kind !== 'content') docs.set(d.id, d);
+  for(const d of await IDB.all('docs')) if(inMap(d.kind)) docs.set(d.id, d);
 }
 async function seed(){
   // Fixed ids and an old timestamp: a second device never duplicates these, and real data from sync always wins.
@@ -7134,7 +7417,8 @@ function themeChanged(){
   invalidate();
 }
 darkMQ.addEventListener && darkMQ.addEventListener('change', themeChanged);
-document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') flushSaves(); else Sync.run(); });
+// leaving the app: save, then upload right away (iOS gives a few seconds), so another device sees the latest strokes
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') flushSaves().then(() => Sync.run()).catch(() => {}); else Sync.run(); });
 // a normal close or reload is not a crash: clear the guard so the page reopens next time
 addEventListener('pagehide', () => { LSset('inkwell.opening', null); flushSaves(); });
 
@@ -7176,6 +7460,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet};
+window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

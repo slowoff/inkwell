@@ -4,6 +4,8 @@
 //   ASK_ALLOWED_EMAILS  comma-separated emails of Inkwell accounts that may use Claude
 //   ASK_MODEL           optional, the strong model, defaults to claude-sonnet-5-5
 //   ASK_FAST_MODEL      optional, the cheap model, defaults to claude-haiku-5-5
+// Spending (since 1.27): every call's cost is added to public.usage_month; accounts with a monthly cap
+// (public.limits.claude_usd_month, default USD 2 for accounts without a limits row, null = no cap) get 402 limit_reached.
 // Body: {mode: 'tutor'|'solve'|'practice', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
 // Background jobs (fixed model, no chat): mode 'read' = transcribe handwriting for search (fast model),
 // mode 'latex' = turn a handwritten formula into LaTeX (smart model), mode 'ocr' = read an imported page
@@ -24,7 +26,7 @@ const cors = (req: Request) => {
 const fail = (req: Request, status: number, error: string, message = "") =>
   new Response(JSON.stringify({ error, message }), { status, headers: { ...cors(req), "Content-Type": "application/json" } });
 
-const BASE = `You are Claude, built into Inkwell, the iPad notes app of Rafael, a student in Switzerland doing the full-time Berufsmaturität (BM TALS, technical track: maths, physics, chemistry, German, English, French, history, economics). He opens you from a page of his notes and often sends a scanned part of a worksheet; the image may contain his handwriting.
+const BASE = `You are Claude, built into Inkwell, the iPad notes app of a student in Switzerland doing the full-time Berufsmaturität (BM TALS, technical track: maths, physics, chemistry, German, English, French, history, economics). He opens you from a page of his notes and often sends a scanned part of a worksheet; the image may contain his handwriting.
 
 How to answer:
 - Answer in English. Keep German technical terms from the worksheet where they help (e.g. "Beschleunigung (acceleration)").
@@ -45,7 +47,7 @@ Mode: TUTOR. Teach, don't solve:
 Mode: SOLVE. Give a complete worked solution: given values, formula, steps with units, result (bold), and one line on the idea behind it.`,
   practice: `${BASE}
 
-Mode: PRACTICE. You quiz Rafael to check whether he really knows the material. His first message contains his learning objectives, exercises and notes (text from his Inkwell pages or files he added) and maybe a focus.
+Mode: PRACTICE. You quiz the student to check whether he really knows the material. His first message contains his learning objectives, exercises and notes (text from his Inkwell pages or files he added) and maybe a focus.
 - Base everything on that material. If learning objectives are there, cover them and say which objective each exercise checks.
 - Give ONE exercise at a time, then stop and wait for his answer. Number them: Exercise 1, Exercise 2, ...
 - Mix the kinds: calculations with new numbers (similar to the given exercises, never copies), short explanations, definitions, "what happens if" questions. Start easy, get harder when he answers well, go back to basics when he struggles.
@@ -80,12 +82,23 @@ Output only the text, nothing else. If the strokes are a drawing, a shape, an ar
   },
 };
 
+// USD per million tokens (platform.claude.com/docs/en/about-claude/pricing, 2026-10-17): [input, output, cache write 5m, cache read]
+const PRICES: Record<string, number[]> = {
+  "claude-sonnet-5-5": [2, 10, 2.5, 0.1],
+  "claude-haiku-5-5": [0.1, 0.5, 0.125, 0.01],
+  "claude-opus-5-5": [4, 20, 5, 0.2],
+};
+const costOf = (model: string, u: any) => {
+  const p = PRICES[model] || PRICES["claude-sonnet-5-5"];
+  return ((u.input_tokens || 0) * p[0] + (u.output_tokens || 0) * p[1] + (u.cache_creation_input_tokens || 0) * p[2] + (u.cache_read_input_tokens || 0) * p[3]) / 1e6;
+};
+
 const ROUTER = `You decide which AI model should answer a student's question. Reply with exactly one word.
 HARD: reading handwriting or a scanned worksheet with diagrams, graphs or tables; multi-step maths, physics or chemistry calculations; derivations or proofs; checking the student's own work; essay feedback; anything ambiguous or unclear.
 EASY: definitions, vocabulary, translations, short factual questions, one-step arithmetic, rephrasing or summarising a short text, simple follow-ups like "thanks" or "explain that again shorter".
 When unsure, answer HARD.`;
 
-async function pickModel(key: string, messages: any[], fast: string, smart: string): Promise<string> {
+async function pickModel(key: string, messages: any[], fast: string, smart: string, spent: { usd: number }): Promise<string> {
   try {
     // only the latest question matters for the choice; images in it are cheap for the small model
     const last = messages[messages.length - 1];
@@ -96,6 +109,7 @@ async function pickModel(key: string, messages: any[], fast: string, smart: stri
     });
     if (!res.ok) return smart;
     const j = await res.json();
+    if (j?.usage) spent.usd += costOf(fast, j.usage);
     const word = String(j?.content?.[0]?.text || "").trim().toUpperCase();
     return word.startsWith("EASY") ? fast : smart;
   } catch { return smart; }
@@ -113,6 +127,14 @@ Deno.serve(async (req) => {
   if (!allowed.includes((user.email || "").toLowerCase())) return fail(req, 403, "not_allowed");
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) return fail(req, 503, "no_key");
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const { data: lim } = await admin.from("limits").select("claude_usd_month").eq("user_id", user.id).maybeSingle();
+  const cap: number | null = lim ? (lim.claude_usd_month === null ? null : Number(lim.claude_usd_month)) : 2;
+  if (cap !== null) {
+    const { data: u } = await admin.from("usage_month").select("claude_usd").eq("user_id", user.id).eq("month", new Date().toISOString().slice(0, 7)).maybeSingle();
+    if (u && Number(u.claude_usd) >= cap) return fail(req, 402, "limit_reached", `This month's Claude limit (USD ${cap}) is used up. It resets on the 1st.`);
+  }
+  const spent = { usd: 0 };
 
   const raw = await req.text();
   if (raw.length > 9_000_000) return fail(req, 413, "too_big");
@@ -130,7 +152,7 @@ Deno.serve(async (req) => {
 
   const smart = Deno.env.get("ASK_MODEL") || "claude-sonnet-5-5", fast = Deno.env.get("ASK_FAST_MODEL") || "claude-haiku-5-5";
   const job = JOBS[body.mode || ""];
-  const model = job ? (job.smart ? smart : fast) : body.model === "fast" ? fast : body.model === "smart" ? smart : await pickModel(key, messages, fast, smart);
+  const model = job ? (job.smart ? smart : fast) : body.model === "fast" ? fast : body.model === "smart" ? smart : await pickModel(key, messages, fast, smart, spent);
 
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -148,5 +170,29 @@ Deno.serve(async (req) => {
     try { const j = await r.json(); msg = j?.error?.message || ""; } catch { /* ignore */ }
     return fail(req, 502, "anthropic_" + r.status, msg || `Claude API error ${r.status}`);
   }
-  return new Response(r.body, { headers: { ...cors(req), "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-ask-model": model } });
+  // pass the stream through unchanged while reading the token counts, then log the cost
+  const usage: any = {};
+  let buf = "";
+  const dec = new TextDecoder();
+  const meter = new TransformStream({
+    transform(chunk, ctl) {
+      ctl.enqueue(chunk);
+      buf += dec.decode(chunk, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 1);
+        if (!line.startsWith("data:") || !line.includes("usage")) continue;
+        try {
+          const ev = JSON.parse(line.slice(5));
+          const u = ev?.message?.usage || ev?.usage;
+          if (u) for (const k of Object.keys(u)) if (typeof u[k] === "number") usage[k] = u[k];
+        } catch { /* partial or other event */ }
+      }
+    },
+    async flush() {
+      const usd = costOf(model, usage) + spent.usd;
+      if (usd > 0) { try { await admin.rpc("add_claude_usage", { p_user: user.id, p_usd: usd }); } catch (e) { console.error("usage log", e); } }
+    },
+  });
+  return new Response(r.body.pipeThrough(meter), { headers: { ...cors(req), "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-ask-model": model } });
 });

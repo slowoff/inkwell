@@ -12,6 +12,16 @@
 // picture for search (fast model), mode 'scribe' = handwriting -> typed text box (fast model).
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
+// Supabase keys (1.35): the new publishable/secret keys (JSON by name, "default"), falling back to the legacy anon/service_role
+// keys, which Supabase switches off at the end of 2026. verify_jwt is off for this function; it checks the user itself.
+const envKey = (json: string, legacy: string): string => {
+  try { const k = JSON.parse(Deno.env.get(json) || "{}").default; if (k) return k; } catch { /* not set */ }
+  return Deno.env.get(legacy)!;
+};
+const PUB_KEY = () => envKey("SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
+const SECRET_KEY = () => envKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
+const bearer = (h: string) => /^Bearer\s+(.+)$/i.exec(h)?.[1] || "";
+
 const ORIGINS = ["https://slowoff.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
 const cors = (req: Request) => {
   const o = req.headers.get("origin") || "";
@@ -120,14 +130,14 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return fail(req, 405, "method");
 
   const auth = req.headers.get("Authorization") || "";
-  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
-  const { data: { user } } = await sb.auth.getUser();
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, PUB_KEY(), { global: { headers: { Authorization: auth } } });
+  const { data: { user } } = await sb.auth.getUser(bearer(auth));
   if (!user) return fail(req, 401, "not_signed_in");
   const allowed = (Deno.env.get("ASK_ALLOWED_EMAILS") || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   if (!allowed.includes((user.email || "").toLowerCase())) return fail(req, 403, "not_allowed");
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) return fail(req, 503, "no_key");
-  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, SECRET_KEY(), { auth: { persistSession: false } });
   const { data: lim } = await admin.from("limits").select("claude_usd_month").eq("user_id", user.id).maybeSingle();
   const cap: number | null = lim ? (lim.claude_usd_month === null ? null : Number(lim.claude_usd_month)) : 2;
   if (cap !== null) {

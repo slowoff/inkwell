@@ -577,7 +577,7 @@ const GD = {
     let j = {}, res;
     try {
       res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/files', {method: 'POST',
-        headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + CFG.SUPABASE_ANON_KEY, apikey: CFG.SUPABASE_ANON_KEY},
+        headers: {'Content-Type': 'application/json', apikey: CFG.SUPABASE_ANON_KEY},   // no session yet: the key goes only in apikey (1.35)
         body: JSON.stringify({action: 'glogin', code: r.code, verifier: r.v, redirect: this.redirect()})});
       j = await res.json().catch(() => ({}));
     } catch { return fail('No connection. Try again when you are online.'); }
@@ -591,7 +591,8 @@ const GD = {
     Sync.fresh = {s: data.session, at: Date.now(), tries: 0};
     this.tok = null; Files.full = null; Files.info = null;
     LSset('inkwell.gdNote', null);
-    toast('Signed in as ' + j.email + '. Your notes and pictures are saved in your Google Drive.');
+    if(j.created) toast('New Inkwell account made for ' + j.email + '. If your notes are under another Google account, sign out (Settings) and sign in with that one.', 'Settings', () => openSettings());
+    else toast('Signed in as ' + j.email + '. Your notes and pictures are saved in your Google Drive.');
     setTimeout(() => { Files.on(true).then(() => { renderCloud(); this.saveNotes(true); this.autoMove(); }).catch(() => {}); }, 2500);
   },
   async token(force){
@@ -680,11 +681,28 @@ const GD = {
     } catch(e){ console.warn('gdrive notes', e); LSset('inkwell.gdNotes', {...st, fail: Date.now()}); }
     finally { this.notesBusy = false; }
   },
+  // (1.35) once a day: are all Drive pictures still in the folder? (deleted or in Drive's bin -> they would vanish from pages)
+  async check(force){
+    const i = Files.info, g = i && i.gdrive;
+    if(!g || g.broken || this.moving || !navigator.onLine) return null;
+    const day = new Date().toDateString(), st = LSget('inkwell.gdCheck', null) || {};
+    if(!force && st.day === day && st.uid === Sync.user.id) return st;
+    try {
+      const r = await Files.call('gcheck');
+      const out = {day, uid: Sync.user.id, total: r.total, missing: r.missing, folder_ok: r.folder_ok, at: Date.now()};
+      LSset('inkwell.gdCheck', out);
+      if(!r.folder_ok) toast('The "Inkwell pictures" folder in your Google Drive was deleted or is in the bin. Restore it in Google Drive, or your pictures disappear from your pages.');
+      else if(r.missing) toast(`${r.missing} picture${r.missing === 1 ? ' is' : 's are'} missing from your Google Drive (deleted or in the bin). Restore ${r.missing === 1 ? 'it' : 'them'} from Drive's bin to get ${r.missing === 1 ? 'it' : 'them'} back.`);
+      if(!$('settingsDlg').hidden) renderGD();
+      return out;
+    } catch(e){ console.warn('gdrive check', e); return null; }
+  },
   // (1.34) pictures still in the old shared storage move to the person's Drive by themselves
   autoMove(){
     const i = Files.info, g = i && i.gdrive;
-    if(this.moving || !g || g.broken || !(i.used_mb > 0) || document.visibilityState !== 'visible') return;
-    this.move(true);
+    if(this.moving || !g || g.broken || document.visibilityState !== 'visible') return;
+    if(!(i.used_mb > 0)){ this.check(); return; }
+    this.move(true).then(() => this.check(true));
   },
   // move this person's pictures from the shared storage into their Drive
   async move(quiet){
@@ -4632,7 +4650,12 @@ function renderGD(){
   const when = nt ? (nt.toDateString() === new Date().toDateString() ? pad2(nt.getHours()) + ':' + pad2(nt.getMinutes()) : nt.toLocaleDateString()) : '';
   const wait = Files.full && Files.localOnly ? ` · ${Files.localOnly} new picture${Files.localOnly === 1 ? '' : 's'} waiting on this device` : '';
   $('gdState').textContent = !g ? 'Not connected' + wait : g.broken ? 'The Google sign-in has expired. New pictures wait on this device until you connect again.' + wait
-    : `${g.email || 'Connected'} · pictures ${fmtMB(g.mb || 0)} · notes copied ${when ? 'at ' + when : 'shortly'}` + (i.used_mb > 0.05 ? ` · ${fmtMB(i.used_mb)} of older pictures still to move` : '') + wait;
+    : `${g.email || 'Connected'} · pictures ${fmtMB(g.mb || 0)} · notes copied ${when ? 'at ' + when : 'shortly'}` + (i.used_mb > 0.05 ? ` · ${fmtMB(i.used_mb)} of older pictures still to move` : '') + checkText() + wait;
+  function checkText(){
+    const c = LSget('inkwell.gdCheck', null);
+    if(!c || c.uid !== (Sync.user && Sync.user.id)) return '';
+    return !c.folder_ok ? ' · the Drive folder is missing!' : c.missing ? ` · ${c.missing} picture${c.missing === 1 ? '' : 's'} missing in Drive` : ` · all ${c.total} pictures checked`;
+  }
 }
 function renderCloud(){
   const i = Files.info, row = $('cloudRow');

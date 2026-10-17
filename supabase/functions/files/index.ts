@@ -21,6 +21,8 @@
 //   gdone {id, gid, size}       -> records a picture the app put in Drive
 //   gmove {n}                   -> moves up to n of the person's pictures from the shared cloud to their Drive -> {moved, left}
 //   put answers {drive: true} when new pictures go to Drive; get answers {g: driveFileId} for pictures in Drive
+//   gcheck (1.35)              -> {total, missing, folder_ok, r2_left}: are the Drive pictures still there
+//   health (1.35, no session)  -> {db, auth_admin, keys, google}: do the server's own keys work
 // Since 1.34 sign-in is Google only and every picture goes to the person's own Drive (Rafael's choice, 2026-10-18):
 //   glogin {code, verifier, redirect} (no Inkwell session needed) -> Google sign-in that also connects Drive:
 //     finds or makes the Inkwell account for the verified Google email, saves Drive access -> {token_hash, email}
@@ -29,6 +31,16 @@
 //   serves old pictures until they are moved to the person's Drive (gmove); nothing new goes there.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { AwsClient } from "npm:aws4fetch@1.0.20";
+
+// Supabase keys (1.35): the new publishable/secret keys (JSON by name, "default"), falling back to the legacy anon/service_role
+// keys, which Supabase switches off at the end of 2026. verify_jwt is off for this function; it checks the user itself.
+const envKey = (json: string, legacy: string): string => {
+  try { const k = JSON.parse(Deno.env.get(json) || "{}").default; if (k) return k; } catch { /* not set */ }
+  return Deno.env.get(legacy)!;
+};
+const PUB_KEY = () => envKey("SUPABASE_PUBLISHABLE_KEYS", "SUPABASE_ANON_KEY");
+const SECRET_KEY = () => envKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
+const bearer = (h: string) => /^Bearer\s+(.+)$/i.exec(h)?.[1] || "";
 
 const ORIGINS = ["https://slowoff.github.io", "http://localhost:8765", "http://127.0.0.1:8765"];
 const cors = (req: Request) => {
@@ -109,10 +121,18 @@ Deno.serve(async (req) => {
   // Google sign-in (1.34): works without an Inkwell session
   let body: any = {};
   try { body = await req.json(); } catch { return json(req, 400, { error: "bad_json" }); }
+  // health check (1.35): says only whether the server's own keys work (no data)
+  if (body.action === "health") {
+    const a = createClient(URL_, SECRET_KEY(), { auth: { persistSession: false } });
+    const db = await a.from("limits").select("user_id", { count: "exact", head: true });
+    const au = await a.auth.admin.listUsers({ page: 1, perPage: 1 });
+    const keys = Deno.env.get("SUPABASE_SECRET_KEYS") ? "new" : "legacy";
+    return json(req, 200, { db: !db.error, auth_admin: !au.error, keys, google: !!(GID && GSECRET) });
+  }
   if (body.action === "glogin") {
     try {
       if (!GID || !GSECRET) return json(req, 503, { error: "g_not_set_up", message: "Google sign-in is not set up on the server yet." });
-      const admin0 = createClient(URL_, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+      const admin0 = createClient(URL_, SECRET_KEY(), { auth: { persistSession: false } });
       const g = await googleConnect(GID, GSECRET, body, null);
       if ("err" in g) return json(req, g.status as number, g.err);
       if (!g.email || !g.verified) return json(req, 400, { error: "g_email", message: "Google did not confirm an email address for this account." });
@@ -137,17 +157,17 @@ Deno.serve(async (req) => {
       }
       const { error } = await admin0.from("gdrive").upsert({ user_id: uid, refresh_token: g.refresh, folder_id: folder, email: g.email, on_new: true, broken: false }, { onConflict: "user_id" });
       if (error) throw error;
-      return json(req, 200, { token_hash: link.data.properties.hashed_token, email: g.email });
+      return json(req, 200, { token_hash: link.data.properties.hashed_token, email: g.email, created: !made.error });   // created: a brand-new account (the app says so)
     } catch (e) {
       console.log("glogin", e);
       return json(req, 500, { error: "server", message: String((e as Error)?.message || e).slice(0, 300) });
     }
   }
 
-  const sb = createClient(URL_, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
-  const { data: { user } } = await sb.auth.getUser();
+  const sb = createClient(URL_, PUB_KEY(), { global: { headers: { Authorization: auth } } });
+  const { data: { user } } = await sb.auth.getUser(bearer(auth));
   if (!user) return json(req, 401, { error: "not_signed_in" });
-  const admin = createClient(URL_, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const admin = createClient(URL_, SECRET_KEY(), { auth: { persistSession: false } });
 
   const acc = Deno.env.get("R2_ACCOUNT_ID"), kid = Deno.env.get("R2_ACCESS_KEY_ID"), sec = Deno.env.get("R2_SECRET_ACCESS_KEY");
   const bucket = Deno.env.get("R2_BUCKET") || "inkwell-assets";
@@ -245,6 +265,34 @@ Deno.serve(async (req) => {
         }
         const { count } = await admin.from("files").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("place", "r2");
         return json(req, 200, { moved, left: count || 0 });
+      }
+      case "gcheck": {   // (1.35) are all of this person's Drive pictures still in their folder (not deleted / in the bin)?
+        const t = await gAccess();
+        const inDrive = new Set<string>();
+        let folderOk = true, page = "";
+        const f0 = await fetch(`${GDRIVE}/${gd!.folder_id}?fields=id,trashed`, { headers: { Authorization: "Bearer " + t.at } });
+        const fj0 = await f0.json().catch(() => ({}));
+        if (!f0.ok || fj0.trashed) folderOk = false;
+        for (let i = 0; i < 100; i++) {
+          const q = encodeURIComponent(`'${gd!.folder_id}' in parents and trashed=false`);
+          const r = await fetch(`${GDRIVE}?q=${q}&fields=nextPageToken,files(id)&pageSize=1000${page ? "&pageToken=" + encodeURIComponent(page) : ""}`, { headers: { Authorization: "Bearer " + t.at } });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error("Drive list failed (" + r.status + ")");
+          for (const f of j.files || []) inDrive.add(f.id);
+          if (!j.nextPageToken) break;
+          page = j.nextPageToken;
+        }
+        const rows: any[] = [];
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await admin.from("files").select("id, gid").eq("user_id", user.id).eq("place", "gdrive").range(from, from + 999);
+          if (error) throw error;
+          rows.push(...(data || []));
+          if (!data || data.length < 1000) break;
+        }
+        const missing = rows.filter((r) => !inDrive.has(r.gid)).map((r) => r.id);
+        const { count: left } = await admin.from("files").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("place", "r2");
+        console.log(`gcheck ${user.id} rows=${rows.length} inDrive=${inDrive.size} missing=${missing.length} folderOk=${folderOk} r2left=${left}`);
+        return json(req, 200, { total: rows.length, missing: missing.length, missing_ids: missing.slice(0, 50), folder_ok: folderOk, r2_left: left || 0 });
       }
       case "info": {
         const month = new Date().toISOString().slice(0, 7);

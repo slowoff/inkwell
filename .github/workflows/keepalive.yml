@@ -1,5 +1,5 @@
 # Keeps the free Supabase project from pausing (it pauses after 7 days without use, e.g. in school holidays).
-# Every 3 days it asks the database for nothing (the public anon key; row-level security returns an empty list).
+# Every 3 days it asks the database for nothing (the public publishable key, since 1.35; row-level security returns an empty list).
 # GitHub switches off scheduled workflows after 60 days without commits, so it also switches itself back on.
 name: Keep sync awake
 on:
@@ -15,9 +15,9 @@ jobs:
     steps:
       - name: Ask the database
         env:
-          KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1YmFlZHpyZ3JramlmbWlxaWV3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE5NjY1NTMsImV4cCI6MjEwNzU0MjU1M30.6Poy7oNGlK4ZjJxpCCRz3e9Klu0wydOQY10eMbk7Qms
+          KEY: sb_publishable_Wf2ZJlMsIHfVzaPZCu44fQ_5Ue4d8G5
         run: |
-          curl -fsS --retry 3 --retry-delay 20 "https://pubaedzrgrkjifmiqiew.supabase.co/rest/v1/docs?select=id&limit=1" -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -o /dev/null -w "HTTP %{http_code}\n"
+          curl -fsS --retry 3 --retry-delay 20 "https://pubaedzrgrkjifmiqiew.supabase.co/rest/v1/docs?select=id&limit=1" -H "apikey: $KEY" -o /dev/null -w "HTTP %{http_code}\n"
       - name: Keep this schedule switched on
         env:
           GH_TOKEN: ${{ github.token }}

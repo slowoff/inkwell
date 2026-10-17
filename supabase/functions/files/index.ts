@@ -3,10 +3,13 @@
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):
 //   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   from Cloudflare R2 -> API tokens (Object Read & Write, bucket inkwell-assets)
 //   R2_BUCKET   optional, defaults to inkwell-assets
+//   R2_TOTAL_MB optional, the cloud total for everyone together, defaults to 9000 MB (below R2's free 10 GB, so it never costs money)
+// No limit per person unless public.limits.storage_mb is set for them. When the total is reached, uploads get 413 cloud_full:
+// the app then keeps new pictures on the device only and says so. Nothing is ever removed automatically.
 // Without the R2 secrets the function answers {r2: false} and the app keeps using Supabase storage.
 // Body {action, ...}:
-//   info                       -> {r2, used_mb, limit_mb, claude_usd, claude_limit}
-//   put  {id, size}            -> {url} presigned PUT (15 min), or 413 storage_full
+//   info                       -> {r2, used_mb, limit_mb, total_mb, cap_mb, claude_usd, claude_limit}
+//   put  {id, size}            -> {url} presigned PUT (15 min), or 413 cloud_full / storage_full
 //   get  {ids}                 -> {urls: {id: url|null}} presigned GET for pictures that are in R2 (null = still only in Supabase)
 //   del  {ids}                 -> {removed}
 //   list                       -> {files: [{id, bytes, created_at}]}
@@ -27,7 +30,8 @@ const cors = (req: Request) => {
 const json = (req: Request, status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors(req), "Content-Type": "application/json" } });
 
-const DEFAULTS = { storage_mb: 1000, claude_usd_month: 2 };
+const DEFAULTS = { storage_mb: null as number | null, claude_usd_month: 2 };
+const CAP_MB = Number(Deno.env.get("R2_TOTAL_MB")) || 9000;
 const MAX_FILE = 15 * 1048576;
 const ID = /^a-[A-Za-z0-9_-]{1,64}$/;
 
@@ -58,6 +62,11 @@ Deno.serve(async (req) => {
 
   const { data: lim } = await admin.from("limits").select("storage_mb, claude_usd_month").eq("user_id", user.id).maybeSingle();
   const storageMb: number | null = lim ? lim.storage_mb : DEFAULTS.storage_mb;
+  const totalBytes = async () => {
+    const { data, error } = await admin.rpc("files_total");
+    if (error) throw error;
+    return Number(data) || 0;
+  };
   const usedBytes = async () => {
     let total = 0;
     for (let from = 0; ; from += 1000) {
@@ -78,6 +87,8 @@ Deno.serve(async (req) => {
           r2: !!r2,
           used_mb: Math.round((await usedBytes()) / 104857.6) / 10,
           limit_mb: storageMb,
+          total_mb: Math.round((await totalBytes()) / 104857.6) / 10,
+          cap_mb: CAP_MB,
           claude_usd: u ? Number(u.claude_usd) : 0,
           claude_limit: lim ? lim.claude_usd_month : DEFAULTS.claude_usd_month,
         });
@@ -87,6 +98,8 @@ Deno.serve(async (req) => {
         const id = String(body.id || ""), size = Number(body.size) || 0;
         if (!ID.test(id)) return json(req, 400, { error: "bad_id" });
         if (size <= 0 || size > MAX_FILE) return json(req, 413, { error: "file_too_big" });
+        const total = await totalBytes();
+        if (total + size > CAP_MB * 1048576) return json(req, 413, { error: "cloud_full", total_mb: Math.round(total / 1048576), cap_mb: CAP_MB });
         if (storageMb !== null) {
           const used = await usedBytes();
           if (used + size > storageMb * 1048576) return json(req, 413, { error: "storage_full", used_mb: Math.round(used / 1048576), limit_mb: storageMb });
@@ -145,7 +158,10 @@ Deno.serve(async (req) => {
           if (!data || data.length < 1000) break;
         }
         let copied = 0;
+        let total = await totalBytes();
         for (const f of todo.slice(0, n)) {
+          if (total + f.size > CAP_MB * 1048576) return json(req, 200, { copied, left: todo.length - copied, full: true });
+          total += f.size;
           const { data: blob, error } = await admin.storage.from("assets").download(user.id + "/" + f.name);
           if (error || !blob) continue;
           const r = await r2.fetch(objUrl(f.name), { method: "PUT", body: blob, headers: { "Content-Type": blob.type || "image/jpeg" } });

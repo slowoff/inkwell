@@ -2,7 +2,8 @@
 -- Applied to project "inkwell" (pubaedzrgrkjifmiqiew) as migration inkwell_limits_and_files.
 
 -- Limits per account. A missing row means the defaults for new accounts:
--- 1000 MB of pictures, 50 MB of notes, USD 2 of Claude per month (Claude also needs the email on ASK_ALLOWED_EMAILS).
+-- no picture limit of their own (only the shared cloud total in the files function), 50 MB of notes,
+-- USD 2 of Claude per month (Claude also needs the email on ASK_ALLOWED_EMAILS).
 -- null in a column = unlimited.
 create table if not exists public.limits (
   user_id          uuid primary key references auth.users(id) on delete cascade,
@@ -43,6 +44,11 @@ insert into public.limits (user_id, storage_mb, notes_mb, claude_usd_month)
   values ('a5a330b1-0600-4e63-96b5-7441939be21d', null, null, null)
   on conflict (user_id) do nothing;
 
+-- Everyone's pictures in R2 together (the files function keeps this under the free 10 GB)
+create or replace function public.files_total() returns bigint
+language sql security definer set search_path = public as $$ select coalesce(sum(bytes), 0)::bigint from public.files $$;
+revoke execute on function public.files_total() from public, anon, authenticated;
+
 create or replace function public.add_claude_usage(p_user uuid, p_usd numeric) returns void
 language sql security definer set search_path = public as $$
   insert into public.usage_month (user_id, month, claude_usd) values (p_user, to_char(now(), 'YYYY-MM'), p_usd)
@@ -70,8 +76,8 @@ drop trigger if exists docs_guard on public.docs;
 create trigger docs_guard before insert or update on public.docs
   for each row execute function public.docs_guard();
 
--- Supabase picture storage: everyone keeps reading and deleting their own pictures,
--- but only accounts without a picture limit (the owner) may still upload there; everyone else uploads to R2.
+-- Supabase picture storage (the old place, 1 GB free): everyone keeps reading and deleting their own pictures,
+-- but only the owner (limits row with storage_mb null) may still upload there; everyone else uploads to R2.
 drop policy if exists "own assets" on storage.objects;
 drop policy if exists "own assets read" on storage.objects;
 drop policy if exists "own assets delete" on storage.objects;

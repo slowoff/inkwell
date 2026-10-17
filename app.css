@@ -709,3 +709,18 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 
 /* ---------- 1.27: page history ---------- */
 .hist-item canvas{width:96px;height:64px;border-radius:6px;background:var(--paper);box-shadow:0 0 0 1px var(--line);flex:none}
+
+/* ---------- 1.27: cloud storage meter and Clean up ---------- */
+.cloud-row{align-items:center}
+.cloud-meter{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.cloud-label{font-size:14.5px}
+.cloud-bar{position:relative;height:10px;border-radius:5px;background:var(--well);overflow:hidden}
+.cloud-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;width:0}
+#cloudAll{background:var(--accent);opacity:.35}
+#cloudMine{background:var(--accent)}
+.cloud-bar.near #cloudAll,.cloud-bar.near #cloudMine{background:var(--tape)}
+.cloud-bar.full #cloudAll,.cloud-bar.full #cloudMine{background:var(--danger)}
+.cu-list .trash-item{cursor:pointer}
+.cu-list input[type=checkbox]{width:22px;height:22px;flex:none;accent-color:var(--accent)}
+.cu-size{font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--muted);font-size:13.5px}
+#cuSort{margin:4px 0 8px;max-width:320px}

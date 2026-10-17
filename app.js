@@ -355,13 +355,19 @@ const Sync = {
   async pushAssets(){
     let pend = (await IDB.get('meta', 'pendingAssets')) || [];
     const r2 = pend.length ? await Files.on() : false;
+    Files.localOnly = pend.length;
+    // cloud full: new pictures stay on this device (nothing is lost) and uploads are retried every 30 minutes
+    if(r2 && Files.full && Date.now() - Files.full.at < 1800000) return;
     while(pend.length){
       const id = pend[0];
       const a = await IDB.get('assets', id);
       if(a){
         if(r2){
           try { await Files.upload(id, a.blob); Files.full = null; }
-          catch(e){ if(e.code === 'storage_full') Files.full = e.j || {}; throw e; }
+          catch(e){
+            if(e.code === 'cloud_full' || e.code === 'storage_full'){ Files.full = Object.assign({at: Date.now(), code: e.code}, e.j || {}); Files.localOnly = pend.length; Files.notice(); renderSyncInfo(); return; }
+            throw e;
+          }
         } else {
           const {error} = await this.sb.storage.from('assets').upload(this.user.id + '/' + id, a.blob, {contentType: a.type || 'image/jpeg', upsert: true});
           if(error) throw error;
@@ -369,6 +375,7 @@ const Sync = {
       }
       pend = ((await IDB.get('meta', 'pendingAssets')) || []).filter(x => x !== id);
       await IDB.put('meta', pend, 'pendingAssets');
+      Files.localOnly = pend.length;
     }
   },
   async fetchAsset(id){
@@ -394,7 +401,20 @@ const Sync = {
    Old pictures in Supabase storage are copied over in the background (migrate) and still read from there until then.
    ===================================================================== */
 const Files = {
-  info: null, infoAt: 0, migrating: false, migLeft: null, full: null, pend: new Map(), timer: null,
+  info: null, infoAt: 0, migrating: false, migLeft: null, full: null, localOnly: 0, pend: new Map(), timer: null,
+  // share of the cloud in use (everyone together), 0..1, or null when unknown
+  share(){ const i = this.info; return i && i.r2 && i.cap_mb ? Math.min(1, (i.total_mb || 0) / i.cap_mb) : null; },
+  // a friendly heads-up at most once a day: nearly full, or full (new pictures stay on the device)
+  notice(){
+    const sh = this.share(), full = !!(this.full && this.full.code === 'cloud_full') || (sh !== null && sh >= 0.995);
+    const kind = full ? 'full' : sh !== null && sh >= 0.8 ? 'near' : '';
+    if(!kind) return;
+    const day = new Date().toDateString(), key = 'inkwell.cloudNote';
+    if(LSget(key, '') === kind + day) return;
+    LSset(key, kind + day);
+    if(kind === 'full') toast('Cloud storage is full. New pictures are kept on this device only for now, so they won\'t show up on your other devices. Free up room in Settings → Clean up.', 'Clean up', () => openCleanup());
+    else toast(`Cloud storage is ${Math.round(sh * 100)}% full. When it is full, new pictures stay on this device only. You can delete old things in Settings → Clean up.`, 'Clean up', () => openCleanup());
+  },
   async call(action, body){
     const {data} = await Sync.sb.auth.getSession(); const s = data && data.session;
     if(!s) throw Object.assign(new Error('Sign in first'), {code: 'not_signed_in'});
@@ -417,7 +437,7 @@ const Files = {
       try { this.info = await this.call('info'); }
       catch(e){ if(e.status === 404) this.info = {r2: false}; else if(!this.info) return false; }
       this.infoAt = Date.now();
-      if(this.info && this.info.r2) this.migrateSoon();
+      if(this.info && this.info.r2){ this.migrateSoon(); this.notice(); }
     }
     return !!(this.info && this.info.r2);
   },
@@ -461,6 +481,7 @@ const Files = {
         if(!navigator.onLine || document.visibilityState !== 'visible' || !Sync.user) break;
         const r = await this.call('migrate', {n: 6});
         this.migLeft = r.left; renderSyncInfo();
+        if(r.full) break;
         if(!r.left){ await IDB.put('meta', 1, key); break; }
         await new Promise(res => setTimeout(res, 300));
       }
@@ -4302,13 +4323,88 @@ async function renderSettings(){
   if(Sync.user){
     $('whoami').textContent = Sync.user.email || 'your account';
     renderSyncInfo();
-    Files.on(true).then(renderSyncInfo).catch(() => {});
+    Files.on(true).then(() => { renderSyncInfo(); renderCloud(); }).catch(() => {});
   }
   try {
     const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
     $('storageInfo').textContent = est && est.usage != null ? `Using ${(est.usage / 1048576).toFixed(1)} MB on this device` : '';
   } catch {}
 }
+/* ---------- Cloud storage meter and Clean up (1.27) ----------
+   One shared cloud total (R2, kept under the free 10 GB by the files function). The bar shows everyone's use
+   (light) and yours (dark); orange from 80 %, red when full. Clean up lists pages by the size of their pictures. */
+const fmtMB = mb => mb >= 1000 ? (mb / 1024).toFixed(1) + ' GB' : mb > 0 && mb < 1 ? 'under 1 MB' : Math.round(mb) + ' MB';
+function renderCloud(){
+  const i = Files.info, row = $('cloudRow');
+  if(!i || !i.r2 || !i.cap_mb){ row.hidden = true; return; }
+  row.hidden = false;
+  const sh = Files.share(), mine = Math.min(1, (i.used_mb || 0) / i.cap_mb), full = sh >= 0.995 || !!(Files.full && Files.full.code === 'cloud_full');
+  $('cloudAll').style.width = (sh * 100).toFixed(1) + '%';
+  $('cloudMine').style.width = (mine * 100).toFixed(1) + '%';
+  const bar = $('cloudBar');
+  bar.classList.toggle('near', !full && sh >= 0.8); bar.classList.toggle('full', full);
+  bar.setAttribute('aria-valuenow', Math.round(sh * 100));
+  $('cloudInfo').textContent = `You ${fmtMB(i.used_mb || 0)} · everyone ${fmtMB(i.total_mb || 0)} of ${fmtMB(i.cap_mb)}` +
+    (full ? ' · full: new pictures stay on this device' : sh >= 0.8 ? ' · nearly full' : '');
+}
+let cuSort = 'big', cuRows = [];
+$('cleanupBtn').addEventListener('click', () => openCleanup());
+async function openCleanup(){
+  hideModal('settingsDlg');
+  $('cuList').innerHTML = '<p class="hint">Counting…</p>'; $('cuInfo').textContent = '';
+  showModal('cleanupDlg');
+  try {
+    await flushSaves();
+    const sizes = new Map();
+    for(const a of await IDB.all('assets')) if(a && a.id && a.blob) sizes.set(a.id, a.blob.size);
+    if(await Files.on()){ const {files} = await Files.call('list'); for(const f of files || []) sizes.set(f.id, +f.bytes || sizes.get(f.id) || 0); }
+    const rows = [];
+    for(const d of await IDB.all('docs')){
+      if(d.kind !== 'content' || d.deleted || !d.data) continue;
+      const page = getDoc(d.id.slice(2)); if(!page) continue;
+      const ids = new Set();
+      for(const it of d.data.items || []) if(it && typeof it.a === 'string') ids.add(it.a);
+      let bytes = 0; for(const id of ids) bytes += sizes.get(id) || 0;
+      if(!bytes) continue;
+      rows.push({id: page.id, title: page.data.title || 'Untitled page', path: pathOf(page), bytes, n: ids.size, at: d.updated || 0});
+    }
+    cuRows = rows;
+    const i = Files.info;
+    $('cuInfo').textContent = (i && i.r2 ? `Cloud: everyone ${fmtMB(i.total_mb || 0)} of ${fmtMB(i.cap_mb)}. ` : '') +
+      'Pages with pictures, imported PDFs and scans. Deleted pages go to Recently deleted first. The space comes back after you empty Recently deleted and tap Free up space in the settings. Nothing is deleted unless you choose it.';
+    renderCleanup();
+  } catch(e){ $('cuList').innerHTML = `<p class="hint">Could not count: ${esc(e.message || String(e))}</p>`; }
+}
+function renderCleanup(){
+  for(const b of $('cuSort').querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === cuSort);
+  const rows = cuRows.slice().sort(cuSort === 'big' ? (a, b) => b.bytes - a.bytes : (a, b) => a.at - b.at);
+  $('cuList').innerHTML = rows.length ? rows.map(r => `<label class="trash-item"><input type="checkbox" data-pid="${esc(r.id)}"><div class="ti-text"><div class="ti-name">${esc(r.title)}</div><div class="hint">${esc(r.path)} · ${r.n} picture${r.n === 1 ? '' : 's'} · last changed ${esc(fmtDate(r.at) || 'long ago')}</div></div><span class="cu-size">${fmtMB(r.bytes / 1048576)}</span></label>`).join('')
+    : '<p class="hint">No pages with pictures.</p>';
+  cuChanged();
+}
+function cuChanged(){
+  const sel = [...$('cuList').querySelectorAll('input:checked')].map(x => x.dataset.pid);
+  const mb = cuRows.filter(r => sel.includes(r.id)).reduce((a, r) => a + r.bytes, 0) / 1048576;
+  $('cuSel').textContent = sel.length ? `${sel.length} page${sel.length === 1 ? '' : 's'}, about ${fmtMB(mb)}` : '';
+  $('cuDelete').disabled = !sel.length;
+}
+$('cuSort').addEventListener('click', e => { const b = e.target.closest('button'); if(!b) return; cuSort = b.dataset.v; renderCleanup(); });
+$('cuList').addEventListener('change', cuChanged);
+$('cuDelete').addEventListener('click', async () => {
+  const btn = $('cuDelete');
+  if(!btn.classList.contains('armed')){ btn.classList.add('armed'); btn.textContent = 'Tap again to delete'; setTimeout(() => { btn.classList.remove('armed'); btn.textContent = 'Delete selected'; }, 4000); return; }
+  btn.classList.remove('armed'); btn.textContent = 'Delete selected';
+  const ids = [...$('cuList').querySelectorAll('input:checked')].map(x => x.dataset.pid);
+  for(const id of ids){
+    if(cur && cur.id === id){ await closeCurrent(); showEmpty(); }
+    await removeDoc(id, 'page'); await removeDoc('c_' + id, 'content', id);
+    localStorage.removeItem('inkwell.cam.' + id);
+  }
+  renderNav(); renderList(); updTrashInfo();
+  cuRows = cuRows.filter(r => !ids.includes(r.id)); renderCleanup();
+  toast(`Moved ${ids.length} page${ids.length === 1 ? '' : 's'} to Recently deleted. To get the space back: empty Recently deleted, then Free up space.`, 'Open', async () => { hideModal('cleanupDlg'); await purgeTrash(); await renderTrash(); showModal('trashDlg'); });
+});
+
 /* ---------- Free up space: images nothing uses any more ----------
    Used = referenced (key "a") by any page, template or chat, including Recently deleted, the open page and the
    current Claude chat, or still waiting to upload. Online copies younger than a day are kept, so an import that
@@ -4414,10 +4510,8 @@ function renderSyncInfo(){
   const el = $('syncInfo'); if(!el || !Sync.user) return;
   let t = (Sync.state === 'warn' ? Sync.msg : Sync.lastOk ? 'Last synced ' + hhmm(Sync.lastOk) : 'Not synced yet') + (Sync.liveOk ? ' · instant sync on' : ' · checks every 20 s');
   const i = Files.info;
-  if(i && i.r2){
-    t += ` · Pictures ${Math.round(i.used_mb || 0)} MB` + (i.limit_mb == null ? '' : ` of ${i.limit_mb} MB`);
-    if(Files.migLeft) t += ` (moving ${Files.migLeft} older pictures to the new storage)`;
-  }
+  if(i && i.r2 && Files.migLeft) t += ` · moving ${Files.migLeft} older pictures to the new storage`;
+  if(Files.full && Files.localOnly) t += ` · cloud full: ${Files.localOnly} new picture${Files.localOnly === 1 ? ' is' : 's are'} on this device only`;
   if(i && i.claude_usd != null && (i.claude_usd > 0 || i.claude_limit != null)) t += ` · Claude this month USD ${(+i.claude_usd).toFixed(2)}` + (i.claude_limit == null ? '' : ` of ${(+i.claude_limit).toFixed(2)}`);
   el.textContent = t;
 }
@@ -7460,6 +7554,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion};
+window.__inkwell = {ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

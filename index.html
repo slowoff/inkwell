@@ -329,6 +329,10 @@
     <p class="set-h">Your notes</p>
     <div class="set-row"><span id="trashInfo">Recently deleted</span><button class="btn ghost" id="trashBtn">Open</button></div>
     <div class="dlg-actions"><span class="hint" id="storageInfo"></span><button class="btn ghost" id="backupBtn">Download backup</button></div>
+    <div class="set-row cloud-row" id="cloudRow" hidden>
+      <div class="cloud-meter"><span class="cloud-label">Cloud storage</span><div class="cloud-bar" id="cloudBar" role="meter" aria-label="Cloud storage used"><i id="cloudAll"></i><i id="cloudMine"></i></div><span class="hint" id="cloudInfo"></span></div>
+      <button class="btn ghost" id="cleanupBtn">Clean up</button>
+    </div>
     <div class="set-row clean-row"><span class="hint" id="cleanInfo">Images nothing uses any more</span><button class="btn ghost" id="cleanBtn">Free up space</button></div>
     <div class="set-row clean-row"><span class="hint">Bring over your OneNote notebooks</span><button class="btn ghost" id="onBtn">Import from OneNote</button></div>
     <hr>
@@ -457,6 +461,16 @@
     <div class="dlg-head"><h3>Page history</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint">Inkwell keeps the page as it was before each time you work on it, and before changes from another device are merged in. Restoring can be undone.</p>
     <div class="trash-list" id="histList"></div>
+  </div>
+</div>
+
+<div class="modal" id="cleanupDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Clean up</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="hint" id="cuInfo"></p>
+    <div class="seg" id="cuSort"><button data-v="big">Biggest first</button><button data-v="old">Oldest first</button></div>
+    <div class="trash-list cu-list" id="cuList"></div>
+    <div class="dlg-actions"><span class="hint" id="cuSel"></span><button class="btn danger" id="cuDelete" disabled>Delete selected</button></div>
   </div>
 </div>
 

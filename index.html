@@ -398,13 +398,28 @@
 <div class="modal" id="onenoteDlg" hidden>
   <div class="dlg">
     <div class="dlg-head"><h3>Import from OneNote</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <ol class="on-track" id="onTrack"><li data-s="setup">Set up</li><li data-s="signin">Sign in</li><li data-s="pick">Import</li></ol>
     <div class="on-step" id="onSetup" hidden>
-      <p class="hint">Inkwell needs a Microsoft app ID once (an app registration in the Microsoft Entra admin center). Its redirect address must be <code id="onRedir"></code>, added as a Single-page application.</p>
-      <label class="field"><span>Application (client) ID</span><input type="text" id="onCid" class="text-in" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
-      <div class="dlg-actions"><span></span><button class="btn primary" id="onCidSave">Save</button></div>
+      <p class="hint">Once only, about 5 minutes. Microsoft only lets apps it knows read OneNote, so you register Inkwell with Microsoft and copy back one ID. Easiest on a computer: open Inkwell there, do the whole import there, and it syncs to the iPad.</p>
+      <ol class="on-guide">
+        <li><b>Open Microsoft Entra</b> and sign in with the Microsoft account that has your OneNote.
+          <div class="on-do"><a class="btn ghost" href="https://entra.microsoft.com/" target="_blank" rel="noopener">Open Microsoft Entra</a></div>
+          <span class="hint">If it says you have no access or no directory: first make a free Azure account (it asks for a card to check it is you; registering Inkwell costs nothing), then open Entra again.</span>
+          <div class="on-do"><a class="btn ghost" href="https://azure.microsoft.com/free/" target="_blank" rel="noopener">Free Azure account</a></div></li>
+        <li><b>New registration.</b> Type <i>App registrations</i> in the search bar at the top, open it, tap <i>New registration</i>.</li>
+        <li><b>Fill in the form.</b>
+          <span class="on-row">Name: <code>Inkwell</code> <button class="btn ghost on-copy" data-copy="Inkwell">Copy</button></span>
+          <span class="on-row">Supported account types: <i>Accounts in any organizational directory and personal Microsoft accounts</i></span>
+          <span class="on-row">Redirect URI: choose <i>Single-page application (SPA)</i>, then paste <code id="onRedir"></code> <button class="btn ghost on-copy" id="onRedirCopy">Copy</button></span>
+          Tap <i>Register</i>.</li>
+        <li><b>Copy the ID.</b> On the page that opens, copy <i>Application (client) ID</i> and paste it here.
+          <div class="on-paste"><input type="text" id="onCid" class="text-in" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn ghost" id="onCidPaste">Paste</button></div></li>
+      </ol>
+      <p class="hint">No redirect field in the form? Add it after registering: <i>Authentication</i> → <i>Add a platform</i> → <i>Single-page application</i>.</p>
+      <div class="dlg-actions"><span></span><button class="btn primary" id="onCidSave">Next</button></div>
     </div>
     <div class="on-step" id="onSignin" hidden>
-      <p class="hint">Sign in with the Microsoft account that has your OneNote notebooks. Inkwell only reads them; nothing in OneNote changes.</p>
+      <p class="hint">Set up is done. Now sign in with the Microsoft account that has your OneNote notebooks and allow Inkwell to read them. Inkwell only reads; nothing in OneNote changes. After signing in you come back here and pick what to bring over.</p>
       <div class="dlg-actions"><button class="btn ghost" id="onCidChange">Change app ID</button><button class="btn primary" id="onGo">Sign in with Microsoft</button></div>
     </div>
     <div class="on-step" id="onPick" hidden>

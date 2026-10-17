@@ -6780,8 +6780,30 @@ function onShow(view, msg){
   $('onMsg').textContent = msg || '';
   $('onMsg').classList.toggle('err', /^!/.test(msg || ''));
   if(msg && msg[0] === '!') $('onMsg').textContent = msg.slice(1);
-  if(view === 'setup'){ $('onRedir').textContent = ON.redirect(); $('onCid').value = ON.cid(); }
+  if(view === 'setup'){ $('onRedir').textContent = ON.redirect(); $('onRedirCopy').dataset.copy = ON.redirect(); $('onCid').value = ON.cid(); }
+  const stage = view === 'setup' ? 0 : view === 'signin' ? 1 : 2;
+  [...$('onTrack').children].forEach((li, i) => { li.classList.toggle('on', i === stage && view !== 'done'); li.classList.toggle('done', i < stage || view === 'done'); });
 }
+// pull a client ID out of whatever was pasted (Microsoft's copy button, or a line with a label around it)
+const onGuid = s => (/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.exec(s || '') || [''])[0].toLowerCase();
+async function onCopy(btn, text){
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
+  catch {
+    const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(t); t.select(); t.setSelectionRange(0, text.length);
+    try { ok = document.execCommand('copy'); } catch {}
+    t.remove();
+  }
+  const was = btn.textContent; btn.textContent = ok ? 'Copied' : 'Select and copy'; btn.classList.toggle('ok', ok);
+  setTimeout(() => { btn.textContent = was; btn.classList.remove('ok'); }, 1600);
+}
+$('onSetup').addEventListener('click', e => { const b = e.target.closest('[data-copy]'); if(b) onCopy(b, b.dataset.copy); });
+$('onCidPaste').addEventListener('click', async () => {
+  try { const g = onGuid(await navigator.clipboard.readText()); if(g){ $('onCid').value = g; $('onMsg').textContent = ''; } else onShow('setup', '!The clipboard has no app ID in it. Copy the Application (client) ID first.'); }
+  catch { $('onCid').focus(); toast('Tap and hold the box, then Paste'); }
+});
+$('onCid').addEventListener('input', () => { const g = onGuid($('onCid').value); if(g && g !== $('onCid').value) $('onCid').value = g; });
 async function onOpen(){
   hideModal('settingsDlg'); showModal('onenoteDlg');
   if(ON.busy){ onShow('run'); return; }
@@ -6814,8 +6836,8 @@ function onFail(e){
 }
 $('onBtn').addEventListener('click', onOpen);
 $('onCidSave').addEventListener('click', () => {
-  const v = $('onCid').value.trim();
-  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)){ onShow('setup', '!That does not look like an app ID. It has the form 00000000-0000-0000-0000-000000000000.'); return; }
+  const v = onGuid($('onCid').value);
+  if(!v){ onShow('setup', '!That does not look like the app ID. It looks like 1a2b3c4d-1234-5678-9abc-1234567890ab and is shown as "Application (client) ID" (not the Object ID or Directory ID).'); return; }
   LSset('inkwell.onenote.cid', v); ON.forget();
   onShow('signin');
 });

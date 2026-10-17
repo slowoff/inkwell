@@ -662,4 +662,21 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .on-step[hidden]{display:none}
 #onMsg:empty{display:none}
 #onMsg.err{color:var(--danger,#C2362B)}
-#onRedir{word-break:break-all}
+#onRedir{display:inline-block;max-width:100%;overflow-wrap:anywhere}
+.on-track{display:flex;gap:6px;list-style:none;margin:0;padding:0;counter-reset:ont}
+.on-track li{flex:1;counter-increment:ont;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--faint);padding-top:6px;border-top:3px solid var(--line)}
+.on-track li::before{content:counter(ont);width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-size:11.5px;font-weight:700;background:var(--well);color:var(--muted);flex:none}
+.on-track li.on{color:var(--fg);font-weight:600;border-color:var(--accent)}
+.on-track li.on::before{background:var(--accent);color:var(--accent-fg)}
+.on-track li.done{color:var(--muted);border-color:var(--accent)}
+.on-track li.done::before{content:"\2713";background:var(--accent-soft);color:var(--accent)}
+.on-guide{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:12px;font-size:14.5px;line-height:1.5}
+.on-guide li{padding-left:2px}
+.on-guide .hint,.on-row{display:block;margin-top:4px}
+.on-row code{overflow-wrap:anywhere}
+.on-do{margin-top:6px}
+.on-do .btn{text-decoration:none;color:var(--fg)}
+.on-copy{height:28px;padding:0 10px;font-size:13px;margin-left:4px;vertical-align:middle}
+.on-copy.ok{color:var(--ok)}
+.on-paste{display:flex;gap:8px;margin-top:6px}
+.on-paste .text-in{flex:1;min-width:0}

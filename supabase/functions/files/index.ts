@@ -21,6 +21,12 @@
 //   gdone {id, gid, size}       -> records a picture the app put in Drive
 //   gmove {n}                   -> moves up to n of the person's pictures from the shared cloud to their Drive -> {moved, left}
 //   put answers {drive: true} when new pictures go to Drive; get answers {g: driveFileId} for pictures in Drive
+// Since 1.34 sign-in is Google only and every picture goes to the person's own Drive (Rafael's choice, 2026-10-18):
+//   glogin {code, verifier, redirect} (no Inkwell session needed) -> Google sign-in that also connects Drive:
+//     finds or makes the Inkwell account for the verified Google email, saves Drive access -> {token_hash, email}
+//     the app turns token_hash into a session with auth.verifyOtp({type: 'magiclink'})
+//   put without working Drive access -> 409 need_drive (the picture waits on the device). The shared R2 storage only
+//   serves old pictures until they are moved to the person's Drive (gmove); nothing new goes there.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import { AwsClient } from "npm:aws4fetch@1.0.20";
 
@@ -55,12 +61,89 @@ async function driveUpload(at: string, folder: string, name: string, blob: Blob)
   return j.id;
 }
 
+// Google code -> tokens; checks Drive was allowed; makes (or finds) the folder; returns what to save in gdrive
+async function googleConnect(GID: string, GSECRET: string, body: any, old: any) {
+  const r = await fetch(GTOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ client_id: GID, client_secret: GSECRET, code: String(body.code || ""), code_verifier: String(body.verifier || ""), redirect_uri: String(body.redirect || ""), grant_type: "authorization_code" }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) return { status: 400, err: { error: "g_signin", message: j.error_description || j.error || "Google sign-in failed" } };
+  const refresh = j.refresh_token || (old && old.refresh_token);
+  if (!refresh) return { status: 400, err: { error: "g_signin", message: "Google did not give Inkwell lasting access. Try again." } };
+  if (j.scope && !String(j.scope).includes("auth/drive.file"))
+    return { status: 400, err: { error: "g_scope", message: "Inkwell needs your Google Drive to save your notes and pictures. Sign in again and leave the Google Drive box ticked." } };
+  let email = "", verified = false;
+  try { const u = await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: "Bearer " + j.access_token } })).json(); email = String(u.email || "").toLowerCase(); verified = u.email_verified === true || u.email_verified === "true"; } catch { /* checked by the caller */ }
+  let folder = old && old.folder_id;
+  if (folder) {   // still there and not in the bin?
+    const fr = await fetch(`${GDRIVE}/${folder}?fields=id,trashed`, { headers: { Authorization: "Bearer " + j.access_token } });
+    const fj = await fr.json().catch(() => ({}));
+    if (!fr.ok || fj.trashed) folder = null;
+  }
+  if (!folder) {
+    const fr = await fetch(GDRIVE + "?fields=id", { method: "POST", headers: { Authorization: "Bearer " + j.access_token, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Inkwell pictures", mimeType: "application/vnd.google-apps.folder", description: "Your Inkwell notes and pictures. Deleting pictures here removes them from your notes." }) });
+    const fj = await fr.json().catch(() => ({}));
+    if (!fr.ok || !fj.id) {
+      const why = (fj.error && (fj.error.errors?.[0]?.reason || fj.error.status)) || String(fr.status);
+      const msg = (fj.error && fj.error.message) || "";
+      console.log("gdrive folder", fr.status, why, msg);
+      if (/accessNotConfigured|SERVICE_DISABLED/i.test(why + msg))
+        return { status: 502, err: { error: "g_error", message: "Google Drive is still being switched on for Inkwell. Try again in a few minutes." } };
+      if (/insufficient|scope|PERMISSION_DENIED/i.test(why + msg) || fr.status === 403)
+        return { status: 400, err: { error: "g_scope", message: "Inkwell needs your Google Drive to save your notes and pictures. Sign in again and leave the Google Drive box ticked. (" + why + ")" } };
+      return { status: 502, err: { error: "g_error", message: "Could not make the folder in Google Drive (" + why + ")" } };
+    }
+    folder = fj.id;
+  }
+  return { refresh, email, verified, folder };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   if (req.method !== "POST") return json(req, 405, { error: "method" });
 
   const URL_ = Deno.env.get("SUPABASE_URL")!;
   const auth = req.headers.get("Authorization") || "";
+  const GID = Deno.env.get("GOOGLE_CLIENT_ID") || "", GSECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
+
+  // Google sign-in (1.34): works without an Inkwell session
+  let body: any = {};
+  try { body = await req.json(); } catch { return json(req, 400, { error: "bad_json" }); }
+  if (body.action === "glogin") {
+    try {
+      if (!GID || !GSECRET) return json(req, 503, { error: "g_not_set_up", message: "Google sign-in is not set up on the server yet." });
+      const admin0 = createClient(URL_, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+      const g = await googleConnect(GID, GSECRET, body, null);
+      if ("err" in g) return json(req, g.status as number, g.err);
+      if (!g.email || !g.verified) return json(req, 400, { error: "g_email", message: "Google did not confirm an email address for this account." });
+      // the Inkwell account for this email: an existing one keeps all its notes; otherwise a new one
+      const made = await admin0.auth.admin.createUser({ email: g.email, email_confirm: true });
+      if (made.error && !/already|registered|exists/i.test(made.error.message)) throw made.error;
+      const link = await admin0.auth.admin.generateLink({ type: "magiclink", email: g.email });
+      if (link.error || !link.data?.properties?.hashed_token || !link.data.user) throw link.error || new Error("no sign-in link");
+      const uid = link.data.user.id;
+      const { data: old } = await admin0.from("gdrive").select("refresh_token, folder_id").eq("user_id", uid).maybeSingle();
+      let folder = g.folder;
+      if (old && old.folder_id && old.folder_id !== folder) {   // keep using the folder the account already has, if it is still there
+        const t = await fetch(GTOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: GID, client_secret: GSECRET, refresh_token: g.refresh, grant_type: "refresh_token" }) }).then((r) => r.json()).catch(() => ({}));
+        if (t.access_token) {
+          const fr = await fetch(`${GDRIVE}/${old.folder_id}?fields=id,trashed`, { headers: { Authorization: "Bearer " + t.access_token } });
+          const fj = await fr.json().catch(() => ({}));
+          if (fr.ok && !fj.trashed) {
+            await fetch(`${GDRIVE}/${folder}`, { method: "DELETE", headers: { Authorization: "Bearer " + t.access_token } });   // the empty folder just made
+            folder = old.folder_id;
+          }
+        }
+      }
+      const { error } = await admin0.from("gdrive").upsert({ user_id: uid, refresh_token: g.refresh, folder_id: folder, email: g.email, on_new: true, broken: false }, { onConflict: "user_id" });
+      if (error) throw error;
+      return json(req, 200, { token_hash: link.data.properties.hashed_token, email: g.email });
+    } catch (e) {
+      console.log("glogin", e);
+      return json(req, 500, { error: "server", message: String((e as Error)?.message || e).slice(0, 300) });
+    }
+  }
+
   const sb = createClient(URL_, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return json(req, 401, { error: "not_signed_in" });
@@ -76,9 +159,6 @@ Deno.serve(async (req) => {
     const signed = await r2!.sign(new Request(u, { method }), { aws: { signQuery: true } });
     return signed.url;
   };
-
-  let body: any = {};
-  try { body = await req.json(); } catch { return json(req, 400, { error: "bad_json" }); }
 
   const { data: lim } = await admin.from("limits").select("storage_mb, claude_usd_month").eq("user_id", user.id).maybeSingle();
   const storageMb: number | null = lim ? lim.storage_mb : DEFAULTS.storage_mb;
@@ -98,7 +178,6 @@ Deno.serve(async (req) => {
     return total;
   };
 
-  const GID = Deno.env.get("GOOGLE_CLIENT_ID") || "", GSECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") || "";
   const { data: gd } = await admin.from("gdrive").select("refresh_token, folder_id, email, on_new, broken").eq("user_id", user.id).maybeSingle();
   // a fresh Google access token from the saved refresh token (Google keeps it valid while it is used at least every 6 months)
   const gAccess = async (): Promise<{ at: string; exp: number }> => {
@@ -127,41 +206,11 @@ Deno.serve(async (req) => {
     switch (body.action) {
       case "gconnect": {
         if (!GID || !GSECRET) return json(req, 503, { error: "g_not_set_up" });
-        const r = await fetch(GTOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ client_id: GID, client_secret: GSECRET, code: String(body.code || ""), code_verifier: String(body.verifier || ""), redirect_uri: String(body.redirect || ""), grant_type: "authorization_code" }) });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || !j.access_token) return json(req, 400, { error: "g_signin", message: j.error_description || j.error || "Google sign-in failed" });
-        const refresh = j.refresh_token || (gd && gd.refresh_token);
-        if (!refresh) return json(req, 400, { error: "g_signin", message: "Google did not give Inkwell lasting access. Try again." });
-        if (j.scope && !String(j.scope).includes("auth/drive.file"))
-          return json(req, 400, { error: "g_scope", message: "Inkwell was not allowed to use Google Drive. Tap Connect again and leave the Google Drive box ticked." });
-        let email = "";
-        try { const u = await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: "Bearer " + j.access_token } })).json(); email = u.email || ""; } catch { /* optional */ }
-        let folder = gd && gd.folder_id;
-        if (folder) {   // still there and not in the bin?
-          const fr = await fetch(`${GDRIVE}/${folder}?fields=id,trashed`, { headers: { Authorization: "Bearer " + j.access_token } });
-          const fj = await fr.json().catch(() => ({}));
-          if (!fr.ok || fj.trashed) folder = null;
-        }
-        if (!folder) {
-          const fr = await fetch(GDRIVE + "?fields=id", { method: "POST", headers: { Authorization: "Bearer " + j.access_token, "Content-Type": "application/json" },
-            body: JSON.stringify({ name: "Inkwell pictures", mimeType: "application/vnd.google-apps.folder", description: "Pictures, scans and imported pages from Inkwell. Deleting them here removes them from your notes." }) });
-          const fj = await fr.json().catch(() => ({}));
-          if (!fr.ok || !fj.id) {
-            const why = (fj.error && (fj.error.errors?.[0]?.reason || fj.error.status)) || String(fr.status);
-            const msg = (fj.error && fj.error.message) || "";
-            console.log("gdrive folder", fr.status, why, msg);
-            if (/accessNotConfigured|SERVICE_DISABLED/i.test(why + msg))
-              return json(req, 502, { error: "g_error", message: "Google Drive is still being switched on for Inkwell. Try again in a few minutes." });
-            if (/insufficient|scope|PERMISSION_DENIED/i.test(why + msg) || fr.status === 403)
-              return json(req, 400, { error: "g_scope", message: "Inkwell was not allowed to use Google Drive. Tap Connect again and leave the Google Drive box ticked. (" + why + ")" });
-            return json(req, 502, { error: "g_error", message: "Could not make the folder in Google Drive (" + why + ")" });
-          }
-          folder = fj.id;
-        }
-        const { error } = await admin.from("gdrive").upsert({ user_id: user.id, refresh_token: refresh, folder_id: folder, email, on_new: true, broken: false }, { onConflict: "user_id" });
+        const g = await googleConnect(GID, GSECRET, body, gd);
+        if ("err" in g) return json(req, g.status as number, g.err);
+        const { error } = await admin.from("gdrive").upsert({ user_id: user.id, refresh_token: g.refresh, folder_id: g.folder, email: g.email, on_new: true, broken: false }, { onConflict: "user_id" });
         if (error) throw error;
-        return json(req, 200, { email });
+        return json(req, 200, { email: g.email });
       }
       case "gtoken": {
         const t = await gAccess();
@@ -201,7 +250,8 @@ Deno.serve(async (req) => {
         const month = new Date().toISOString().slice(0, 7);
         const { data: u } = await admin.from("usage_month").select("claude_usd").eq("user_id", user.id).eq("month", month).maybeSingle();
         return json(req, 200, {
-          r2: !!r2,
+          r2: true,   // pictures go through this function (Drive; R2 only for old ones still to move)
+          r2_left: !!r2,
           used_mb: Math.round((await usedBytes()) / 104857.6) / 10,
           limit_mb: storageMb,
           total_mb: Math.round((await totalBytes()) / 104857.6) / 10,
@@ -212,21 +262,12 @@ Deno.serve(async (req) => {
           gdrive: gd ? { email: gd.email, on: gd.on_new, broken: gd.broken, mb: Math.round((await driveBytes()) / 104857.6) / 10 } : null,
         });
       }
-      case "put": {
-        if (!r2) return json(req, 503, { error: "no_r2" });
+      case "put": {   // since 1.34 new pictures only go to the person's own Google Drive
         const id = String(body.id || ""), size = Number(body.size) || 0;
         if (!ID.test(id)) return json(req, 400, { error: "bad_id" });
         if (size <= 0 || size > MAX_FILE) return json(req, 413, { error: "file_too_big" });
-        if (gd && gd.on_new && !gd.broken && GID && GSECRET) return json(req, 200, { drive: true });
-        const total = await totalBytes();
-        if (total + size > CAP_MB * 1048576) return json(req, 413, { error: "cloud_full", total_mb: Math.round(total / 1048576), cap_mb: CAP_MB });
-        if (storageMb !== null) {
-          const used = await usedBytes();
-          if (used + size > storageMb * 1048576) return json(req, 413, { error: "storage_full", used_mb: Math.round(used / 1048576), limit_mb: storageMb });
-        }
-        const { error } = await admin.from("files").upsert({ user_id: user.id, id, bytes: size, place: "r2", gid: null }, { onConflict: "user_id,id" });
-        if (error) throw error;
-        return json(req, 200, { url: await presign(id, "PUT") });
+        if (gd && !gd.broken && GID && GSECRET) return json(req, 200, { drive: true });
+        return json(req, 409, { error: "need_drive", message: "Sign in with Google so Inkwell can save pictures in your Google Drive." });
       }
       case "get": {
         const ids: string[] = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x: string) => ID.test(x)).slice(0, 100);
@@ -274,36 +315,8 @@ Deno.serve(async (req) => {
         }
         return json(req, 200, { files });
       }
-      case "migrate": {
-        if (!r2) return json(req, 503, { error: "no_r2" });
-        const n = Math.max(1, Math.min(12, Number(body.n) || 6));
-        const have = new Set<string>();
-        for (let from = 0; ; from += 1000) {
-          const { data } = await admin.from("files").select("id").eq("user_id", user.id).range(from, from + 999);
-          for (const r of data || []) have.add(r.id);
-          if (!data || data.length < 1000) break;
-        }
-        const todo: { name: string; size: number }[] = [];
-        for (let off = 0; off < 100000; off += 1000) {
-          const { data, error } = await admin.storage.from("assets").list(user.id, { limit: 1000, offset: off });
-          if (error) throw error;
-          for (const o of data || []) if (o && o.name && ID.test(o.name) && !have.has(o.name)) todo.push({ name: o.name, size: Number(o.metadata?.size) || 0 });
-          if (!data || data.length < 1000) break;
-        }
-        let copied = 0;
-        let total = await totalBytes();
-        for (const f of todo.slice(0, n)) {
-          if (total + f.size > CAP_MB * 1048576) return json(req, 200, { copied, left: todo.length - copied, full: true });
-          total += f.size;
-          const { data: blob, error } = await admin.storage.from("assets").download(user.id + "/" + f.name);
-          if (error || !blob) continue;
-          const r = await r2.fetch(objUrl(f.name), { method: "PUT", body: blob, headers: { "Content-Type": blob.type || "image/jpeg" } });
-          if (!r.ok) return json(req, 502, { error: "r2_put_" + r.status, message: (await r.text()).slice(0, 300) });
-          await admin.from("files").upsert({ user_id: user.id, id: f.name, bytes: blob.size }, { onConflict: "user_id,id" });
-          copied++;
-        }
-        return json(req, 200, { copied, left: Math.max(0, todo.length - copied) });
-      }
+      case "migrate":   // since 1.34 nothing new goes to the shared storage (it used to copy Supabase storage to R2)
+        return json(req, 200, { copied: 0, left: 0 });
       default:
         return json(req, 400, { error: "bad_action" });
     }

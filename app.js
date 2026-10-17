@@ -365,7 +365,7 @@ const Sync = {
         if(r2){
           try { await Files.upload(id, a.blob); Files.full = null; }
           catch(e){
-            if(e.code === 'cloud_full' || e.code === 'storage_full' || e.code === 'gdrive_full'){ Files.full = Object.assign({at: Date.now(), code: e.code}, e.j || {}); Files.localOnly = pend.length; Files.notice(); renderSyncInfo(); return; }
+            if(e.code === 'cloud_full' || e.code === 'storage_full' || e.code === 'gdrive_full' || e.code === 'need_drive'){ Files.full = Object.assign({at: Date.now(), code: e.code}, e.j || {}); Files.localOnly = pend.length; Files.notice(); renderSyncInfo(); return; }
             throw e;
           }
         } else {
@@ -408,6 +408,11 @@ const Files = {
   notice(){
     const g = this.info && this.info.gdrive;
     if(g && g.broken && LSget('inkwell.gdNote', '') !== new Date().toDateString()){ LSset('inkwell.gdNote', new Date().toDateString()); GD.lost(); return; }
+    if(this.info && this.info.google_client_id && !g && this.full && this.full.code === 'need_drive' && LSget('inkwell.gdNote', '') !== new Date().toDateString()){
+      LSset('inkwell.gdNote', new Date().toDateString());
+      toast('Connect your Google Drive so new pictures can be saved. Until then they wait on this device.', 'Settings', () => openSettings()); return;
+    }
+    if(this.info && this.info.google_client_id) return;   // 1.34: no shared storage any more
     const sh = this.share(), full = !!(this.full && this.full.code === 'cloud_full') || (sh !== null && sh >= 0.995);
     const kind = full ? 'full' : sh !== null && sh >= 0.8 ? 'near' : '';
     if(!kind) return;
@@ -439,7 +444,7 @@ const Files = {
       try { this.info = await this.call('info'); }
       catch(e){ if(e.status === 404) this.info = {r2: false}; else if(!this.info) return false; }
       this.infoAt = Date.now();
-      if(this.info && this.info.r2){ this.migrateSoon(); this.notice(); }
+      if(this.info && this.info.r2){ this.migrateSoon(); this.notice(); setTimeout(() => GD.autoMove(), 5000); }
     }
     return !!(this.info && this.info.r2);
   },
@@ -517,20 +522,23 @@ const GD = {
   redirect(){ return location.origin + location.pathname.replace(/index\.html$/, ''); },
   catchRedirect(){
     const q = new URLSearchParams(location.search), st = q.get('state') || '';
-    if(!st.startsWith('gd-')) return;
+    if(!st.startsWith('gd-') && !st.startsWith('gl-')) return;
     history.replaceState(null, '', location.pathname + location.hash);
     const saved = LSget('inkwell.gdrive.auth', null);
     LSset('inkwell.gdrive.auth', null);
     if(q.get('error')) this.ret = {error: q.get('error') === 'access_denied' ? 'Google sign-in was cancelled.' : 'Google sign-in failed (' + q.get('error') + ').'};
     else if(!saved || saved.s !== st || !q.get('code')) this.ret = {error: 'The Google sign-in did not finish. Try again.'};
     else this.ret = {code: q.get('code'), v: saved.v};
+    this.ret.login = st.startsWith('gl-');
   },
-  async connect(){
-    const cid = Files.info && Files.info.google_client_id;
-    if(!cid){ toast('Google Drive is not set up on the server yet.'); return; }
+  // Sign in with Google (1.34): one Google screen signs in to Inkwell and connects Drive
+  login(){ $('gLoginMsg').textContent = 'Opening Google…'; return this.connect(true); },
+  async connect(login){
+    const cid = CFG.GOOGLE_CLIENT_ID || (Files.info && Files.info.google_client_id);
+    if(!cid){ toast('Google sign-in is not set up yet.'); return; }
     const v = b64url(crypto.getRandomValues(new Uint8Array(48)));
     const ch = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)));
-    const s = 'gd-' + b64url(crypto.getRandomValues(new Uint8Array(16)));
+    const s = (login ? 'gl-' : 'gd-') + b64url(crypto.getRandomValues(new Uint8Array(16)));
     LSset('inkwell.gdrive.auth', {v, s, at: Date.now()});
     await flushSaves();
     const p = new URLSearchParams({client_id: cid, response_type: 'code', redirect_uri: this.redirect(), scope: 'https://www.googleapis.com/auth/drive.file openid email',
@@ -540,6 +548,7 @@ const GD = {
   // back from Google: hand the code to the server (it keeps the lasting access)
   async finish(){
     const r = this.ret; if(!r) return;
+    if(r.login) return this.finishLogin(r);
     for(let i = 0; i < 40 && !(Sync.sb && Sync.user); i++) await new Promise(res => setTimeout(res, 250));
     this.ret = null;
     if(r.error){ toast(r.error); return; }
@@ -547,7 +556,8 @@ const GD = {
       const j = await Files.call('gconnect', {code: r.code, verifier: r.v, redirect: this.redirect()});
       this.tok = null;
       await Files.on(true);
-      toast('Google Drive connected' + (j.email ? ' (' + j.email + ')' : '') + '. Your notes and new pictures now also go to your Drive.');
+      Files.full = null; Sync.soon();
+      toast('Google Drive connected' + (j.email ? ' (' + j.email + ')' : '') + '. Your notes and pictures are saved there.');
       this.saveNotes(true);
       openSettings();
     } catch(e){
@@ -556,6 +566,33 @@ const GD = {
       else if(/invalid_grant|expired|already (been )?(used|redeemed)/i.test(m)) toast('The Google sign-in took too long. Tap Connect again.', 'Settings', () => openSettings());
       else toast('Google Drive could not connect: ' + m);
     }
+  },
+  async finishLogin(r){
+    for(let i = 0; i < 40 && !Sync.sb; i++) await new Promise(res => setTimeout(res, 250));
+    this.ret = null;
+    const fail = m => { authView = 'signin'; openSettings(); $('gLoginMsg').textContent = m; toast(m); };
+    if(r.error) return fail(r.error);
+    if(!Sync.sb) return fail('Sync could not start, so Inkwell cannot sign in right now.');
+    toast('Signing in with Google…');
+    let j = {}, res;
+    try {
+      res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/files', {method: 'POST',
+        headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + CFG.SUPABASE_ANON_KEY, apikey: CFG.SUPABASE_ANON_KEY},
+        body: JSON.stringify({action: 'glogin', code: r.code, verifier: r.v, redirect: this.redirect()})});
+      j = await res.json().catch(() => ({}));
+    } catch { return fail('No connection. Try again when you are online.'); }
+    if(!res.ok || !j.token_hash){
+      const m = String(j.message || j.error || res.status);
+      return fail(/invalid_grant|expired|already/i.test(m) ? 'The Google sign-in took too long. Tap Sign in with Google again.' : /client secret|invalid_client/i.test(m) ? 'Google sign-in is not set up right on the server yet.' : m);
+    }
+    await clearStaleSession();
+    const {data, error} = await Sync.sb.auth.verifyOtp({token_hash: j.token_hash, type: 'magiclink'});
+    if(error || !data || !data.session) return fail('Signing in did not finish: ' + ((error && error.message) || 'no session') + '. Try again.');
+    Sync.fresh = {s: data.session, at: Date.now(), tries: 0};
+    this.tok = null; Files.full = null; Files.info = null;
+    LSset('inkwell.gdNote', null);
+    toast('Signed in as ' + j.email + '. Your notes and pictures are saved in your Google Drive.');
+    setTimeout(() => { Files.on(true).then(() => { renderCloud(); this.saveNotes(true); this.autoMove(); }).catch(() => {}); }, 2500);
   },
   async token(force){
     if(!force && this.tok && this.tok.exp > Date.now() + 60000) return this.tok;
@@ -592,7 +629,7 @@ const GD = {
     this.tok = null;
     LSset('inkwell.gdNote', new Date().toDateString());
     if(Files.info && Files.info.gdrive){ Files.info.gdrive.broken = true; Files.info.gdrive.on = false; }
-    toast('Google Drive is no longer connected, so new pictures go to the shared storage. Reconnect in Settings → Google Drive.', 'Settings', () => openSettings());
+    toast('Google Drive is no longer connected. New pictures wait on this device until you connect it again in Settings → Google Drive.', 'Settings', () => openSettings());
   },
   async setOn(on){ await Files.call('gset', {on}); await Files.on(true); renderCloud(); },
   /* (1.33) A full copy of all notes in the Drive folder as "Inkwell notes.json" (same format as the backup's notes.json,
@@ -643,23 +680,32 @@ const GD = {
     } catch(e){ console.warn('gdrive notes', e); LSset('inkwell.gdNotes', {...st, fail: Date.now()}); }
     finally { this.notesBusy = false; }
   },
-  // move this person's pictures from the shared storage into their Drive (frees shared space)
-  async move(){
+  // (1.34) pictures still in the old shared storage move to the person's Drive by themselves
+  autoMove(){
+    const i = Files.info, g = i && i.gdrive;
+    if(this.moving || !g || g.broken || !(i.used_mb > 0) || document.visibilityState !== 'visible') return;
+    this.move(true);
+  },
+  // move this person's pictures from the shared storage into their Drive
+  async move(quiet){
     if(this.moving) return;
     this.moving = true;
     try {
       for(let guard = 0; guard < 2000; guard++){
         const r = await Files.call('gmove', {n: 5});
-        $('gdState').textContent = r.left ? `Moving pictures to your Drive: ${r.left} left. Keep Inkwell open.` : 'All your pictures are in your Google Drive now.';
-        if(!r.left || !r.moved) break;
+        this.moveLeft = r.left;
+        $('gdState').textContent = r.left ? `Moving your pictures to your Drive: ${r.left} left. Keep Inkwell open.` : 'All your pictures are in your Google Drive now.';
+        renderSyncInfo();
+        if(!r.left || !r.moved || document.visibilityState !== 'visible') break;
       }
-    } catch(e){ toast('Moving stopped: ' + (e.message || e) + '. Tap Move again to continue.'); }
-    this.moving = false;
+    } catch(e){ if(!quiet) toast('Moving stopped: ' + (e.message || e) + '. It continues by itself next time.'); console.warn('gdrive move', e); }
+    this.moving = false; this.moveLeft = 0; renderSyncInfo();
     await Files.on(true).catch(() => {}); renderCloud();
   }
 };
 function syncError(e){
   if(e && e.code === 'gdrive_full') return 'Your Google Drive is full: new pictures stay on this device';
+  if(e && e.code === 'need_drive') return 'Connect Google Drive: new pictures wait on this device';
   if(e && e.code === 'storage_full'){ const j = (e.j || Files.full || {}); return `Picture storage full (${j.used_mb ?? '?'} of ${j.limit_mb ?? '?'} MB): new pictures stay on this device`; }
   const m = String((e && (e.message || e.error_description || e.msg)) || e || '');
   if(/relation .*docs.* does not exist|Could not find the table/i.test(m)) return 'Run setup.sql in Supabase';
@@ -4576,23 +4622,25 @@ function renderGD(){
   const i = Files.info, box = $('gdBox');
   if(!i || !i.r2 || !i.google_client_id){ box.hidden = true; return; }
   box.hidden = false;
-  const g = i.gdrive;
-  $('gdConnect').hidden = !!(g && !g.broken);
-  $('gdConnect').textContent = g && g.broken ? 'Connect again' : 'Use my Google Drive';
-  $('gdToggle').hidden = !g || g.broken;
-  $('gdToggle').textContent = g && g.on ? 'Use shared storage instead' : 'Send new pictures to Drive';
-  $('gdMove').hidden = !g || g.broken || !g.on || !(i.used_mb > 0.05);
-  $('gdWhy').hidden = !!(g && !g.broken);
+  const g = i.gdrive, ok = !!(g && !g.broken);
+  $('gdConnect').hidden = ok;
+  $('gdConnect').textContent = g && g.broken ? 'Connect again' : 'Connect Google Drive';
+  $('gdToggle').hidden = true; $('gdMove').hidden = true;
+  $('gdWhy').hidden = ok;
   if(GD.moving) return;
   const ns = GD.notesState(), nt = ns.saved && ns.uid === (Sync.user && Sync.user.id) ? new Date(ns.saved) : null;
   const when = nt ? (nt.toDateString() === new Date().toDateString() ? pad2(nt.getHours()) + ':' + pad2(nt.getMinutes()) : nt.toLocaleDateString()) : '';
-  $('gdState').textContent = !g ? '' : g.broken ? 'The Google sign-in has expired. New pictures go to the shared storage until you connect again.'
-    : `Connected${g.email ? ' as ' + g.email : ''} · notes copied to your Drive ${when ? 'at ' + when : 'shortly'} · pictures: ${fmtMB(g.mb || 0)} in your Drive, new ones go to ${g.on ? 'your Drive' : 'the shared storage'}`;
+  const wait = Files.full && Files.localOnly ? ` · ${Files.localOnly} new picture${Files.localOnly === 1 ? '' : 's'} waiting on this device` : '';
+  $('gdState').textContent = !g ? 'Not connected' + wait : g.broken ? 'The Google sign-in has expired. New pictures wait on this device until you connect again.' + wait
+    : `${g.email || 'Connected'} · pictures ${fmtMB(g.mb || 0)} · notes copied ${when ? 'at ' + when : 'shortly'}` + (i.used_mb > 0.05 ? ` · ${fmtMB(i.used_mb)} of older pictures still to move` : '') + wait;
 }
 function renderCloud(){
   const i = Files.info, row = $('cloudRow');
   renderGD();
-  if(!i || !i.r2 || !i.cap_mb){ row.hidden = true; return; }
+  const cu = $('cleanupBtn');
+  if(i && i.google_client_id){ if(cu.parentNode !== $('gdBox').querySelector('.gd-btns')) $('gdBox').querySelector('.gd-btns').insertBefore(cu, $('gdMove')); }
+  else if(cu.parentNode !== row) row.appendChild(cu);   // server without Google: the old storage bar keeps its Clean up
+  if(!i || !i.r2 || !i.cap_mb || i.google_client_id){ row.hidden = true; return; }   // 1.34: no shared storage bar
   row.hidden = false;
   const sh = Files.share(), mine = Math.min(1, (i.used_mb || 0) / i.cap_mb), full = sh >= 0.995 || !!(Files.full && Files.full.code === 'cloud_full');
   $('cloudAll').style.width = (sh * 100).toFixed(1) + '%';
@@ -4604,6 +4652,7 @@ function renderCloud(){
     (full ? ' · full: new pictures stay on this device' : sh >= 0.8 ? ' · nearly full' : '');
 }
 $('gdConnect').addEventListener('click', () => GD.connect());
+$('gLogin').addEventListener('click', () => GD.login());
 $('gdToggle').addEventListener('click', () => { const g = Files.info && Files.info.gdrive; GD.setOn(!(g && g.on)).catch(e => toast(e.message || String(e))); });
 $('gdMove').addEventListener('click', () => GD.move());
 let cuSort = 'big', cuRows = [];
@@ -4770,7 +4819,8 @@ function renderSyncInfo(){
   let t = (Sync.state === 'warn' ? Sync.msg : Sync.lastOk ? 'Last synced ' + hhmm(Sync.lastOk) : 'Not synced yet') + (Sync.liveOk ? ' · instant sync on' : ' · checks every 20 s');
   const i = Files.info;
   if(i && i.r2 && Files.migLeft) t += ` · moving ${Files.migLeft} older pictures to the new storage`;
-  if(Files.full && Files.localOnly) t += ` · cloud full: ${Files.localOnly} new picture${Files.localOnly === 1 ? ' is' : 's are'} on this device only`;
+  if(GD.moveLeft) t += ` · moving ${GD.moveLeft} pictures to your Google Drive`;
+  if(Files.full && Files.localOnly) t += Files.full.code === 'need_drive' ? ` · ${Files.localOnly} new picture${Files.localOnly === 1 ? '' : 's'} waiting: connect Google Drive` : Files.full.code === 'gdrive_full' ? ` · Google Drive full: ${Files.localOnly} new picture${Files.localOnly === 1 ? ' is' : 's are'} on this device only` : ` · cloud full: ${Files.localOnly} new picture${Files.localOnly === 1 ? ' is' : 's are'} on this device only`;
   if(i && i.claude_usd != null && (i.claude_usd > 0 || i.claude_limit != null)) t += ` · Claude this month USD ${(+i.claude_usd).toFixed(2)}` + (i.claude_limit == null ? '' : ` of ${(+i.claude_limit).toFixed(2)}`);
   el.textContent = t;
 }

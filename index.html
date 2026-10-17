@@ -279,12 +279,18 @@
       <p class="hint">Until then, notes are saved on this device.</p>
     </div>
     <form id="authForm" hidden>
-      <p class="hint">Sign in with the same account on every device. Your notes stay private to this account.</p>
+      <div class="g-signin">
+        <button type="button" class="btn primary g-btn" id="gLogin"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.3z"/><path fill="#fff" opacity=".85" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z"/><path fill="#fff" opacity=".7" d="M6.4 14c-.2-.6-.3-1.3-.3-2s.1-1.4.3-2V7.4H3.1a10 10 0 0 0 0 9.2L6.4 14z"/><path fill="#fff" opacity=".55" d="M12 5.9c1.5 0 2.8.5 3.8 1.5l2.9-2.9A10 10 0 0 0 3.1 7.4L6.4 10c.8-2.3 3-4.1 5.6-4.1z"/></svg>Sign in with Google</button>
+        <p class="hint">Use the same Google account on every device. Your notes and pictures are saved in your own Google Drive (15 GB free), in a folder called "Inkwell pictures". On Google's screen, leave the Google Drive box ticked.</p>
+        <p class="hint" id="gLoginMsg"></p>
+      </div>
+      <div id="authOld" hidden>
       <label class="field"><span>Email</span><input type="email" id="authEmail" class="text-in" autocomplete="username" required></label>
       <label class="field"><span>Password</span><input type="password" id="authPass" class="text-in" autocomplete="current-password" minlength="6" required></label>
       <button type="button" class="link-btn" id="authForgot">Forgot password?</button>
       <div class="dlg-actions"><button type="button" class="btn ghost" id="authSignup">Create account</button><button type="submit" class="btn primary">Sign in</button></div>
       <p class="hint" id="authMsg"></p>
+      </div>
     </form>
     <form id="resetForm" novalidate hidden>
       <p class="hint">Inkwell emails you a link. Open it to choose a new password.</p>
@@ -329,14 +335,11 @@
     <p class="set-h">Your notes</p>
     <div class="set-row"><span id="trashInfo">Recently deleted</span><button class="btn ghost" id="trashBtn">Open</button></div>
     <div class="dlg-actions"><span class="hint" id="storageInfo"></span><button class="btn ghost" id="backupBtn">Download backup</button></div>
-    <div class="set-row cloud-row" id="cloudRow" hidden>
-      <div class="cloud-meter"><span class="cloud-label">Cloud storage</span><div class="cloud-bar" id="cloudBar" role="meter" aria-label="Cloud storage used"><i id="cloudAll"></i><i id="cloudMine"></i></div><span class="hint" id="cloudInfo"></span></div>
-      <button class="btn ghost" id="cleanupBtn">Clean up</button>
-    </div>
+    <div class="set-row cloud-row" id="cloudRow" hidden><div class="cloud-meter"><div class="cloud-bar" id="cloudBar"><i id="cloudAll"></i><i id="cloudMine"></i></div><span id="cloudInfo"></span></div></div>
     <div class="gd-box" id="gdBox" hidden>
       <div class="gd-head"><span class="cloud-label">Google Drive</span><span class="hint" id="gdState"></span></div>
-      <p class="hint" id="gdWhy">Your pictures, scans and imported PDFs can go to your own Google Drive instead of the shared Inkwell storage. Worth it if you import a lot: it uses your own Google space (15 GB free, more with Google One) and never fills up the shared storage. Your notes also get saved there as a copy that keeps itself up to date ("Inkwell notes.json"), so everything is in your own Drive; syncing between devices still runs through Inkwell. You sign in to Google only once; your other devices use it too. Everything goes into a folder called "Inkwell pictures"; don't delete it, or pictures disappear from your pages.</p>
-      <div class="gd-btns"><button class="btn ghost" id="gdConnect">Use my Google Drive</button><button class="btn ghost" id="gdMove" hidden>Move my pictures there</button><button class="btn ghost" id="gdToggle" hidden>Use shared storage instead</button></div>
+      <p class="hint" id="gdWhy">Inkwell saves your notes and pictures in your own Google Drive. Connect it to keep adding pictures; until then, new pictures wait on this device.</p>
+      <div class="gd-btns"><button class="btn ghost" id="gdConnect">Connect Google Drive</button><button class="btn ghost" id="cleanupBtn">Clean up</button><button class="btn ghost" id="gdMove" hidden>Move my pictures there</button><button class="btn ghost" id="gdToggle" hidden>Use shared storage instead</button></div>
     </div>
     <div class="set-row clean-row"><span class="hint" id="cleanInfo">Images nothing uses any more</span><button class="btn ghost" id="cleanBtn">Free up space</button></div>
     <div class="set-row clean-row"><span class="hint">Bring over your OneNote notebooks</span><button class="btn ghost" id="onBtn">Import from OneNote</button></div>

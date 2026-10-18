@@ -1,0 +1,10 @@
+tests/out:
+backup_test.zip
+shots
+
+tests/out/shots:
+cleanup.png
+glogin_settings.png
+glogin_signedout.png
+history.png
+settings_cloud.png

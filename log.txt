@@ -1,0 +1,271 @@
+=== tests/test_clean_and_cells.py
+PASS Free up space keeps used pictures, and also ones Undo could bring back ({'usedKept': True, 'unusedFound': False})
+ lines found: {'nh': 5, 'nv': 4}
+PASS a cell is found inside the table, none above it ({'x1': 288, 'x2': 501.33333333333337, 'y1': 181.33333333333334, 'y2': 261.3333333333333})
+PASS typed text fits inside the cell ({'ch': 78, 'sh': 82})
+PASS no page errors: []
+ALL OK
+=== tests/test_google_signin.py
+PASS signed out: Settings shows only Sign in with Google (no email/password)
+PASS if Drive was not allowed, it says so and stays signed out
+PASS one Google screen asks for sign-in and Drive together
+PASS the code goes to the server without an Inkwell session (new publishable key, no Bearer)
+PASS the app finishes the sign-in with the one-time token
+PASS signed in to the same Inkwell account (11111111-1111-1111-1111-111111111111)
+ toast: Signed in as r@gmail.com. Your notes and pictures are saved in your Google Drive.
+PASS an existing account is opened (no new-account warning)
+PASS old pictures move to Google Drive by themselves
+PASS notes copy made in Drive after sign-in
+ state: r@gmail.com · pictures under 1 MB · notes copied at 12:49 · all 2 pictures checked
+PASS no shared storage bar or switches; Clean up is still there
+PASS Settings shows the Google account and the notes copy
+PASS after the move the app checks the pictures are in Drive
+ check toast: 3 pictures are missing from your Google Drive (deleted or in the bin). Restore them from Drive's bin to get them back.
+PASS missing Drive pictures are reported
+A sync: synced 
+PASS a new picture goes to Google Drive
+ sync with Drive lost: synced 
+PASS without Drive a new picture waits on the device
+PASS notes still sync (synced )
+PASS Settings offers Connect again
+ after reconnect: synced 
+PASS after connecting again, the waiting picture goes to Drive
+ B toast: New Inkwell account made for r@gmail.com. If your notes are under another Google account, sign out (Settings) and sign in with that one.
+PASS signing in with a Google account that has no Inkwell account yet says so
+B sync: synced 
+PASS second device signs in with Google and gets the notes and pictures
+PASS no page errors: []
+ALL OK
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+=== tests/test_merge.py
+A first sync: synced 
+A push: synced 
+PASS page content reached server
+B sync: synced 
+PASS B has the same page as A
+PASS B stored a merge base
+A sync: synced 
+B sync: synced 
+A sync: synced 
+ A screen: ['s_s0|#d03030', 's_sA|auto', 's_sB|auto', 'x_t0|<p>hello from B</p>', 'xmvdtprv46a5bfu|<p>hello from A</p>']
+ B screen: ['s_s0|#d03030', 's_sA|auto', 's_sB|auto', 'x_t0|<p>hello from B</p>', 'xmvdtprv46a5bfu|<p>hello from A</p>']
+ server  : ['s_s0|#d03030', 's_sA|auto', 's_sB|auto', 'x_t0|<p>hello from B</p>', 'xmvdtprv46a5bfu|<p>hello from A</p>']
+PASS scenario 1: both devices and server agree
+PASS scenario 1: strokes from both devices kept
+PASS scenario 1: text deleted on A stays deleted
+PASS scenario 1: recolour from B kept
+PASS scenario 1: both text versions kept (one as a copy)
+B sync: synced 
+A sync: synced 
+A sync: synced 
+B sync: synced 
+A sync: synced 
+ A screen: ['s_s0|#d03030', 's_sA2|auto', 's_sA|auto', 's_sB|auto', 't_tapeB|undefined', 'x_t0|<p>hello from B</p>', 'xmvdtprv46a5bfu|<p>hello from A</p>']
+ B stored: ['s_s0|#d03030', 's_sA2|auto', 's_sA|auto', 's_sB|auto', 't_tapeB|undefined', 'x_t0|<p>hello from B</p>', 'xmvdtprv46a5bfu|<p>hello from A</p>']
+PASS scenario 2: open page on A and stored page on B agree
+PASS scenario 2: additions from both kept
+PASS scenario 2: page title (A) and order (B) both kept: {'order': -99, 'sec': 'sec-general', 'snippet': 'hello from B hello from A', 'title': 'Renamed on A'}
+B sync: synced 
+A sync: synced 
+PASS scenario 3: simple edit shows up on the open page on A
+ cleaned: <p>ok <b>bold</b></p><a class="pl" data-page="pg-1">link</a>plain<span style="color:red">c</span><u>keep</u><div>d</div><ul class="check"><li class="done">t</li></ul>
+ text: ok bold xlinkplainckeepxd t
+PASS sanitizer: nothing ran (htmlText included)
+PASS sanitizer: dangerous parts removed
+PASS sanitizer: page links kept, other links unwrapped
+PASS sanitizer: formatting, checklists and colours kept
+PASS no page errors: []
+ALL OK
+=== tests/test_storage_history_backup.py
+A sync: synced 
+PASS R2 off: picture uploaded to Supabase storage
+A sync: synced 
+PASS R2 on: new picture uploaded to R2 through a presigned link
+PASS old Supabase pictures copied to R2 in the background
+PASS Files.info says R2 is on
+B sync: synced 
+PASS other device downloads the R2 picture (size 7)
+PASS downloads ask the server for a link
+B sync with full storage: synced 
+PASS a full cloud is not a sync error (notes keep syncing)
+PASS a full cloud is explained: Cloud storage is full. New pictures are kept on this device only for now, so they won't show up on your other devices. Free up room in Settings → Clean up.
+PASS settings say how many pictures are on this device only
+PASS refused picture stays waiting on the device
+B sync: synced 
+PASS it uploads once there is room
+ versions: {'n': 1, 'items': ['i_pic', 'i_pic2', 'x_h1']}
+PASS a version keeps the page as it was before the editing session
+PASS Page history dialog lists versions
+PASS restore brings the old version back: ['i_pic2', 'i_pic', 'x_h1']
+PASS Undo returns to what was there before the restore
+A sync: synced 
+PASS versions are synced to the server
+PASS versions stay out of the in-memory list
+ backup: 14 notes items and 5 pictures, 0.0 MB in 1 file. Save it (to Files or iCloud Drive, for example). To restore, choose all the parts together in Settings → Restore backup.
+PASS backup dialog shows what will be saved
+ zip: inkwell-backup-2026-10-18.zip 7 entries
+PASS zip holds notes and pictures, also ones only online
+PASS restore from the zip brings back the page and its pictures
+ meter: You under 1 MB · everyone 7.8 GB of 8.8 GB · nearly full
+PASS Settings shows the storage bar, orange when nearly full
+PASS nearly-full heads-up: Cloud storage is 89% full. When it is full, new pictures stay on this device only. You can delete old things in Settings → Clean up.
+PASS Clean up lists pages with pictures (1)
+PASS Delete selected moves the page to Recently deleted
+ clean plan: ['a-old1:r2', 'a-old2:r2', 'a-mvdtq3i8fnkpes:r2', 'a-unused:r2', 'a-old1', 'a-old2']
+PASS Free up space finds unused R2 pictures and keeps used ones
+PASS leaving the app saves and uploads at once
+PASS no page errors: []
+ALL OK
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+Future exception was never retrieved
+future: <Future finished exception=TargetClosedError('Target page, context or browser has been closed')>
+playwright._impl._errors.TargetClosedError: Target page, context or browser has been closed
+ALL TESTS PASSED

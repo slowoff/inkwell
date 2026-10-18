@@ -19,7 +19,7 @@ jobs:
           python-version: '3.12'
       - name: Install Playwright and Chromium
         run: |
-          pip install playwright==1.48.0 pillow
+          pip install playwright==1.56.0 pillow
           python -m playwright install --with-deps chromium
       - name: Run tests
         run: tests/run.sh 2>&1 | tee /tmp/test-log.txt; exit ${PIPESTATUS[0]}

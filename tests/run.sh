@@ -18,7 +18,7 @@ fail=0
 for t in tests/test_*.py; do
   echo "=== $t"
   log="$OUT/$(basename "$t").log"
-  timeout 600 python3 "$t" 2>&1 | tee "$log"
+  timeout -s INT -k 30 480 python3 -u "$t" 2>&1 | tee "$log"
   code=${PIPESTATUS[0]}
   if [ "$code" != 0 ]; then
     echo "FAILED: $t (exit $code)"; fail=1

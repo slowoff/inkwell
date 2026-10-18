@@ -1,5 +1,6 @@
 # Runs all Inkwell tests (tests/run.sh) in headless Chromium on every push, against fake Supabase/Google servers.
-# A red cross on a commit in GitHub means something broke; the log says which check failed.
+# A red cross on a commit in GitHub means something broke; the log (and the annotations) say which check failed.
+# Playwright is pinned to the version the tests are written with: 1.48 made some tests hang on GitHub now and then.
 name: Tests
 on:
   push:
@@ -19,7 +20,7 @@ jobs:
           python-version: '3.12'
       - name: Install Playwright and Chromium
         run: |
-          pip install playwright==1.48.0 pillow
+          pip install playwright==1.56.0 pillow
           python -m playwright install --with-deps chromium
       - name: Run tests
         run: tests/run.sh

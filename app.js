@@ -73,12 +73,47 @@ const saveUi = () => LSset('inkwell.ui', ui);
 /* =====================================================================
    Local database (IndexedDB) — everything is stored here first
    ===================================================================== */
+/* One local database per account (1.36). Before, signing out and signing in with another account kept the first
+   account's notes on screen, and anything edited then was uploaded into the other account. Now each account has
+   its own local database: 'inkwell' (the original one, and notes made without an account) and 'inkwell-<user id>'
+   for any other account that signs in on this device. Nothing is deleted when switching; signing back in with the
+   first account brings its notes back, including changes not uploaded yet.
+   localStorage inkwell.dbs = {cur: name of the database in use, users: {userId: name}}; meta 'owner' = its account. */
+const Acct = {
+  owner: null,
+  st(){ const s = LSget('inkwell.dbs', null) || {}; return {cur: s.cur || 'inkwell', users: s.users || {}}; },
+  name(){ return this.st().cur; },
+  async load(){ this.owner = (await IDB.get('meta', 'owner').catch(() => null)) || null; },
+  // true when the local notes belong to the signed-in account (or have no account yet and now get this one)
+  mine(){ return !!(Sync.user && this.owner === Sync.user.id); },
+  async ok(user){
+    if(!user) return false;
+    if(this.owner === user.id) return true;
+    const st = this.st(), mapped = st.users[user.id];
+    if(!this.owner && (!mapped || mapped === st.cur)){
+      // notes made without an account (or by a version before 1.36): from now on they belong to this account
+      await IDB.put('meta', user.id, 'owner');
+      this.owner = user.id; st.users[user.id] = st.cur; LSset('inkwell.dbs', st);
+      return true;
+    }
+    // the notes on this device belong to another account: open this account's own local notes instead
+    if(this.switching) return false;
+    this.switching = true;
+    try { await flushSaves(); } catch(e){ console.warn('switch account', e); }
+    st.cur = mapped || 'inkwell-' + user.id; st.users[user.id] = st.cur;
+    LSset('inkwell.dbs', st);
+    LSset('inkwell.opening', null);
+    toast('Opening the notes of ' + (user.email || 'this account') + '…');
+    setTimeout(() => location.reload(), 600);
+    return false;
+  }
+};
 const IDB = {
   db: null, mem: null,
   async open(){
     try {
       this.db = await new Promise((res, rej) => {
-        const r = indexedDB.open('inkwell', 1);
+        const r = indexedDB.open(Acct.name(), 1);
         r.onupgradeneeded = () => {
           const d = r.result;
           d.createObjectStore('docs', {keyPath: 'id'});
@@ -262,6 +297,8 @@ const Sync = {
   tell(){ if(this.chan && this.liveOk){ try { this.chan.send({type: 'broadcast', event: 'changed', payload: {}}); } catch(e){ console.warn('live sync send', e); } } },
   async run(){
     if(!this.sb || !this.user){ this.unlisten(); setStatus(); return; }
+    // (1.36) the notes on this device must belong to this account; otherwise its own local notes are opened first
+    if(!(await Acct.ok(this.user))) return;
     this.listen();
     if(!navigator.onLine){ this.state = 'offline'; setStatus(); return; }
     if(this.running){ this.again = true; return; }
@@ -272,7 +309,15 @@ const Sync = {
       const sent = await this.push();
       await this.pushAssets();
       if(sent) this.tell();
+      // (1.36) keep the account's storage info fresh (at most every 10 minutes): the Drive notes copy, the daily
+      // picture check and the move of old pictures all start from it. Before, it only loaded when Settings was opened
+      // or a picture had to be uploaded or downloaded, so on most starts the notes copy in Drive was not updated.
+      Files.on().catch(() => {});
       this.state = 'synced'; this.msg = ''; this.lastOk = Date.now();
+      if(this.refused){
+        this.state = 'warn';
+        this.msg = this.refused === 'notes_full' ? 'Notes storage full: new changes stay on this device' : 'A page is too big to sync: it stays on this device';
+      }
     } catch(e){
       console.warn('sync', e);
       this.state = 'warn'; this.msg = syncError(e);
@@ -323,11 +368,26 @@ const Sync = {
     await this.checkStale();
     const all = await IDB.all('docs');
     const dirty = all.filter(d => d.dirty);
-    let batch = [], size = 0;
+    let batch = [], size = 0, refused = null;
+    const LIMIT = /notes_full|doc_too_big/;
     const flush = async () => {
       if(!batch.length) return;
       const rows = batch.map(d => ({user_id: this.user.id, id: d.id, kind: d.kind, data: d.data ?? null, deleted: !!d.deleted, updated_at: d.updated}));
-      const {data: back, error} = await this.sb.from('docs').upsert(rows, {onConflict: 'user_id,id'}).select('id,server_ts');
+      let {data: back, error} = await this.sb.from('docs').upsert(rows, {onConflict: 'user_id,id'}).select('id,server_ts');
+      // (1.36) the server refused a doc (notes limit reached, or one doc too big): upload the others one by one,
+      // so one refused doc does not stop everything else from syncing. Refused ones stay on this device.
+      if(error && LIMIT.test(String(error.message || '')) && batch.length > 1){
+        const ok = [];
+        back = [];
+        for(let i = 0; i < batch.length; i++){
+          const one = await this.sb.from('docs').upsert([rows[i]], {onConflict: 'user_id,id'}).select('id,server_ts');
+          if(one.error){
+            if(!LIMIT.test(String(one.error.message || ''))) throw one.error;
+            refused = String(one.error.message).match(LIMIT)[0];
+          } else { ok.push(batch[i]); back.push(...(one.data || [])); }
+        }
+        batch = ok; error = null;
+      } else if(error && LIMIT.test(String(error.message || ''))){ refused = String(error.message).match(LIMIT)[0]; batch = []; error = null; }
       if(error) throw error;
       const ts = new Map((back || []).map(r => [r.id, r.server_ts]));
       for(const d of batch){
@@ -350,12 +410,17 @@ const Sync = {
       batch.push(d); size += s;
     }
     await flush();
+    this.refused = refused;
     return dirty.length;
   },
   async pushAssets(){
     let pend = (await IDB.get('meta', 'pendingAssets')) || [];
     const r2 = pend.length ? await Files.on() : false;
     Files.localOnly = pend.length;
+    // (1.36) the old Supabase picture storage is only for a server without the files function (it answered 404).
+    // If the function just could not be reached, the pictures wait here: before, they went to the old storage,
+    // which is about to be emptied.
+    if(pend.length && !r2 && !(Files.info && Files.info.r2 === false)) return;
     // cloud full: new pictures stay on this device (nothing is lost) and uploads are retried every 30 minutes
     if(r2 && Files.full && Date.now() - Files.full.at < 1800000) return;
     while(pend.length){
@@ -439,7 +504,7 @@ const Files = {
   },
   // true when pictures go to R2; info (usage and limits) refreshed at most every 10 minutes
   async on(force){
-    if(!Sync.sb || !Sync.user || !navigator.onLine) return false;
+    if(!Sync.sb || !Sync.user || !navigator.onLine || !Acct.mine()) return false;
     if(force || !this.info || Date.now() - this.infoAt > 600000){
       try { this.info = await this.call('info'); }
       catch(e){ if(e.status === 404) this.info = {r2: false}; else if(!this.info) return false; }
@@ -586,13 +651,16 @@ const GD = {
       return fail(/invalid_grant|expired|already/i.test(m) ? 'The Google sign-in took too long. Tap Sign in with Google again.' : /client secret|invalid_client/i.test(m) ? 'Google sign-in is not set up right on the server yet.' : m);
     }
     await clearStaleSession();
+    this.tok = null; Files.full = null; Files.info = null;
     const {data, error} = await Sync.sb.auth.verifyOtp({token_hash: j.token_hash, type: 'magiclink'});
     if(error || !data || !data.session) return fail('Signing in did not finish: ' + ((error && error.message) || 'no session') + '. Try again.');
     Sync.fresh = {s: data.session, at: Date.now(), tries: 0};
-    this.tok = null; Files.full = null; Files.info = null;
     LSset('inkwell.gdNote', null);
-    if(j.created) toast('New Inkwell account made for ' + j.email + '. If your notes are under another Google account, sign out (Settings) and sign in with that one.', 'Settings', () => openSettings());
-    else toast('Signed in as ' + j.email + '. Your notes and pictures are saved in your Google Drive.');
+    const note = j.created ? 'New Inkwell account made for ' + j.email + '. If your notes are under another Google account, sign out (Settings) and sign in with that one.'
+      : 'Signed in as ' + j.email + '. Your notes and pictures are saved in your Google Drive.';
+    // another account's notes were open: Inkwell reloads with this account's own notes and says it then (1.36)
+    if(Acct.switching){ LSset('inkwell.note', note); return; }
+    if(j.created) toast(note, 'Settings', () => openSettings()); else toast(note);
     setTimeout(() => { Files.on(true).then(() => { renderCloud(); this.saveNotes(true); this.autoMove(); }).catch(() => {}); }, 2500);
   },
   async token(force){
@@ -640,7 +708,7 @@ const GD = {
   notesState(){ return LSget('inkwell.gdNotes', null) || {}; },
   async saveNotes(force){
     const g = Files.info && Files.info.gdrive;
-    if(!g || g.broken || this.notesBusy || !navigator.onLine || !Sync.user) return;
+    if(!g || g.broken || this.notesBusy || !navigator.onLine || !Sync.user || !Acct.mine()) return;
     const st = this.notesState();
     if(st.fail && Date.now() - st.fail < 60000) return;          // after a failure, wait a minute
     this.notesBusy = true;
@@ -651,7 +719,7 @@ const GD = {
       if(sig === st.sig && st.id) return;                         // nothing changed since the last copy
       if(!force && st.saved && Date.now() - st.saved < 3 * 60000) return;   // while writing: at most every 3 minutes
       const body = JSON.stringify({app: 'Inkwell', version: 2, exported: new Date().toISOString(), parts: 1, docs: docsAll});
-      let id = st.uid === Sync.user.id ? st.id : null;
+      let id = st.uid === Sync.user.id ? st.id : null, remade = false;
       for(let k = 0; k < 2; k++){
         const t = await this.token(k > 0), H = {Authorization: 'Bearer ' + t.at};
         if(!id){
@@ -664,7 +732,7 @@ const GD = {
         let r;
         if(id){
           r = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + encodeURIComponent(id) + '?uploadType=media&fields=id', {method: 'PATCH', headers: {...H, 'Content-Type': 'application/json'}, body});
-          if(r.status === 404){ id = null; k--; continue; }   // the file was deleted in Drive: make it again
+          if(r.status === 404 && !remade){ id = null; remade = true; k--; continue; }   // the file was deleted in Drive: make it again (once)
         } else {
           const b = 'inkwell' + Math.random().toString(36).slice(2) + Date.now().toString(36);
           const meta = JSON.stringify({name: 'Inkwell notes.json', mimeType: 'application/json', description: 'A copy of all your Inkwell notes, kept up to date. Settings → Restore backup can read it.', parents: t.folder ? [t.folder] : undefined});
@@ -684,7 +752,7 @@ const GD = {
   // (1.35) once a day: are all Drive pictures still in the folder? (deleted or in Drive's bin -> they would vanish from pages)
   async check(force){
     const i = Files.info, g = i && i.gdrive;
-    if(!g || g.broken || this.moving || !navigator.onLine) return null;
+    if(!g || g.broken || this.moving || !navigator.onLine || !Sync.user) return null;
     const day = new Date().toDateString(), st = LSget('inkwell.gdCheck', null) || {};
     if(!force && st.day === day && st.uid === Sync.user.id) return st;
     try {
@@ -4851,7 +4919,10 @@ $('signOut').addEventListener('click', async () => {
   Sync.unlisten();
   Sync.signingOut = true; Sync.fresh = null;
   try { await Sync.sb.auth.signOut(); } finally { Sync.signingOut = false; }
-  Sync.user = null; setStatus(); renderSettings();
+  Sync.user = null;
+  // forget the account's server state (Drive access, storage info); the notes stay on this device (1.36)
+  Files.info = null; Files.full = null; Files.infoAt = 0; GD.tok = null; GD.moveLeft = 0;
+  setStatus(); renderSettings(); renderCloud();
 });
 // Before signing in: if an old session is still stored on this device, let its pending token renewal finish
 // and remove it, so it cannot fail later and sign the new session out (seen on the iPad 2026-10-15).
@@ -6341,7 +6412,8 @@ const HW = {
     const c = page && page.data.hw && page.data.hw.c; if(!c) return '';
     return Object.keys(c).sort((a, b) => { const [ax, ay] = a.split(',').map(Number), [bx, by] = b.split(',').map(Number); return ay - by || ax - bx; }).map(k => c[k].t || '').join(' ').trim();
   },
-  on(){ return prefs.hwSearch !== false && !!Sync.sb && !!Sync.user; },
+  // (1.36) an account that is not allowed to use Claude is not asked again until Inkwell restarts
+  on(){ return prefs.hwSearch !== false && !!Sync.sb && !!Sync.user && HW.noAccess !== Sync.user.id; },
   // which pages have ink that has not been read yet
   async scanAll(){
     if(!this.on()) return;
@@ -6374,7 +6446,7 @@ const HW = {
     catch(e){
       const c = e.code || '';
       if(c === 'offline'){ this.queue.unshift(pid); this.busy = false; this.timer = setTimeout(() => this.work(), 30000); renderHwStatus(); return; }
-      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync', 'limit_reached'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
+      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync', 'limit_reached'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; if(c === 'not_allowed' && Sync.user) HW.noAccess = Sync.user.id; }
       else { this.state = 'Last try failed: ' + jobWhy(c || e.message); console.warn('hw', e); }
     }
     this.busy = false; renderHwStatus();
@@ -6533,7 +6605,7 @@ const PT = {
       const c = e.code || '';
       if(jobBlocked(e)){ try { await savePtxt(a, 'ocr', [], {nb: 1}); } catch {} this.state = ''; this.busy = false; renderHwStatus(); if(this.queue.length) this.timer = setTimeout(() => this.work(), 1200); return; }
       if(c === 'offline'){ this.queue.unshift(a); this.busy = false; this.timer = setTimeout(() => this.work(), 30000); renderHwStatus(); return; }
-      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync', 'limit_reached'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; }
+      if(['not_allowed', 'no_key', 'not_signed_in', 'no_sync', 'limit_reached'].includes(c)){ this.state = jobWhy(c); this.queue.length = 0; if(c === 'not_allowed' && Sync.user) HW.noAccess = Sync.user.id; }
       else if(c !== 'missing'){ this.state = 'Last try failed: ' + jobWhy(c || e.message); console.warn('ocr', e); }
     }
     this.busy = false; renderHwStatus();
@@ -7796,6 +7868,7 @@ async function boot(){
   GD.catchRedirect();
   readTokens();
   await IDB.open();
+  await Acct.load();
   await loadDocs();
   if(!docs.size){ await seed(); await loadDocs(); if(!ui.page){ ui.nb = 'nb-school'; ui.sec = 'sec-general'; ui.page = 'pg-welcome'; } }
   ensureUi();
@@ -7823,6 +7896,8 @@ async function boot(){
     if(first && width() !== 'narrow') await openPage(first.id); else showEmpty();
   }
   setStatus();
+  const note = LSget('inkwell.note', null);   // a message from just before a reload (1.36: switching accounts)
+  if(note){ LSset('inkwell.note', null); setTimeout(() => toast(note), 800); }
   Sync.init();
   if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   purgeTrash().catch(() => {});

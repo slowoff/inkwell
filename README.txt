@@ -46,10 +46,11 @@ Supabase project, protected by your login.
 a) Open the link in Safari.
 b) Share button -> Add to Home Screen -> Add.
 c) Open Inkwell from the home screen.
-d) Tap the gear (top left) -> enter email and password ->
-   Create account, then Sign in.
-Do the same on your phone or PC with the same account and the
-notes sync.
+d) Optional: tap the gear (top left) -> Sign in with Google.
+   Without signing in, notes stay on this device only.
+Sign in with the same Google account on your phone or PC and the
+notes sync. Pictures and a copy of the notes go to your own
+Google Drive (folder "Inkwell pictures").
 
 ----------------------------------------------------------------
 UPDATING LATER

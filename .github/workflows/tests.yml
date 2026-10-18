@@ -24,8 +24,8 @@ jobs:
       - name: Run tests
         run: tests/run.sh 2>&1 | tee /tmp/test-log.txt; exit ${PIPESTATUS[0]}
       - name: Save log (debug)
-        if: always()
+        if: failure()
         run: |
           git config user.name ci; git config user.email ci@example.com
-          git checkout --orphan ci-debug-logs; git rm -rqf . ; cp /tmp/test-log.txt log.txt; ls -R tests/out 2>/dev/null | head -50 > outs.txt || true
-          git add log.txt outs.txt; git commit -qm log; git push -f origin ci-debug-logs
+          git checkout --orphan ci-logs-${{ github.run_id }}; git rm -rqf . ; cp /tmp/test-log.txt log.txt; ls -R tests/out 2>/dev/null | head -50 > outs.txt || true
+          git add log.txt outs.txt; git commit -qm log; git push -f origin ci-logs-${{ github.run_id }}

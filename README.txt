@@ -113,7 +113,7 @@ guide).
 RELEASING A CHANGE
 ================================================================
 1. Change the files.
-2. Raise VERSION in sw.js (inkwell-1.38 -> inkwell-1.39 ...).
+2. Raise VERSION in sw.js (inkwell-1.39 -> inkwell-1.40 ...).
    Without this, iPads keep the old cached version.
 3. Run the tests: tests/run.sh (headless Chromium with Playwright,
    fake Supabase and Google). They also run on GitHub on every push.

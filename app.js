@@ -1858,7 +1858,7 @@ function toolMove(e){
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
     else if(act.kind === 'space'){ moveSpace(toWorld(sx, sy)[1] - act.y0); }
     else if(act.kind === 'lasso'){ act.poly.push(sx, sy); }
-    else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){ act.w1 = toWorld(sx, sy); }
+    else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){ act.w1 = toWorld(sx, sy); if(act.kind === 'pick') compassTrack(act); }
   }
   drawLiveSoon();
 }
@@ -5442,7 +5442,25 @@ function endPick(){
 }
 function pickBox(a){
   const [x0, y0] = a.w0, [x1, y1] = a.w1 || a.w0;
-  return {x0, y0, x1, y1, tap: Math.abs(x1 - x0) * cam.z < 10 && Math.abs(y1 - y0) * cam.z < 10};
+  return {x0, y0, x1, y1, tap: Math.abs(x1 - x0) * cam.z < 10 && Math.abs(y1 - y0) * cam.z < 10, a0: a.cmp ? a.cmp.a0 : null, sweep: a.cmp ? a.cmp.sweep : 0};
+}
+// Compass: once the pointer is a little away from the centre, add up how far it has gone around (radians, either way)
+function compassTrack(a){
+  if(!pick || pick.shape !== 'compass' || !a.w1) return;
+  const dx = a.w1[0] - a.w0[0], dy = a.w1[1] - a.w0[1];
+  if(Math.hypot(dx, dy) * cam.z < 14) return;
+  const ang = Math.atan2(dy, dx);
+  if(!a.cmp){ a.cmp = {a0: ang, prev: ang, sweep: 0}; return; }
+  let d = ang - a.cmp.prev;
+  if(d > Math.PI) d -= 2 * Math.PI; else if(d < -Math.PI) d += 2 * Math.PI;
+  a.cmp.sweep += d; a.cmp.prev = ang;
+}
+// [cx, cy, r, start angle, sweep]; a sweep under 15° or past 345° is a full circle
+function compassGeo(b){
+  if(b.tap || b.a0 == null) return [b.x0, b.y0, b.tap ? 60 / cam.z : Math.hypot(b.x1 - b.x0, b.y1 - b.y0), 0, 2 * Math.PI];
+  const r = Math.hypot(b.x1 - b.x0, b.y1 - b.y0), s = Math.abs(b.sweep);
+  if(s < Math.PI / 12 || s > Math.PI * 23 / 12) return [b.x0, b.y0, r, b.a0, 2 * Math.PI];
+  return [b.x0, b.y0, r, b.a0, b.sweep];
 }
 function moveSpace(dy){
   act.dy = dy;
@@ -5464,6 +5482,21 @@ function drawPickPreview(a){
     const b = pickBox(a);
     liveCtx.fillStyle = inkColor(prefs.pen.c, false, false);
     for(const it of shapeItems(pick.shape, b)) liveCtx.fill(strokePath(it, false));
+    if(pick.shape === 'compass'){
+      // needle point, dashed radius line and the radius in cm (paper scale, as on the ruler)
+      const [cx, cy, r] = compassGeo(b), ex = b.x1, ey = b.y1;
+      liveCtx.strokeStyle = tokens.accent; liveCtx.fillStyle = tokens.accent; liveCtx.lineWidth = 1.5 / cam.z;
+      liveCtx.setLineDash([6 / cam.z, 5 / cam.z]); liveCtx.beginPath(); liveCtx.moveTo(cx, cy); liveCtx.lineTo(ex, ey); liveCtx.stroke(); liveCtx.setLineDash([]);
+      liveCtx.beginPath(); liveCtx.arc(cx, cy, 3.5 / cam.z, 0, Math.PI * 2); liveCtx.fill();
+      liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const sx = ex * cam.z + cam.ox, sy = ey * cam.z + cam.oy, txt = 'r = ' + (r / MM / 10).toFixed(1).replace('.', ',') + ' cm';
+      liveCtx.font = '600 13px system-ui, sans-serif'; const tw = liveCtx.measureText(txt).width;
+      // outside the circle, past the pointer, so it never sits on the line or under the hand
+      const d = Math.hypot(ex - cx, ey - cy) || 1;
+      const lx = clamp(sx + (ex - cx) / d * (tw / 2 + 26), tw / 2 + 10, W - tw / 2 - 10), ly = clamp(sy + (ey - cy) / d * 30, 16, H - 16);
+      liveCtx.fillStyle = tokens.accent; liveCtx.fillRect(lx - tw / 2 - 6, ly - 11, tw + 12, 22);
+      liveCtx.fillStyle = '#fff'; liveCtx.fillText(txt, lx - tw / 2, ly + 5);
+    }
   } else {
     const x = Math.min(a.w0[0], a.w1[0]), y = Math.min(a.w0[1], a.w1[1]), w = Math.abs(a.w1[0] - a.w0[0]), h = Math.abs(a.w1[1] - a.w0[1]);
     liveCtx.globalAlpha = 0.08; liveCtx.fillStyle = tokens.accent; liveCtx.fillRect(x, y, w, h); liveCtx.globalAlpha = 1;
@@ -5490,6 +5523,13 @@ function arrowHead(from, tip, size){
 const LINE_SHAPES = ['line', 'arrow', 'darrow', 'spring', 'dline'];
 // Returns the polylines of a shape: [[points, closed], ...]
 function shapePolys(shape, b, w){
+  if(shape === 'compass'){
+    const [cx, cy, r, a0, sw] = compassGeo(b), full = Math.abs(sw) >= 2 * Math.PI - 1e-9;
+    if(r * cam.z < 2) return [];
+    const n = Math.max(24, Math.ceil(Math.abs(sw) * r / 2.5)), V = [];
+    for(let i = 0; i < (full ? n : n + 1); i++){ const t = a0 + sw * i / n; V.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); }
+    return [[V, full]];
+  }
   let {x0, y0, x1, y1} = b;
   const line = LINE_SHAPES.includes(shape);
   if(b.tap){
@@ -5549,6 +5589,10 @@ $('shapeGrid').addEventListener('click', e => {
   const b = e.target.closest('button[data-shape]'); if(!b) return;
   closePops();
   startPick({kind: 'shape', shape: b.dataset.shape}, 'Drag on the page to draw the ' + (b.title || 'shape').toLowerCase());
+});
+$('compassOpen').addEventListener('click', () => {
+  closePops();
+  startPick({kind: 'shape', shape: 'compass'}, 'Put the point on the centre, drag out to the radius, then go around for an arc. Let go without going around for a full circle.');
 });
 
 /* =====================================================================

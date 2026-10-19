@@ -92,6 +92,7 @@
         <div class="swatches" id="swatches"></div>
         <div class="seg" id="eraseMode" hidden><button data-m="stroke" title="Removes whole strokes">Stroke</button><button data-m="area" title="Rubs out only the ink under it">Partial</button></div>
         <button class="tb" id="colorBtn" title="More colours" aria-label="More colours"><span class="rainbow"></span></button>
+        <button class="tb" id="assistBtn" hidden title="Writing assist: keep lines level, even word spacing" aria-label="Writing assist"><svg viewBox="0 0 24 24"><path d="M3 17h18" stroke-dasharray="3 2.5"/><path d="M4 13c1.5-5 3-5 3.5 0s2-5 3.5 0M14 13c1-4 2.5-4 3 0s1.5-3 3-1"/></svg></button>
         <button class="tb" id="pasteBtn" hidden title="Paste what you copied with the Select tool">Paste</button>
         <label class="size" id="sizeWrap" title="Thickness"><span class="size-dot" id="sizeDot"></span><input type="range" id="size" min="1" max="100" aria-label="Thickness"></label>
       </div>
@@ -189,6 +190,14 @@
   <button class="btn ghost" id="compassOpen" title="Compass: circles and arcs from a centre point"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="4" r="1.6"/><path d="M11.3 5.5 6 19M12.7 5.5 18 19M5 15.5c4 3.2 10 3.2 14 0"/></svg>&nbsp;Compass</button>
   <button class="btn ghost" id="graphOpen"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3v18h16M5 3l-2 3M5 3l2 3M21 21l-3-2M21 21l-3 2"/><path d="M8 17c3-1 5-6 11-9"/></svg>&nbsp;Graph / axes</button>
   <p class="hint">Pick a shape, then drag on the page. Tap instead of dragging for a standard size. Compass: put the point on the centre, drag out to the radius, then go around for an arc.</p>
+</div>
+
+<div class="pop assist-pop" id="assistPop" hidden>
+  <div class="pop-title">Writing assist</div>
+  <button class="toggle" id="waLevel"><span class="sw"></span><span>Keep lines level</span></button>
+  <button class="toggle" id="waSpace"><span class="sw"></span><span>Even word spacing</span></button>
+  <p class="hint">For handwriting with the pen. Each word is moved to the height of the first word on its line, and the gap before a new word is made the same every time. Undo still takes away one stroke at a time. Best for text; turn it off for maths and drawings.</p>
+  <p class="hint" id="waOff" hidden>Paused while Write to text is on.</p>
 </div>
 
 <div class="pop fade-pop" id="fadePop" hidden>

@@ -2469,6 +2469,9 @@ function finishLasso(a){
   const wp = [];
   for(let i = 0; i < poly.length; i += 2) wp.push(...toWorld(poly[i], poly[i+1]));
   const ids = [];
+  let lb = [Infinity, Infinity, -Infinity, -Infinity];
+  for(let i = 0; i < wp.length; i += 2){ lb[0] = Math.min(lb[0], wp[i]); lb[1] = Math.min(lb[1], wp[i+1]); lb[2] = Math.max(lb[2], wp[i]); lb[3] = Math.max(lb[3], wp[i+1]); }
+  const lw = lb[2] - lb[0], lh = lb[3] - lb[1];
   for(const it of cur.items.values()){
     if(it.t === 's'){
       const p = it.p, n = p.length / 3, step = Math.max(1, Math.floor(n / 40)) * 3;
@@ -2476,11 +2479,14 @@ function finishLasso(a){
       for(let i = 0; i < p.length; i += step){ tot++; if(pip(p[i], p[i+1], wp)) inside++; }
       if(tot && inside / tot >= 0.35) ids.push(it.id);
     } else {
-      // boxes: the centre, or at least 4 of 9 sample points, inside the loop
+      // boxes (pictures, imported pages, text, formulas) must be mostly inside the loop (1.41.1): before, a loop
+      // around writing in the middle of an imported page caught the whole page because its centre was inside
       const b = itemBox(it);
       let n = 0;
       for(const fx of [0.1, 0.5, 0.9]) for(const fy of [0.1, 0.5, 0.9]) if(pip(b[0] + (b[2] - b[0]) * fx, b[1] + (b[3] - b[1]) * fy, wp)) n++;
-      if(n >= 4 || pip((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, wp)) ids.push(it.id);
+      // centre inside counts only when the loop is about as big as the item (a loose oval around it)
+      const fits = (b[2] - b[0]) * 0.7 <= lw && (b[3] - b[1]) * 0.7 <= lh;
+      if(n >= 6 || (fits && pip((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, wp))) ids.push(it.id);
     }
   }
   if(ids.length) selectIds(ids); else clearSel();

@@ -1,59 +1,136 @@
-INKWELL - SETUP (about 15 minutes, once)
+INKWELL
 
-You need a computer for steps 1 and 2. Step 3 is on the iPad.
+A notes app for the iPad (a OneNote replacement) that runs as a home-screen
+web app: notebooks > sections > pages, typed text and Apple Pencil ink on an
+infinite canvas, PDF/Word/picture import, search, Ask Claude, and sync
+between devices.
+
+Live app: https://slowoff.github.io/inkwell/
+Current version: see VERSION in sw.js.
+
+How it is built:
+- One plain HTML/CSS/JS app, no build step: index.html, app.css, app.js,
+  config.js, sw.js (offline cache). Libraries are bundled in lib/.
+- Notes are stored on the device first (IndexedDB) and synced through
+  Supabase (table "docs", each account only sees its own rows).
+- Sign in is with Google only. Pictures and a copy of all notes
+  ("Inkwell notes.json") go to the person's own Google Drive, folder
+  "Inkwell pictures". Without signing in, everything stays on the device.
+- Hosted on GitHub Pages from the main branch.
+
+The code is public, your notes are not: they sit in the Supabase project,
+protected by your login, and in your own Google Drive.
+
+================================================================
+FIRST-TIME SETUP (only needed for a new copy of Inkwell)
+================================================================
+
+You need a computer for steps 1 to 4. Step 5 is on the iPad.
 
 ----------------------------------------------------------------
 1. SYNC DATABASE (Supabase, free)
 ----------------------------------------------------------------
-a) Go to supabase.com, sign up, click "New project".
-   Name: inkwell. Pick a strong database password (you won't need it again).
-   Region: Central EU (Zurich) or Frankfurt. Create.
-b) Left menu: SQL Editor -> New query. Open setup.sql from this folder,
-   paste everything, click Run. It should say "Success".
-c) Left menu: Project Settings -> API Keys.
-   Copy the "anon" "public" key. If you only see a "publishable" key,
-   open the "Legacy API keys" tab and copy the anon key from there.
-   Then: Project Settings -> Data API (or "API") -> copy the Project URL.
-d) Open config.js in this folder with Notepad and paste both values
-   between the quotes. Save.
-e) Optional, makes sign-up simpler: Authentication -> Sign In / Providers
-   -> Email -> turn off "Confirm email". Otherwise you click a link in an
-   email once after creating your account.
-
-Note: free Supabase projects pause after 7 days without any use.
-If that happens, log in at supabase.com and click "Restore project".
-Your notes stay on the iPad either way.
+a) supabase.com -> New project. Name: inkwell. Region: Central EU
+   (Zurich) or Frankfurt. Pick a strong database password. Create.
+b) SQL Editor -> New query. Paste and Run, in this order:
+     setup.sql
+     supabase/migrations/20261017_limits_and_files.sql
+     supabase/migrations/20261018_gdrive.sql
+     supabase/migrations/20261018_guard_fix.sql
+   Each should say "Success".
+c) Project Settings -> API Keys: copy the "publishable" key
+   (starts with sb_publishable_). Project Settings -> Data API:
+   copy the Project URL. Paste both into config.js
+   (SUPABASE_URL and SUPABASE_ANON_KEY). The old "anon" keys stop
+   working at the end of 2026, so do not use them.
+d) Authentication -> Sign In / Providers: turn OFF "Allow new users
+   to sign up". Accounts are made by the Google sign-in instead.
 
 ----------------------------------------------------------------
-2. HOSTING (GitHub Pages, free)
+2. GOOGLE SIGN-IN AND DRIVE
 ----------------------------------------------------------------
-a) Go to github.com, sign up, click "New repository".
-   Name: inkwell. Public. Create.
-b) Click "uploading an existing file". Drag ALL files and folders from
-   this folder into the page (index.html, app.js, lib, icons, ...).
-   Click "Commit changes".
-c) Repository Settings -> Pages -> Source: "Deploy from a branch",
-   Branch: main, folder: / (root). Save.
-d) After 1-2 minutes your app is at:
+a) console.cloud.google.com -> new project "Inkwell".
+   Enable the Google Drive API.
+b) Google Auth Platform -> Branding: app name Inkwell, privacy policy
+   link https://YOUR-GITHUB-NAME.github.io/inkwell/privacy.html.
+   Audience: External, then "Publish app" (In production).
+   Data access: scopes drive.file, openid, email.
+c) Clients -> Create client -> Web application.
+   Authorized JavaScript origin: https://YOUR-GITHUB-NAME.github.io
+   Authorized redirect URI:      https://YOUR-GITHUB-NAME.github.io/inkwell/
+   Copy the Client ID into config.js (GOOGLE_CLIENT_ID).
+   Keep the Client secret for step 3.
+
+----------------------------------------------------------------
+3. SERVER FUNCTIONS (Supabase Edge Functions)
+----------------------------------------------------------------
+a) Deploy both functions from supabase/functions/ with
+   "Verify JWT" turned OFF (they check the user themselves):
+     files  - Google sign-in, pictures in Google Drive
+     ask    - Ask Claude (optional)
+b) Edge Functions -> Secrets:
+     GOOGLE_CLIENT_ID       the Client ID from step 2
+     GOOGLE_CLIENT_SECRET   the Client secret from step 2
+   For Ask Claude (optional, billed separately by Anthropic):
+     ANTHROPIC_API_KEY      from console.anthropic.com
+     ASK_ALLOWED_EMAILS     comma-separated emails allowed to use it
+     ASK_MODEL / ASK_FAST_MODEL   optional model overrides
+
+----------------------------------------------------------------
+4. HOSTING (GitHub Pages, free)
+----------------------------------------------------------------
+a) github.com -> New repository "inkwell", Public. Upload ALL files and
+   folders from this folder (index.html, app.js, lib, icons, .github ...).
+b) Settings -> Pages -> Source: "Deploy from a branch", branch main,
+   folder / (root). Save. After 1-2 minutes the app is at
    https://YOUR-GITHUB-NAME.github.io/inkwell/
-
-The code is public, your notes are not: they sit in your private
-Supabase project, protected by your login.
+c) In .github/workflows/keepalive.yml put your own Supabase URL and
+   publishable key. It pings the database every 3 days so the free
+   project never pauses.
 
 ----------------------------------------------------------------
-3. ON THE IPAD
+5. ON THE IPAD
 ----------------------------------------------------------------
 a) Open the link in Safari.
 b) Share button -> Add to Home Screen -> Add.
 c) Open Inkwell from the home screen.
 d) Optional: tap the gear (top left) -> Sign in with Google.
-   Without signing in, notes stay on this device only.
 Sign in with the same Google account on your phone or PC and the
-notes sync. Pictures and a copy of the notes go to your own
-Google Drive (folder "Inkwell pictures").
+notes sync. Each Google account keeps its own notes on a device.
 
-----------------------------------------------------------------
-UPDATING LATER
-----------------------------------------------------------------
-Upload the changed files to the same GitHub repository (they replace
-the old ones). Inkwell shows "A new version is ready - Reload".
+================================================================
+OPTIONAL: IMPORT FROM ONENOTE
+================================================================
+Needs a Microsoft app registration (Entra admin center -> App
+registrations): personal + work accounts, platform "Single-page
+application", redirect https://YOUR-GITHUB-NAME.github.io/inkwell/,
+Microsoft Graph delegated permission Notes.Read. Put the Application
+(client) ID in config.js (ONENOTE_CLIENT_ID) or paste it in the app:
+Settings -> Your notes -> Import from OneNote (it has a step-by-step
+guide).
+
+================================================================
+RELEASING A CHANGE
+================================================================
+1. Change the files.
+2. Raise VERSION in sw.js (inkwell-1.38 -> inkwell-1.39 ...).
+   Without this, iPads keep the old cached version.
+3. Run the tests: tests/run.sh (headless Chromium with Playwright,
+   fake Supabase and Google). They also run on GitHub on every push.
+4. Commit and push to main. GitHub Pages redeploys in about a minute.
+5. On the iPad: close Inkwell fully and open it again.
+
+Database changes go in supabase/migrations/ as a new .sql file.
+Old notes must keep working: if the data format changes, old data is
+converted when it loads.
+
+Files:
+  index.html, app.css, app.js   the app
+  config.js                     Supabase URL + key, Google and OneNote client IDs
+  sw.js                         offline cache (VERSION)
+  manifest.webmanifest, icons/  home-screen app
+  privacy.html                  privacy page for the Google consent screen
+  lib/                          pdf.js, pdf-lib, KaTeX, supabase-js, docx-preview
+  setup.sql, supabase/          database setup, migrations, edge functions
+  tests/                        browser tests
+  .github/workflows/            tests on every push, Supabase keep-alive

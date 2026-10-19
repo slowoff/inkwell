@@ -60,11 +60,14 @@ const DEFAULT_PREFS = {
   theme: 'auto',   // 'auto' follows the iPad, or 'light' / 'dark'
   snapHold: 550,   // ms the pen must rest before a stroke is straightened; 0 = off
   leftEdge: false, // true: the page stops at its left edge (endless only up, down and right)
+  zMax: 8,         // highest zoom (1 = 100 %); set from Settings with "Use current zoom"
   askMode: 'tutor',
   askModel: 'auto', // 'auto' (cheap model decides), 'fast' (Haiku) or 'smart' (Sonnet)
   focus: false, open: {}
 };
 const prefs = Object.assign({}, DEFAULT_PREFS, LSget('inkwell.prefs', {}));
+const Z_TOP = 8, Z_MIN = 0.1;
+const zMax = () => { const m = +prefs.zMax; return m >= 0.5 && m <= Z_TOP ? m : Z_TOP; };
 for(const k of ['pen', 'hl', 'eraser', 'mark', 'ruler', 'bg']) prefs[k] = Object.assign({}, DEFAULT_PREFS[k], prefs[k] || {});
 const savePrefs = debounce(() => LSset('inkwell.prefs', prefs), 300);
 const ui = Object.assign({nb: null, sec: null, page: null}, LSget('inkwell.ui', {}));
@@ -1748,12 +1751,12 @@ function pinchMove(){
   const [a, b] = [...touches.values()];
   if(!b) return;
   const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-  const z = clamp(gesture.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0, 0.1, 8);
+  const z = clamp(gesture.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0, Z_MIN, zMax());
   cam.z = z; cam.ox = cx - gesture.wc[0] * z; cam.oy = cy - gesture.wc[1] * z;
   invalidate();
 }
 function zoomAt(sx, sy, z){
-  z = clamp(z, 0.1, 8);
+  z = clamp(z, Z_MIN, zMax());
   const [wx, wy] = toWorld(sx, sy);
   cam.z = z; cam.ox = sx - wx * z; cam.oy = sy - wy * z;
   invalidate(); saveCamSoon();
@@ -5064,6 +5067,10 @@ function renderPrefSettings(){
   const hold = +prefs.snapHold || 0;
   $('setHold').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === hold));
   $('setLeft').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === (prefs.leftEdge ? 1 : 0)));
+  { const cur = Math.round(cam.z * 100), m = Math.round(zMax() * 100), lim = zMax() < Z_TOP;
+    $('setZoomCur').textContent = 'Use current zoom (' + cur + '%)';
+    $('setZoom').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (lim ? 'cur' : 'none')));
+    $('setZoomHint').textContent = lim ? 'You can zoom in up to ' + m + '%. Zoom to another level and tap Use current zoom to change it.' : 'You can zoom in up to 800%. Zoom in as far as you want, then come here and tap Use current zoom.'; }
   $('setLeftHint').textContent = prefs.leftEdge ? 'Pages stop at the left edge and only grow up, down and to the right.' : 'Pages go on forever in every direction.';
   $('setModel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askModel || 'auto')));
   $('setHw').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.hwSearch === false ? 'off' : 'on')));
@@ -5080,6 +5087,12 @@ $('setTheme').addEventListener('click', e => {
 $('setLeft').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
   prefs.leftEdge = b.dataset.v === '1'; savePrefs(); renderPrefSettings(); invalidate();
+});
+$('setZoom').addEventListener('click', e => {
+  const b = e.target.closest('button[data-v]'); if(!b) return;
+  prefs.zMax = b.dataset.v === 'cur' ? clamp(Math.round(cam.z * 100) / 100, 0.5, Z_TOP) : Z_TOP;
+  savePrefs(); renderPrefSettings();
+  toast(b.dataset.v === 'cur' ? 'Max zoom set to ' + Math.round(zMax() * 100) + '%' : 'Max zoom back to 800%');
 });
 $('setModel').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
@@ -6647,7 +6660,7 @@ function snippetHTML(s, k, len){
 function jumpToLine(itemId, y){
   const it = cur && cur.items.get(itemId); if(!it) return;
   const fit = (W - 32) / it.w;
-  if(cam.z < fit * 0.6 || cam.z > fit * 2.2) cam.z = clamp(fit, 0.1, 8);
+  if(cam.z < fit * 0.6 || cam.z > fit * 2.2) cam.z = clamp(fit, Z_MIN, zMax());
   const ly = it.y + (y >= 0 ? y : 0) * it.h;
   cam.ox = (W - it.w * cam.z) / 2 - it.x * cam.z;
   cam.oy = H * (y >= 0 ? 0.33 : 0.04) - ly * cam.z;

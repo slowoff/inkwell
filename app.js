@@ -2522,6 +2522,45 @@ $('selDup').addEventListener('click', () => {
   addItems(copies);
   selectIds(copies.map(c => c.id));
 });
+/* Copy / paste (1.38): Copy in the selection menu keeps the selected items on this device (localStorage
+   inkwell.clip, items stored like in content docs), so they can be pasted on any page with Paste in the
+   Select tool's bar or Ctrl/Cmd+V. Pictures keep their asset id, so nothing is uploaded twice. */
+const Clip = {
+  get(){ const c = LSget('inkwell.clip', null); return c && Array.isArray(c.items) && c.items.length && Array.isArray(c.b) ? c : null; },
+  copy(){
+    if(!sel || !cur) return;
+    computeSel(); if(!sel) return;
+    const items = sel.ids.map(id => cur.items.get(id)).filter(Boolean).map(ser);
+    try { localStorage.setItem('inkwell.clip', JSON.stringify({at: Date.now(), page: cur.id, b: sel.b, items})); }
+    catch { toast('Too much to copy at once'); return; }
+    toast(items.length === 1 ? 'Copied' : 'Copied ' + items.length + ' items', 'Paste', () => Clip.paste());
+    renderOpts();
+  },
+  paste(){
+    const c = Clip.get();
+    if(!cur || !c){ toast('Nothing copied yet'); return; }
+    const b = c.b, bw = b[2] - b[0], bh = b[3] - b[1];
+    const [vx0, vy0] = toWorld(0, 0), [vx1, vy1] = toWorld(W, H);
+    const inView = (b[0] + b[2]) / 2 > vx0 && (b[0] + b[2]) / 2 < vx1 && (b[1] + b[3]) / 2 > vy0 && (b[1] + b[3]) / 2 < vy1;
+    let dx, dy;
+    if(c.page === cur.id && inView){ dx = dy = 24 / cam.z; }   // same spot is on screen: put the copy just beside it
+    else { const [cx, cy] = toWorld(W / 2, H / 2); dx = cx - (b[0] + bw / 2); dy = cy - (b[1] + bh / 2); }
+    if(prefs.leftEdge && b[0] + dx < 0) dx = -b[0];
+    const gmap = new Map();
+    const copies = c.items.map(deser).filter(it => it && it.t && it.id).map(it => {
+      const o = transformItem(it, {dx, dy, s: 1, ax: 0, ay: 0});
+      o.id = it.id[0] + newId() + Math.random().toString(36).slice(2, 5);
+      if(it.g){ if(!gmap.has(it.g)) gmap.set(it.g, 'g' + newId()); o.g = gmap.get(it.g); }
+      return o;
+    });
+    if(!copies.length){ toast('Nothing copied yet'); return; }
+    if(prefs.tool !== 'lasso') setTool('lasso');
+    addItems(copies);
+    selectIds(copies.map(o => o.id));
+  }
+};
+$('selCopy').addEventListener('click', () => Clip.copy());
+$('pasteBtn').addEventListener('click', () => Clip.paste());
 $('selMenu').addEventListener('pointerdown', e => e.stopPropagation());
 
 /* ---------- taps ---------- */
@@ -3591,7 +3630,9 @@ function setTool(t){
 }
 function renderOpts(){
   const t = prefs.tool, ink = t === 'pen' || t === 'hl';
-  $('opts').hidden = !(ink || t === 'eraser' || t === 'mark');
+  const paste = t === 'lasso' && !!Clip.get();
+  $('opts').hidden = !(ink || t === 'eraser' || t === 'mark' || paste);
+  $('pasteBtn').hidden = !paste; $('sizeWrap').hidden = t === 'lasso';
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   if(t === 'eraser') $('eraseMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.eraser.mode === 'area' ? 'area' : 'stroke')));
@@ -7293,6 +7334,9 @@ document.addEventListener('keydown', e => {
     const k = e.key.toLowerCase();
     if(k === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if(k === 'y'){ e.preventDefault(); redo(); }
+    else if(k === 'c' && sel){ e.preventDefault(); Clip.copy(); }
+    else if(k === 'x' && sel){ e.preventDefault(); Clip.copy(); const ids = sel ? sel.ids.slice() : []; clearSel(); removeItems(ids); }
+    else if(k === 'v' && Clip.get()){ e.preventDefault(); Clip.paste(); }
     return;
   }
   if(e.altKey) return;

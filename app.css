@@ -740,7 +740,8 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .fade-pop{width:250px}
 .assist-pop{width:280px}
 .assist-pop .toggle{justify-content:space-between;flex-direction:row-reverse;padding:0 2px;color:var(--fg);font-size:14px}
-.assist-pop .hint{margin:0}
+.assist-pop .hint{margin:-4px 0 4px}
+.tb.busy svg{animation:scribePulse 1s ease-in-out infinite alternate}
 .fade-pop .hint{margin:6px 0 0}
 .g-look{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center;font-size:14px}
 .g-look > span{color:var(--muted)}

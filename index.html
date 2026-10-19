@@ -92,13 +92,12 @@
         <div class="swatches" id="swatches"></div>
         <div class="seg" id="eraseMode" hidden><button data-m="stroke" title="Removes whole strokes">Stroke</button><button data-m="area" title="Rubs out only the ink under it">Partial</button></div>
         <button class="tb" id="colorBtn" title="More colours" aria-label="More colours"><span class="rainbow"></span></button>
-        <button class="tb" id="assistBtn" hidden title="Writing assist: keep lines level, even word spacing" aria-label="Writing assist"><svg viewBox="0 0 24 24"><path d="M3 17h18" stroke-dasharray="3 2.5"/><path d="M4 13c1.5-5 3-5 3.5 0s2-5 3.5 0M14 13c1-4 2.5-4 3 0s1.5-3 3-1"/></svg></button>
+        <button class="tb" id="assistBtn" hidden title="Writing: Write to text, Reference line" aria-label="Writing options"><svg viewBox="0 0 24 24"><path d="M3 17h18" stroke-dasharray="3 2.5"/><path d="M4 13c1.5-5 3-5 3.5 0s2-5 3.5 0M14 13c1-4 2.5-4 3 0s1.5-3 3-1"/></svg></button>
         <button class="tb" id="pasteBtn" hidden title="Paste what you copied with the Select tool">Paste</button>
         <label class="size" id="sizeWrap" title="Thickness"><span class="size-dot" id="sizeDot"></span><input type="range" id="size" min="1" max="100" aria-label="Thickness"></label>
       </div>
       <span class="spacer"></span>
       <button class="tb" id="rulerBtn" title="Ruler" aria-label="Ruler"><svg viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="8" rx="1.5" transform="rotate(-30 12 12)"/><path d="m7.6 13.6 1-1.7M10.6 11.9l1.5-2.6M13.6 10.1l1-1.7" /></svg></button>
-      <button class="toggle" id="scribeBtn" title="What you write with the pen turns into typed text when you pause (needs internet). Undo brings the ink back."><span class="sw"></span><span>Write to text</span></button>
       <button class="toggle" id="fingerBtn" title="When off, fingers scroll and zoom and only the Apple Pencil writes"><span class="sw"></span><span>Finger draws</span></button>
       <button class="tb zoom" id="zoomBtn" title="Reset zoom">100%</button>
     </div>
@@ -193,11 +192,11 @@
 </div>
 
 <div class="pop assist-pop" id="assistPop" hidden>
-  <div class="pop-title">Writing assist</div>
-  <button class="toggle" id="waLevel"><span class="sw"></span><span>Keep lines level</span></button>
-  <button class="toggle" id="waSpace"><span class="sw"></span><span>Even word spacing</span></button>
-  <p class="hint">For handwriting with the pen. Each word is moved to the height of the first word on its line, and the gap before a new word is made the same every time. Undo still takes away one stroke at a time. Best for text; turn it off for maths and drawings.</p>
-  <p class="hint" id="waOff" hidden>Paused while Write to text is on.</p>
+  <div class="pop-title">Writing</div>
+  <button class="toggle" id="scribeBtn"><span class="sw"></span><span>Write to text</span></button>
+  <p class="hint">What you write turns into typed text when you pause (needs sign-in and internet). Undo brings the ink back.</p>
+  <button class="toggle" id="waRef"><span class="sw"></span><span>Reference line</span></button>
+  <p class="hint">A faint line appears under the line you are writing, at the height of its first word, so you can keep the rest straight. Your writing is never moved.</p>
 </div>
 
 <div class="pop fade-pop" id="fadePop" hidden>

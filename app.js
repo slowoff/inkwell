@@ -55,7 +55,7 @@ const DEFAULT_PREFS = {
   finger: false,
   autoText: false,   // Write to text: pen writing becomes a typed text box (needs sign-in)
   snapLines: true,
-  assist: {level: false, space: false},   // Writing assist (1.41): keep handwritten lines level / even word spacing
+  refLine: false,   // Reference line (1.42): faint line under the handwriting line being written
   ruler: {on: false, cx: null, cy: null, a: 0},
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
   theme: 'auto',   // 'auto' follows the iPad, or 'light' / 'dark'
@@ -69,8 +69,10 @@ const DEFAULT_PREFS = {
 const prefs = Object.assign({}, DEFAULT_PREFS, LSget('inkwell.prefs', {}));
 const Z_TOP = 8, Z_MIN = 0.1;
 const zMax = () => { const m = +prefs.zMax; return m >= 0.5 && m <= Z_TOP ? m : Z_TOP; };
-for(const k of ['pen', 'hl', 'eraser', 'mark', 'ruler', 'bg', 'assist']) prefs[k] = Object.assign({}, DEFAULT_PREFS[k], prefs[k] || {});
+for(const k of ['pen', 'hl', 'eraser', 'mark', 'ruler', 'bg']) prefs[k] = Object.assign({}, DEFAULT_PREFS[k], prefs[k] || {});
 const savePrefs = debounce(() => LSset('inkwell.prefs', prefs), 300);
+// 1.41 had prefs.assist {level, space}; 1.42 keeps only the reference line (on if levelling was on)
+if(prefs.assist){ if(prefs.assist.level && !LSget('inkwell.prefs', {}).hasOwnProperty('refLine')) prefs.refLine = true; delete prefs.assist; savePrefs(); }
 const ui = Object.assign({nb: null, sec: null, page: null}, LSget('inkwell.ui', {}));
 const saveUi = () => LSset('inkwell.ui', ui);
 
@@ -1189,7 +1191,7 @@ function frame(){
   if(need.ink) drawInk();
   if(need.over){ positionOverlays(); imgSoon(); renderSlider(); }
   need = {bg: 0, ink: 0, over: 0};
-  if(act) drawLive();
+  if(act || WA.linger()) drawLive();   // the reference line follows the page while it is still showing
 }
 function drawBg(){
   bgCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1876,8 +1878,8 @@ function endTool(e){
     const it = {t: 's', id: 's' + newId(), c: a.c, w: a.w, hl: a.hl, p: a.pts};
     if(a.mk){ it.mk = 1; it.at = Date.now(); }
     const handwriting = a.tool === 'pen' && !a.snapped && !a.hl && !a.mk && !a.edge;
-    if(handwriting) WA.stroke(it);   // writing assist: may move the stroke over (spacing) and level the word before
     addItems([it]);
+    if(handwriting) WA.stroke(it);   // reference line: notes which line is being written (never moves ink)
     if(handwriting) Scribe.add(it);
   } else if(a.kind === 'erase'){
     finishTextErase(a);
@@ -1910,7 +1912,7 @@ function drawLiveSoon(){ if(!liveRaf) liveRaf = requestAnimationFrame(() => { li
 function clearLive(){ liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(0, 0, liveCv.width, liveCv.height); }
 function drawLive(){
   clearLive();
-  if(!act) return;
+  if(!act){ WA.drawAfter(); return; }
   if(act.kind === 'stroke'){
     liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
     const paper = onPaperAt(paperRects(), act.pts[0], act.pts[1]);
@@ -1946,25 +1948,21 @@ function drawLive(){
 }
 
 /* =====================================================================
-   Writing assist (1.41, pen options → Assist). Works on handwriting with the pen on any paper.
-   - Keep lines level: the first word of a line sets its height; every later word on that line is moved
-     up or down to it when it is finished (next word started, or a 0.6 s pause). A faint guide line shows
-     the line while writing.
-   - Even word spacing: the first stroke of a new word is moved sideways so the gap to the word before
-     is always the same (about one letter wide). Gaps smaller than about half a letter count as the gap
-     between letters and are left alone.
-   Moves only fix up the step that added the stroke (patchHist), so Undo still removes one stroke at a time.
-   Nothing is stored: strokes are ordinary strokes. Off while Write to text is on. State lives on cur (cur.wa).
+   Reference line (1.42, pen options → Writing menu, prefs.refLine). Replaces the 1.41 "Keep lines level"
+   and "Even word spacing", which moved your strokes; nothing is moved any more.
+   While you write with the pen, a faint dashed line appears under the line you are writing, at the height
+   of its first word, so you can keep the rest of the line straight yourself. It stays for a few seconds
+   after you lift the pen, then fades. Strokes stay exactly as written. State lives on cur (cur.wa).
    ===================================================================== */
+const REF_LINGER = 4000, REF_FADE = 1200;
 const WA = {
-  on(){ const p = prefs.assist || {}; return (p.level || p.space) && !Scribe.on(); },
-  st(){ if(!cur) return null; if(!cur.wa) cur.wa = {lines: [], timer: 0}; return cur.wa; },
-  ys(p){ const r = []; for(let i = 1; i < p.length; i += 3) r.push(p[i]); return r; },
+  last: null,   // {page, L, at}: the line written on last, for the guide after the pen is lifted
+  on(){ return !!prefs.refLine; },
+  st(){ if(!cur) return null; if(!cur.wa) cur.wa = {lines: []}; return cur.wa; },
   q(arr, f){ if(!arr.length) return 0; const a = arr.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.max(0, Math.round((a.length - 1) * f)))]; },
   box(p){ let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for(let i = 0; i < p.length; i += 3){ const x = p[i], y = p[i+1]; if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y; } return [x0, y0, x1, y1]; },
-  // the height a word sits at: 70th percentile of its ink (low in the letter body, little affected by capitals and descenders)
-  level(ps){ const ys = []; for(const p of ps) for(let i = 1; i < p.length; i += 3) ys.push(p[i]); return this.q(ys, 0.7); },
-  moved(it, dx, dy){ const p = it.p.slice(); for(let i = 0; i < p.length; i += 3){ p[i] += dx; p[i+1] += dy; } return Object.assign({}, it, {p}); },
+  // the height a word sits at: 70th percentile of its ink (low in the letter body)
+  level(p){ const ys = []; for(let i = 1; i < p.length; i += 3) ys.push(p[i]); return this.q(ys, 0.7); },
   findLine(st, b){
     const mid = (b[1] + b[3]) / 2; let best = null, bd = Infinity;
     for(const L of st.lines){
@@ -1974,113 +1972,55 @@ const WA = {
     }
     return best;
   },
-  // called with each finished pen stroke before it is added
+  // each finished pen stroke: find or start its line (only read, never changed)
   stroke(it){
-    if(!this.on() || !cur) return;
-    const st = this.st(); clearTimeout(st.timer);
+    if(!this.on() || !cur || it.p.length < 6) return;
+    const st = this.st();
     const b = this.box(it.p), w = b[2] - b[0], h = b[3] - b[1];
-    if(it.p.length < 6) return;
-    const L = this.findLine(st, b);
+    let L = this.findLine(st, b);
     if(!L){
-      // too big for writing (a drawing, an underline): not part of any line
-      if(h * cam.z > 200 || w * cam.z > 500) return;
+      if(h * cam.z > 200 || w * cam.z > 500) return;   // a drawing, not writing
       const hh = Math.max(h, 6 / cam.z);
-      st.lines.push({ref: this.level([it.p]), h: hh, hs: [hh], left: b[0], right: b[2], ids: [it.id], first: it.id, word: {ids: [it.id], pr: null}});
-      if(st.lines.length > 8) st.lines.shift();
-      return this.arm();
-    }
-    if(h > 3 * L.h || w > 8 * L.h) return;   // a drawing or a line across: leave it and the line alone
-    let gap = b[0] - this.right(L);
-    if(gap > 0.55 * L.h){
-      // a new word: finish the one before (it may move), then measure again
-      this.finish(L);
-      gap = b[0] - this.right(L);
-    }
-    const W = L.word, wb = this.wbox(W);
-    if(gap > 0.55 * L.h){
-      L.word = {ids: [it.id], pr: this.right(L)};
-    } else if(wb && b[0] >= wb[0] - 0.6 * L.h){
-      W.ids.push(it.id);
+      L = {ref: this.level(it.p), h: hh, hs: [hh], left: b[0], right: b[2]};
+      st.lines.push(L); if(st.lines.length > 8) st.lines.shift();
     } else {
-      // added to an older word (an i-dot, a t-bar): it belongs where it was put
+      if(h > 3 * L.h || w > 8 * L.h) return;   // a drawing or a line across: not part of the writing
+      L.left = Math.min(L.left, b[0]); L.right = Math.max(L.right, b[2]);
+      L.hs.push(Math.max(h, 2)); if(L.hs.length > 40) L.hs.shift();
+      L.h = Math.max(this.q(L.hs, 0.5), 6 / cam.z);
     }
-    L.ids.push(it.id); if(L.ids.length > 300) L.ids.shift();
-    L.hs.push(Math.max(h, 2)); if(L.hs.length > 40) L.hs.shift();
-    L.h = Math.max(this.q(L.hs, 0.5), 6 / cam.z);
-    this.arm();
+    this.last = {page: cur.id, L, at: Date.now()};
+    drawLiveSoon();
   },
-  // right edge of the line from the strokes still there (undo and the eraser may have taken some away)
-  right(L){
-    L.ids = L.ids.filter(id => cur.items.has(id));
-    let r = -Infinity; for(const id of L.ids){ const q = this.box(cur.items.get(id).p); if(q[2] > r) r = q[2]; }
-    return r === -Infinity ? L.right : (L.right = r);
+  // after the pen is lifted the guide stays a moment, then fades
+  linger(){
+    const l = this.last;
+    if(!l || !this.on() || !cur || l.page !== cur.id) return 0;
+    const t = Date.now() - l.at;
+    return t < REF_LINGER ? 1 : t < REF_LINGER + REF_FADE ? 1 - (t - REF_LINGER) / REF_FADE : 0;
   },
-  wbox(W){
-    W.ids = W.ids.filter(id => cur.items.has(id));
-    if(!W.ids.length) return null;
-    const r = [Infinity, Infinity, -Infinity, -Infinity];
-    for(const id of W.ids){ const q = this.box(cur.items.get(id).p); r[0] = Math.min(r[0], q[0]); r[1] = Math.min(r[1], q[1]); r[2] = Math.max(r[2], q[2]); r[3] = Math.max(r[3], q[3]); }
-    return r;
+  drawAfter(){
+    const f = this.linger(); if(!f) return;
+    liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
+    this.line(this.last.L, this.last.L.right, f);
+    clearTimeout(this.tm);
+    this.tm = setTimeout(drawLiveSoon, f < 1 ? 50 : REF_LINGER - (Date.now() - this.last.at) + 10);
   },
-  arm(){ const st = this.st(); if(!st) return; clearTimeout(st.timer); st.timer = setTimeout(() => this.idle(), 600); },
-  idle(){
-    if(!cur || !cur.wa) return;
-    if(act && act.kind === 'stroke') return this.arm();
-    for(const L of cur.wa.lines) this.finish(L);
-  },
-  // the word just written: move it to the line's height and/or to the same gap after the word before
-  finish(L){
-    if(!this.on() || !cur) return;
-    const W = L.word, wb = W && this.wbox(W);
-    if(!wb) return;
-    const its = W.ids.map(id => cur.items.get(id)).filter(it => it && it.t === 's');
-    let n = 0; for(const it of its) n += it.p.length / 3;
-    if(n < 4) return;
-    const isFirst = W.ids[0] === L.first;
-    let dx = 0, dy = 0;
-    if(prefs.assist.level && !isFirst){
-      dy = L.ref - this.level(its.map(it => it.p));
-      if(Math.abs(dy) < 0.04 * L.h || Math.abs(dy) > 1.0 * L.h) dy = 0;
-    } else if(!prefs.assist.level){
-      L.ref = this.level(its.map(it => it.p));   // without levelling the line follows the writing, so it is still found after it drifts
-    }
-    if(prefs.assist.space && W.pr !== null){
-      // the word before may have moved since this one started: measure from where it is now
-      const others = L.ids.filter(id => !W.ids.includes(id) && cur.items.has(id)).map(id => this.box(cur.items.get(id).p)).filter(q => q[0] < wb[0]);
-      const pr = others.length ? Math.max(...others.map(q => q[2])) : W.pr;
-      const gap = wb[0] - pr;
-      if(gap > 0.3 * L.h && gap < 5 * L.h) dx = 0.9 * L.h - gap;
-      if(Math.abs(dx) < 0.03 * L.h) dx = 0;
-    }
-    if(!dx && !dy) return;
-    const pairs = its.map(it => [it.id, this.moved(it, dx, dy)]);
-    const loose = [];
-    its.forEach((it, i) => { if(!patchHist(it, pairs[i][1])) loose.push(i); });
-    setItems(pairs);
-    if(loose.length) commit(loose.map(i => [its[i].id, its[i]]), loose.map(i => pairs[i]));
-  },
-  // faint guide under the line being written (Keep lines level only)
+  // while writing: the line under the stroke being written (live canvas already in world units)
   guide(a){
-    if(!prefs.assist.level || !this.on() || !cur || !cur.wa || a.pts.length < 3) return;
-    const b = [a.pts[0], a.pts[1], a.pts[0], a.pts[1]];
-    const L = this.findLine(cur.wa, b); if(!L) return;
-    const y = L.ref + 0.3 * L.h;
+    if(!this.on() || !cur || !cur.wa || a.pts.length < 3) return;
+    const L = this.findLine(cur.wa, [a.pts[0], a.pts[1], a.pts[0], a.pts[1]]); if(!L) return;
+    this.line(L, Math.max(L.right, a.pts[a.pts.length - 3]), 1);
+  },
+  line(L, right, f){
+    const y = L.ref + 0.35 * L.h;
     liveCtx.save();
-    liveCtx.globalAlpha = 0.45; liveCtx.strokeStyle = tokens.accent; liveCtx.lineWidth = 1.2 / cam.z;
+    liveCtx.globalAlpha = 0.45 * f; liveCtx.strokeStyle = tokens.accent; liveCtx.lineWidth = 1.2 / cam.z;
     liveCtx.setLineDash([6 / cam.z, 5 / cam.z]);
-    liveCtx.beginPath(); liveCtx.moveTo(L.left - L.h, y); liveCtx.lineTo(Math.max(L.right, a.pts[0]) + 10 * L.h, y); liveCtx.stroke();
+    liveCtx.beginPath(); liveCtx.moveTo(L.left - L.h, y); liveCtx.lineTo(right + 8 * L.h, y); liveCtx.stroke();
     liveCtx.restore();
   }
 };
-// change a stroke without a new undo step: the step that added (or last changed) it now holds the new version
-function patchHist(old, nw){
-  if(!cur) return false;
-  for(let i = cur.undo.length - 1, n = 0; i >= 0 && n < 80; i--, n++){
-    const e = cur.undo[i].a.find(x => x[0] === old.id);
-    if(e){ if(e[1] === old){ e[1] = nw; return true; } return false; }
-  }
-  return false;
-}
 
 /* eraser: 'stroke' removes whole strokes it touches, 'area' (partial) rubs out only the ink under it */
 function eraseAt(sx, sy){
@@ -2644,16 +2584,13 @@ $('selColors').addEventListener('click', e => {
   if(list.length) replaceItems(list);
 });
 $('selMath').addEventListener('click', () => strokesToFormula());
-// Writing assist (1.41)
+// Writing menu (1.42): Write to text and Reference line
 function renderAssist(){
-  $('waLevel').classList.toggle('on', !!prefs.assist.level);
-  $('waSpace').classList.toggle('on', !!prefs.assist.space);
-  $('waOff').hidden = !prefs.autoText;
+  $('waRef').classList.toggle('on', !!prefs.refLine);
   renderOpts();
 }
-$('assistBtn').addEventListener('click', e => { renderAssist(); openPop('assistPop', e.currentTarget); });
-$('waLevel').addEventListener('click', () => { prefs.assist = Object.assign({}, prefs.assist, {level: !prefs.assist.level}); savePrefs(); if(cur) cur.wa = null; renderAssist(); });
-$('waSpace').addEventListener('click', () => { prefs.assist = Object.assign({}, prefs.assist, {space: !prefs.assist.space}); savePrefs(); if(cur) cur.wa = null; renderAssist(); });
+$('assistBtn').addEventListener('click', e => { renderAssist(); renderScribe(); openPop('assistPop', e.currentTarget); });
+$('waRef').addEventListener('click', () => { prefs.refLine = !prefs.refLine; savePrefs(); if(cur) cur.wa = null; WA.last = null; drawLiveSoon(); renderAssist(); });
 // Fade (1.40): sets the optional o field on everything selected; dragging the slider is one undo step
 const withFade = (it, v) => { const o = Object.assign({}, it); if(v >= 0.995) delete o.o; else o.o = Math.round(v * 100) / 100; return o; };
 let fadeOrig = null;
@@ -3823,7 +3760,7 @@ function renderOpts(){
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   $('assistBtn').hidden = t !== 'pen';
-  $('assistBtn').classList.toggle('on', !!(prefs.assist.level || prefs.assist.space));
+  $('assistBtn').classList.toggle('on', !!(prefs.refLine || prefs.autoText));
   if(t === 'eraser') $('eraseMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.eraser.mode === 'area' ? 'area' : 'stroke')));
   if(ink){
     const favs = t === 'pen' ? prefs.penFavs : prefs.hlFavs, c = prefs[t].c;
@@ -7131,6 +7068,8 @@ function renderScribe(){
   const btn = $('scribeBtn'); if(!btn) return;
   btn.classList.toggle('on', !!prefs.autoText);
   btn.classList.toggle('busy', Scribe.busy);
+  const ab = $('assistBtn');
+  if(ab){ ab.classList.toggle('on', !!(prefs.refLine || prefs.autoText)); ab.classList.toggle('busy', Scribe.busy); }
 }
 $('scribeBtn').addEventListener('click', () => {
   prefs.autoText = !prefs.autoText; savePrefs(); renderScribe();

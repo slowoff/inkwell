@@ -81,20 +81,49 @@ async def main():
 
         rows = await page.evaluate(LIVE_ROWS)
         y0 = Y - box[1]
-        check(rows and all(y0 - 14 <= r <= y0 + 6 for r in rows), f'faint line shown under the first word after lifting the pen (rows {rows[:4]}, letters end at {y0:.0f})')
+        check(rows and all(y0 - 1 <= r <= y0 + 5 for r in rows), f'faint line shown under the first word after lifting the pen (rows {rows[:4]}, letters end at {y0:.0f})')
         # while writing: line is there during the stroke too
         await page.mouse.move(X + 21 * 12 + 120, Y - 20); await page.mouse.down()
         for k in range(8): await page.mouse.move(X + 21 * 12 + 120 + 3 * k, Y - 20 + 2 * k)
         rows2 = await page.evaluate(LIVE_ROWS)
         await page.mouse.up()
-        check(any(y0 - 14 <= r <= y0 + 6 for r in rows2), 'line shown while writing')
+        check(any(y0 - 1 <= r <= y0 + 5 for r in rows2), 'line shown while writing')
         await page.wait_for_timeout(5800)
         rows3 = await page.evaluate(LIVE_ROWS)
         check(not rows3, f'line fades away a few seconds after the pen is lifted ({len(rows3)} rows left)')
 
+        # 1.42.1: i-dots, t-bars, a dot before the first letter and a descender never set the line
+        async def dash(x0, y0_, x1, y1_):
+            await page.mouse.move(x0, y0_); await page.mouse.down()
+            for k in range(1, 6): await page.mouse.move(x0 + (x1 - x0) * k / 5, y0_ + (y1_ - y0_) * k / 5)
+            await page.mouse.up(); await page.wait_for_timeout(80)
+        await page.evaluate("() => { const W = __inkwell; W.removeItems([...W.cur.items.keys()]); W.cur.wa = null; W.WA.last = null; }")
+        Y2 = Y + 120; y2 = Y2 - box[1]
+        await dash(X - 10, Y2 - 45, X - 8, Y2 - 44)                       # stray dot before writing
+        n0 = await page.evaluate("() => (__inkwell.cur.wa ? __inkwell.cur.wa.lines.length : 0)")
+        check(n0 == 0, f'a dot on its own does not start a line ({n0})')
+        await letter(page, X, Y2)
+        # descender: a "g"-like stroke reaching 14 px below the line
+        await page.mouse.move(X + 29, Y2 - 26); await page.mouse.down()
+        for k in range(1, 15): await page.mouse.move(X + 29 + (k % 3) * 4, Y2 - 26 + 40 * k / 14)
+        await page.mouse.up()
+        await letter(page, X + 42, Y2); await letter(page, X + 63, Y2)
+        await dash(X + 8, Y2 - 46, X + 9, Y2 - 45)                         # i-dot above the first letter
+        await dash(X + 60, Y2 - 22, X + 82, Y2 - 23)                       # t-bar across the top
+        await page.wait_for_timeout(150)
+        n1 = await page.evaluate("() => __inkwell.cur.wa.lines.length")
+        rows = await page.evaluate(LIVE_ROWS)
+        check(n1 == 1, f'dots and bars stay on the same line ({n1} lines)')
+        check(rows and all(y2 - 1 <= r <= y2 + 5 for r in rows), f'line stays at the bottom of the letters after a dot, a bar and a descender (rows {rows[:4]}, letters end at {y2:.0f})')
+        # while drawing a dot above, the line under the letters keeps showing
+        await page.mouse.move(X + 50, Y2 - 48); await page.mouse.down(); await page.mouse.move(X + 51, Y2 - 47)
+        rows = await page.evaluate(LIVE_ROWS)
+        await page.mouse.up()
+        check(any(y2 - 1 <= r <= y2 + 5 for r in rows), 'while dotting an i the line stays under the letters')
+
         # off: no line
         await page.evaluate("() => { __inkwell.prefs.refLine = false; }")
-        await letter(page, X, Y + 150); await page.wait_for_timeout(200)
+        await page.wait_for_timeout(5800); await letter(page, X, Y + 250); await page.wait_for_timeout(200)
         check(not await page.evaluate(LIVE_ROWS), 'no line when Reference line is off')
         check(not errs, 'no page errors ' + '; '.join(errs[:3]))
         await b.close()

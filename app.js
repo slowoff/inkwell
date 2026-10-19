@@ -1961,14 +1961,18 @@ const WA = {
   st(){ if(!cur) return null; if(!cur.wa) cur.wa = {lines: []}; return cur.wa; },
   q(arr, f){ if(!arr.length) return 0; const a = arr.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.max(0, Math.round((a.length - 1) * f)))]; },
   box(p){ let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for(let i = 0; i < p.length; i += 3){ const x = p[i], y = p[i+1]; if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y; } return [x0, y0, x1, y1]; },
-  // the height a word sits at: 70th percentile of its ink (low in the letter body)
-  level(p){ const ys = []; for(let i = 1; i < p.length; i += 3) ys.push(p[i]); return this.q(ys, 0.7); },
+  // A line: base = where the letters sit (median bottom of its first few letter-sized strokes, so one
+  // descender like g or y does not move it), h = typical letter height. Dots, i-dots and t-bars never set it.
+  mid(L){ return L.base - 0.5 * L.h; },
+  small(h, w, L){ return L ? h < 0.45 * L.h : (h * cam.z < 10 || (h < 0.35 * w && h * cam.z < 16)); },
   findLine(st, b){
-    const mid = (b[1] + b[3]) / 2; let best = null, bd = Infinity;
+    const m = (b[1] + b[3]) / 2, h = b[3] - b[1], w = b[2] - b[0]; let best = null, bd = Infinity;
     for(const L of st.lines){
-      const d = Math.abs(mid - L.ref);
-      if(d > 1.1 * L.h || b[0] < L.left - 2 * L.h || b[0] > L.right + 12 * L.h) continue;
-      if(d < bd){ bd = d; best = L; }
+      if(b[0] < L.left - 2 * L.h || b[0] > L.right + 12 * L.h) continue;
+      const d = m - this.mid(L);
+      // dots and crossbars may sit well above the letters
+      const ok = this.small(h, w, L) ? d > -2.2 * L.h && d < 1.1 * L.h : Math.abs(d) <= 1.1 * L.h;
+      if(ok && Math.abs(d) < bd){ bd = Math.abs(d); best = L; }
     }
     return best;
   },
@@ -1980,14 +1984,17 @@ const WA = {
     let L = this.findLine(st, b);
     if(!L){
       if(h * cam.z > 200 || w * cam.z > 500) return;   // a drawing, not writing
-      const hh = Math.max(h, 6 / cam.z);
-      L = {ref: this.level(it.p), h: hh, hs: [hh], left: b[0], right: b[2]};
+      if(this.small(h, w, null)) return;                // a dot or dash on its own does not start a line
+      L = {base: b[3], bots: [b[3]], h, hs: [h], left: b[0], right: b[2]};
       st.lines.push(L); if(st.lines.length > 8) st.lines.shift();
     } else {
       if(h > 3 * L.h || w > 8 * L.h) return;   // a drawing or a line across: not part of the writing
       L.left = Math.min(L.left, b[0]); L.right = Math.max(L.right, b[2]);
-      L.hs.push(Math.max(h, 2)); if(L.hs.length > 40) L.hs.shift();
-      L.h = Math.max(this.q(L.hs, 0.5), 6 / cam.z);
+      if(!this.small(h, w, L)){
+        L.hs.push(h); if(L.hs.length > 40) L.hs.shift();
+        L.h = Math.max(this.q(L.hs, 0.5), 6 / cam.z);
+        if(L.bots.length < 5){ L.bots.push(b[3]); L.base = this.q(L.bots, 0.5); }
+      }
     }
     this.last = {page: cur.id, L, at: Date.now()};
     drawLiveSoon();
@@ -2009,11 +2016,18 @@ const WA = {
   // while writing: the line under the stroke being written (live canvas already in world units)
   guide(a){
     if(!this.on() || !cur || !cur.wa || a.pts.length < 3) return;
-    const L = this.findLine(cur.wa, [a.pts[0], a.pts[1], a.pts[0], a.pts[1]]); if(!L) return;
+    // the line this stroke is near; while a dot or bar is being drawn above, keep showing the line just written
+    let L = this.findLine(cur.wa, [a.pts[0], a.pts[1], a.pts[0], a.pts[1]]);
+    const l = this.last;
+    if(l && l.page === cur.id){
+      const d = a.pts[1] - this.mid(l.L);
+      if(d > -2.5 * l.L.h && d < 1.2 * l.L.h && a.pts[0] > l.L.left - 2 * l.L.h && a.pts[0] < l.L.right + 12 * l.L.h) L = l.L;
+    }
+    if(!L) return;
     this.line(L, Math.max(L.right, a.pts[a.pts.length - 3]), 1);
   },
   line(L, right, f){
-    const y = L.ref + 0.35 * L.h;
+    const y = L.base + 2 / cam.z;   // just under the bottom of the letters
     liveCtx.save();
     liveCtx.globalAlpha = 0.45 * f; liveCtx.strokeStyle = tokens.accent; liveCtx.lineWidth = 1.2 / cam.z;
     liveCtx.setLineDash([6 / cam.z, 5 / cam.z]);

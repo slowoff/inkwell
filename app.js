@@ -1009,6 +1009,8 @@ function decPts(str){
   return p;
 }
 const ser = it => it.t === 's' ? Object.assign({}, it, {p: encPts(it.p)}) : it;
+// optional fade on any item (1.40): o between 0.1 and 1, missing = fully visible (older versions just ignore it)
+const opOf = it => it && it.o > 0 && it.o < 1 ? it.o : 1;
 const deser = it => it && it.t === 's' ? Object.assign({}, it, {p: decPts(it.p)}) : it;
 const r1 = v => Math.round(v * 10) / 10;
 
@@ -1228,7 +1230,7 @@ function drawInk(){
       const g = geoOf(it);
       if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
       const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
-      inkCtx.globalAlpha = pass ? (isDark() && !paper ? 0.34 : 0.4) : 1;
+      inkCtx.globalAlpha = (pass ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
       inkCtx.fillStyle = inkColor(it.c, false, paper);
       inkCtx.fill(g.path);
     }
@@ -1346,6 +1348,7 @@ function itemEl(it){
   }
   el.style.left = it.x + 'px';
   el.style.top = it.y + 'px';
+  el.style.opacity = opOf(it) < 1 ? String(opOf(it)) : '';
   if(layer === worldFront) frontXf(el);
   if(it.t === 'i'){
     el.classList.add('it-img');
@@ -2085,6 +2088,8 @@ function eraseArea(wx, wy, R){
       if(pp.length < 6) continue;   // a lone point is just a crumb
       const np = {t: 's', id: 's' + newId(), c: it.c, w: it.w, hl: it.hl, p: pp};
       if(it.mk){ np.mk = 1; if(it.at) np.at = it.at; }
+      if(it.g) np.g = it.g;
+      if(it.o) np.o = it.o;
       cur.items.set(np.id, np); act.added.set(np.id, np);
     }
   }
@@ -2378,7 +2383,7 @@ function computeSel(){
   for(const id of sel.ids){ const q = itemBox(cur.items.get(id)); b = [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])]; }
   sel.b = b;
 }
-function clearSel(){ sel = null; $('selBox').hidden = true; }
+function clearSel(){ sel = null; $('selBox').hidden = true; if(!$('fadePop').hidden) closePop('fadePop'); }
 function transformItem(it, tf){
   if(tf.r !== undefined) return rotateItem(it, tf.r, tf.ax, tf.ay);   // r can be 0 (back to start)
   const m = (x, y) => [tf.ax + (x - tf.ax) * tf.s + tf.dx, tf.ay + (y - tf.ay) * tf.s + tf.dy];
@@ -2492,6 +2497,31 @@ $('selColors').addEventListener('click', e => {
   if(list.length) replaceItems(list);
 });
 $('selMath').addEventListener('click', () => strokesToFormula());
+// Fade (1.40): sets the optional o field on everything selected; dragging the slider is one undo step
+const withFade = (it, v) => { const o = Object.assign({}, it); if(v >= 0.995) delete o.o; else o.o = Math.round(v * 100) / 100; return o; };
+let fadeOrig = null;
+const fadeLabel = v => { $('fadeVal').textContent = Math.round(v * 100) + ' %'; };
+$('selFade').addEventListener('click', e => {
+  if(!sel || !cur) return;
+  const its = sel.ids.map(id => cur.items.get(id)).filter(Boolean);
+  const v = its.length ? Math.max(...its.map(opOf)) : 1;
+  $('fadeRange').value = Math.round(v * 100); fadeLabel(v); fadeOrig = null;
+  openPop('fadePop', e.currentTarget);
+});
+function fadeCommit(){
+  if(!fadeOrig || !cur) { fadeOrig = null; return; }
+  const after = fadeOrig.map(it => [it.id, cur.items.get(it.id) || null]);
+  if(after.some(([id, it], i) => it !== fadeOrig[i])) commit(fadeOrig.map(it => [it.id, it]), after);
+  fadeOrig = null;
+}
+$('fadeRange').addEventListener('input', () => {
+  if(!sel || !cur) return;
+  const v = clamp(+$('fadeRange').value / 100, 0.1, 1);
+  if(!fadeOrig) fadeOrig = sel.ids.map(id => cur.items.get(id)).filter(Boolean);
+  setItems(fadeOrig.map(it => [it.id, withFade(it, v)]));
+  fadeLabel(v);
+});
+$('fadeRange').addEventListener('change', fadeCommit);
 $('selRot90').addEventListener('click', () => {
   if(!sel) return;
   const b = sel.b, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
@@ -3827,7 +3857,7 @@ async function drawMarkPreview(cv, e){
     if(it.t !== 's' || (it.hl ? 1 : 0) !== pass) continue;
     const sb = strokeBox(it); if(boxGap(sb, area) > 0) continue;
     const paper = onP((sb[0] + sb[2]) / 2, (sb[1] + sb[3]) / 2);
-    ctx.globalAlpha = pass ? 0.4 : 1;
+    ctx.globalAlpha = (pass ? 0.4 : 1) * opOf(it);
     ctx.fillStyle = inkColor(it.c, false, paper);
     ctx.fill(strokePath(it, false));
   }
@@ -4153,7 +4183,7 @@ function drawVersion(cv, data){
   const sc = Math.min((W - 12) / Math.max(1, b[2] - b[0]), (H - 12) / Math.max(1, b[3] - b[1]), 1);
   ctx.setTransform(sc, 0, 0, sc, 6 - b[0] * sc, 6 - b[1] * sc);
   for(const it of items){
-    if(it.t === 's'){ ctx.globalAlpha = it.hl ? 0.35 : 1; ctx.fillStyle = inkColor(it.c, true); ctx.fill(strokePath(it, false)); ctx.globalAlpha = 1; }
+    if(it.t === 's'){ ctx.globalAlpha = (it.hl ? 0.35 : 1) * opOf(it); ctx.fillStyle = inkColor(it.c, true); ctx.fill(strokePath(it, false)); ctx.globalAlpha = 1; }
     else { const q = boxOf(it); ctx.fillStyle = it.t === 'i' ? '#e4e6ea' : it.t === 'tp' ? '#e8b23a' : '#c3c8d0'; ctx.fillRect(q[0], q[1], q[2] - q[0], it.t === 'x' ? Math.min(q[3] - q[1], 10 / sc) : q[3] - q[1]); }
   }
 }
@@ -4194,9 +4224,9 @@ function openPop(id, anchor){
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }
-function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop']) closePop(id); }
+function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop']) closePop(id); }
 document.addEventListener('pointerdown', e => {
-  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,[data-act="tcolor"]')) return;
+  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,#selFade,[data-act="tcolor"]')) return;
   closePops();
 }, true);
 function showModal(id){ closePops(); $(id).hidden = false; }
@@ -4500,7 +4530,8 @@ async function exportPdf(){
   for(const pass of [1, 0]) for(const it of cur.items.values()){
     if(it.t !== 's' || it.mk || (it.hl ? 1 : 0) !== pass) continue;
     const q = itemBox(it);
-    inks.push({a: q[1], b: q[3], h: `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${pass ? ' fill-opacity="0.4"' : ''}/>`});
+    const fo = (pass ? 0.4 : 1) * opOf(it);
+    inks.push({a: q[1], b: q[3], h: `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
   }
   const tops = [];
   for(const it of cur.items.values()){
@@ -4551,7 +4582,7 @@ async function printSheets(gi){
     for(const p of J.hit(J.parts, k)){
       if(!p.img){ body += p.h; continue; }
       const it = p.img, u = await assetURL(it.a);
-      if(u) body += `<img src="${u}" style="position:absolute;left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px">`;
+      if(u) body += `<img src="${u}" style="position:absolute;left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px${opOf(it) < 1 ? ';opacity:' + opOf(it) : ''}">`;
     }
     body += `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1">${J.hit(J.inks, k).map(p => p.h).join('')}</svg>` + J.hit(J.tops, k).map(p => p.h).join('');
     html += `<div class="print-sheet"><div style="position:absolute;left:${J.margin}px;top:${J.margin}px;width:${J.pw}px;height:${J.ph}px;overflow:hidden"><div class="print-inner" style="transform:scale(${J.s}) translate(${-J.x0}px,${-ya}px)">${body}</div></div></div>`;
@@ -4624,7 +4655,7 @@ async function exportPdfFile(){
       if(i % 4 === 0){ say(`Preparing text ${i + 1} of ${texts.length}…`); await tick(); }
       const it = texts[i], el = elMap.get(it.id), w = el.offsetWidth, h = el.offsetHeight;
       if(!w || !h) continue;
-      const c = el.cloneNode(true); c.removeAttribute('contenteditable');
+      const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.opacity = '';
       if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
       const sc = Math.max(1, Math.min(s * 2.5, Math.sqrt(12e6 / (w * h))));
       const png = await doc.embedPng(await renderPng(c, w, h, sc));
@@ -4670,16 +4701,16 @@ async function exportPdfFile(){
           embedded.set(it.a, img);
         }
         const r = {x: X(it.x), y: Y(it.y + it.h), width: it.w * s * k, height: it.h * s * k};
-        if(img) page.drawImage(img, r);
+        if(img) page.drawImage(img, opOf(it) < 1 ? {...r, opacity: opOf(it)} : r);
         const ov = overlays.get(it.id); if(ov) page.drawImage(ov, r);
       }
       for(const it of inks){
         const q = inkBoxes.get(it.id); if(!reach(q[1], q[3])) continue;
-        page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true)), opacity: it.hl ? 0.4 : 1});
+        page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true)), opacity: (it.hl ? 0.4 : 1) * opOf(it)});
       }
       for(const t of tops){
         if(!reach(t.b[1], t.b[3])) continue;
-        page.drawImage(t.png, {x: X(t.x), y: Y(t.y + t.h), width: t.w * s * k, height: t.h * s * k});
+        page.drawImage(t.png, {x: X(t.x), y: Y(t.y + t.h), width: t.w * s * k, height: t.h * s * k, opacity: opOf(t.it)});
       }
       page.pushOperators(popGraphicsState());
     }
@@ -5662,18 +5693,43 @@ function labelTex(s){
   return m ? m[1] + '\\ ' + txt(m[2].trim()) : txt(s);
 }
 const fmtNum = v => { const r = Math.round(v * 1e6) / 1e6; return String(r).replace('-', '-'); };
+// Look (1.40), o.look: size (scale), axC (axes + labels colour), fnC / fnW / fnS (curve colour, width factor,
+// 'solid' | 'dash' | 'dot'), gridO / allO (fade in %, 10–100), arrows. Missing = the look from before 1.40.
+const GRAPH_LOOK = {size: 1, axC: 'auto', fnC: '#1F4FCF', fnW: 1.15, fnS: 'solid', gridO: 100, allO: 100, arrows: true};
+// cuts a polyline into dashes along its length: [[points], …]
+function dashPolys(V, dash, gap){
+  const out = []; let cur = [V[0]], on = true, left = dash;
+  for(let i = 1; i < V.length; i++){
+    let a = V[i - 1]; const b = V[i]; let d = dist(a, b);
+    while(d > left){
+      const t = left / d, m = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      if(on){ cur.push(m); out.push(cur); } else cur = [m];
+      on = !on; d -= left; a = m; left = on ? dash : gap;
+    }
+    left -= d; if(on) cur.push(b);
+  }
+  if(on && cur.length > 1) out.push(cur);
+  return out;
+}
 function buildGraph(o, gx, gy){
-  const items = [], w = penWidth(), axisC = 'auto', id = p => p + newId() + Math.random().toString(36).slice(2, 5);
+  const L = Object.assign({}, GRAPH_LOOK, o.look || {}), S = L.size > 0 ? L.size : 1;
+  const items = [], w = penWidth(), axisC = L.axC || 'auto', id = p => p + newId() + Math.random().toString(36).slice(2, 5);
   const grp = 'g' + newId();
-  const stroke = (V, c = axisC, ww = w) => items.push({t: 's', id: id('s'), c, w: ww, hl: 0, p: polyPts(V, false)});
-  const formula = (tex, x, y, fs) => { if(tex) items.push({t: 'm', id: id('m'), x, y, tex, fs, c: 'auto'}); };
+  const stroke = (V, c = axisC, ww = w, op = 1) => { const it = {t: 's', id: id('s'), c, w: ww, hl: 0, p: polyPts(V, false)}; if(op < 1) it.o = op; items.push(it); };
+  const formula = (tex, x, y, fs) => { if(tex) items.push({t: 'm', id: id('m'), x, y, tex, fs, c: axisC}); };
   const hs = Math.max(10, w * 5);
+  const arrow = (from, tip) => { if(L.arrows !== false) stroke(arrowHead(from, tip, hs)); };
+  const finish = () => {
+    const all = clamp((+L.allO || 100) / 100, 0.1, 1);
+    items.forEach(it => { it.g = grp; if(all < 1){ const v = Math.round(opOf(it) * all * 100) / 100; it.o = Math.max(0.05, v); } });
+    return items;
+  };
   if(o.type === '3d'){
-    const Ox = gx + 120, Oy = gy + 200, L = 210;
-    const ends = {y: [Ox + L, Oy], z: [Ox, Oy - L], x: [Ox - L * 0.55, Oy + L * 0.55]};
+    const Ox = gx + 120 * S, Oy = gy + 200 * S, Ln = 210 * S;
+    const ends = {y: [Ox + Ln, Oy], z: [Ox, Oy - Ln], x: [Ox - Ln * 0.55, Oy + Ln * 0.55]};
     for(const k of ['x', 'y', 'z']){
       const e = ends[k];
-      stroke([[Ox, Oy], e]); stroke(arrowHead([Ox, Oy], e, hs));
+      stroke([[Ox, Oy], e]); arrow([Ox, Oy], e);
       for(let i = 1; i <= 4; i++){
         const t = i / 5, px = Ox + (e[0] - Ox) * t, py = Oy + (e[1] - Oy) * t;
         if(k === 'z') stroke([[px - 4, py], [px + 4, py]]); else stroke([[px, py - 4], [px, py + 4]]);
@@ -5682,23 +5738,23 @@ function buildGraph(o, gx, gy){
     formula(labelTex(o.ly), ends.y[0] + 6, ends.y[1] + 4, 18);
     formula(labelTex(o.lz), ends.z[0] + 10, ends.z[1] - 6, 18);
     formula(labelTex(o.lx), ends.x[0] - 26, ends.x[1] - 6, 18);
-    items.forEach(it => it.g = grp);
-    return items;
+    return finish();
   }
-  const GW = 380, GH = 270;
+  const GW = 380 * S, GH = 270 * S;
   let {x0, x1, xs, y0, y1, ys} = o;
   const X = v => gx + (v - x0) / (x1 - x0) * GW, Y = v => gy + GH - (v - y0) / (y1 - y0) * GH;
   const ax = X(clamp(0, x0, x1)), ay = Y(clamp(0, y0, y1));
   const ticks = (a, b, st) => { const out = []; if(!(st > 0)) return out; const n0 = Math.ceil(a / st - 1e-9), n1 = Math.floor(b / st + 1e-9); if(n1 - n0 > 200) return out; for(let n = n0; n <= n1; n++) out.push(n * st); return out; };
   const tx = ticks(x0, x1, xs), ty = ticks(y0, y1, ys);
   if(o.grid){
-    for(const v of tx) if(Math.abs(X(v) - ax) > 0.5) stroke([[X(v), Y(y0)], [X(v), Y(y1)]], '#8A97A4', w * 0.45);
-    for(const v of ty) if(Math.abs(Y(v) - ay) > 0.5) stroke([[X(x0), Y(v)], [X(x1), Y(v)]], '#8A97A4', w * 0.45);
+    const go = clamp((+L.gridO || 100) / 100, 0.1, 1);
+    for(const v of tx) if(Math.abs(X(v) - ax) > 0.5) stroke([[X(v), Y(y0)], [X(v), Y(y1)]], '#8A97A4', w * 0.45, go);
+    for(const v of ty) if(Math.abs(Y(v) - ay) > 0.5) stroke([[X(x0), Y(v)], [X(x1), Y(v)]], '#8A97A4', w * 0.45, go);
   }
   const xe = [X(x1) + 22, ay], ye = [ax, Y(y1) - 22];
-  stroke([[X(x0), ay], xe]); stroke(arrowHead([X(x0), ay], xe, hs));
-  stroke([[ax, Y(y0)], ye]); stroke(arrowHead([ax, Y(y0)], ye, hs));
-  const every = arr => Math.max(1, Math.ceil(arr.length / 12));
+  stroke([[X(x0), ay], xe]); arrow([X(x0), ay], xe);
+  stroke([[ax, Y(y0)], ye]); arrow([ax, Y(y0)], ye);
+  const every = arr => Math.max(1, Math.ceil(arr.length / Math.max(4, Math.round(12 * S))));
   const ex = every(tx), ey = every(ty);
   tx.forEach((v, i) => {
     if(Math.abs(X(v) - ax) < 0.5) return;
@@ -5721,17 +5777,37 @@ function buildGraph(o, gx, gy){
       else { if(seg.length > 1) segs.push(seg); seg = []; }
     }
     if(seg.length > 1) segs.push(seg);
+    const fw = w * (L.fnW > 0 ? L.fnW : 1.15), fc = L.fnC || '#1F4FCF';
     for(const sg of segs){
-      // thin out points that lie on a straight line
-      const V = rdp(sg, 0.25);
-      items.push({t: 's', id: id('s'), c: '#1F4FCF', w: w * 1.15, hl: 0, p: polyPts(V, false)});
+      const pieces = L.fnS === 'dash' ? dashPolys(sg, Math.max(8, fw * 4), Math.max(6, fw * 3))
+        : L.fnS === 'dot' ? dashPolys(sg, Math.max(0.6, fw * 0.3), Math.max(5, fw * 2.6)) : [sg];
+      for(const pc of pieces){
+        // thin out points that lie on a straight line
+        const V = pc.length > 2 ? rdp(pc, 0.25) : pc;
+        items.push({t: 's', id: id('s'), c: fc, w: fw, hl: 0, p: polyPts(V, false)});
+      }
     }
   }
-  items.forEach(it => it.g = grp);
-  return items;
+  return finish();
 }
 const GRAPH_DEFAULTS = {q1: {x0: 0, x1: 10, xs: 1, y0: 0, y1: 10, ys: 1}, q4: {x0: -5, x1: 5, xs: 1, y0: -5, y1: 5, ys: 1}};
 let graphType = 'q1';
+// the dialog's look choices are remembered per device (prefs.graph); grid lines start half faded
+const gLook = () => { if(!prefs.graph || typeof prefs.graph !== 'object') prefs.graph = {}; return Object.assign({}, GRAPH_LOOK, {gridO: 50}, prefs.graph); };
+function setGLook(k, v){ if(!prefs.graph || typeof prefs.graph !== 'object') prefs.graph = {}; prefs.graph[k] = v; savePrefs(); renderGLook(); }
+function renderGLook(){
+  const L = gLook();
+  const seg = (box, v) => $(box).querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === +v || b.dataset.v === String(v)));
+  seg('gSize', L.size); seg('gFnW', L.fnW); seg('gFnS', L.fnS);
+  const sw = (box, list, v) => { $(box).innerHTML = list.map(c => `<button class="swatch${c === v ? ' on' : ''}" data-c="${c}" aria-label="${c === 'auto' ? 'Automatic (black or white)' : c}"><span style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span></button>`).join(''); };
+  const favs = [...new Set(['auto', ...prefs.penFavs, '#8A97A4'])];
+  sw('gAxC', favs, L.axC);
+  sw('gFnC', [...new Set(['#1F4FCF', ...prefs.penFavs])], L.fnC);
+  $('gGridO').value = L.gridO; $('gGridOv').textContent = L.gridO + ' %';
+  $('gAllO').value = L.allO; $('gAllOv').textContent = L.allO + ' %';
+  $('gArrows').checked = L.arrows !== false;
+  drawGraphPreview();
+}
 function setGraphType(t){
   graphType = t;
   $('gType').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === t));
@@ -5739,6 +5815,44 @@ function setGraphType(t){
   document.querySelectorAll('#graphDlg .g3').forEach(el => el.hidden = t !== '3d');
   const d = GRAPH_DEFAULTS[t];
   if(d) for(const [k, v] of Object.entries({gX0: d.x0, gX1: d.x1, gXs: d.xs, gY0: d.y0, gY1: d.y1, gYs: d.ys})) $(k).value = v;
+  drawGraphPreview();
+}
+// reads the dialog: {o} or {err}
+function readGraph(){
+  const num = id => { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) ? v : NaN; };
+  const o = {type: graphType, lx: $('gLx').value, ly: $('gLy').value, lz: $('gLz').value, nums: $('gNums').checked, grid: $('gGrid').checked, look: gLook()};
+  if(graphType !== '3d'){
+    Object.assign(o, {x0: num('gX0'), x1: num('gX1'), xs: Math.abs(num('gXs')), y0: num('gY0'), y1: num('gY1'), ys: Math.abs(num('gYs'))});
+    if(!(o.x1 > o.x0) || !(o.y1 > o.y0)) return {err: 'Each "to" must be bigger than its "from".'};
+    try { o.fn = parseFn($('gFn').value); } catch(err){ return {err: err.message}; }
+  }
+  return {o};
+}
+// small picture of the graph in the dialog; formulas drawn as plain text
+function drawGraphPreview(){
+  const cv = $('gPrev'); if(!cv || $('graphDlg').hidden) return;
+  const r = cv.getBoundingClientRect(); if(!r.width) return;
+  const d = Math.min(2, devicePixelRatio || 1), CW = Math.round(r.width * d), CH = Math.round(r.height * d);
+  if(cv.width !== CW || cv.height !== CH){ cv.width = CW; cv.height = CH; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, CW, CH);
+  const g = readGraph(); if(g.err) return;
+  const items = buildGraph(g.o, 0, 0);
+  const tw = it => texPlain(it.tex).length * it.fs * 0.55;
+  let b = null;
+  for(const it of items){
+    const q = it.t === 's' ? strokeBox(it) : [it.x, it.y, it.x + tw(it), it.y + it.fs * 1.3];
+    b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q;
+  }
+  if(!b) return;
+  const kk = Math.min(1.6 * d, (CW - 24 * d) / (b[2] - b[0]), (CH - 16 * d) / (b[3] - b[1]));
+  ctx.setTransform(kk, 0, 0, kk, CW / 2 - (b[0] + b[2]) / 2 * kk, CH / 2 - (b[1] + b[3]) / 2 * kk);
+  for(const it of items){
+    ctx.globalAlpha = opOf(it);
+    if(it.t === 's'){ ctx.fillStyle = inkColor(it.c, false); ctx.fill(strokePath(it, false)); }
+    else { ctx.fillStyle = it.c && it.c !== 'auto' ? inkColor(it.c) : tokens.fg; ctx.font = `italic ${it.fs * 0.9}px "Times New Roman", serif`; ctx.fillText(texPlain(it.tex), it.x, it.y + it.fs); }
+  }
+  ctx.globalAlpha = 1;
 }
 $('graphOpen').addEventListener('click', () => {
   closePops();
@@ -5748,22 +5862,28 @@ $('graphOpen').addEventListener('click', () => {
   if(!$('gX1').value){ $('gNums').checked = true; setGraphType('q1'); }
   $('gFnMsg').textContent = '';
   showModal('graphDlg');
+  renderGLook();
 });
 $('gType').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b) setGraphType(b.dataset.v); });
 $('gFn').addEventListener('input', () => {
   try { parseFn($('gFn').value); $('gFnMsg').textContent = ''; } catch(err){ $('gFnMsg').textContent = err.message; }
 });
+$('graphDlg').addEventListener('input', e => { if(e.target.id !== 'gGridO' && e.target.id !== 'gAllO') drawGraphPreview(); });
+$('graphDlg').addEventListener('change', e => { if(e.target.matches('input[type=checkbox]') && e.target.id !== 'gArrows') drawGraphPreview(); });
+for(const [box, key, num] of [['gSize', 'size', 1], ['gFnW', 'fnW', 1], ['gFnS', 'fnS', 0]])
+  $(box).addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b) setGLook(key, num ? +b.dataset.v : b.dataset.v); });
+for(const [box, key] of [['gAxC', 'axC'], ['gFnC', 'fnC']])
+  $(box).addEventListener('click', e => { const b = e.target.closest('[data-c]'); if(b) setGLook(key, b.dataset.c); });
+for(const [inp, key] of [['gGridO', 'gridO'], ['gAllO', 'allO']])
+  $(inp).addEventListener('input', () => setGLook(key, clamp(+$(inp).value || 100, 10, 100)));
+$('gArrows').addEventListener('change', () => setGLook('arrows', $('gArrows').checked));
 $('gInsert').addEventListener('click', () => {
   if(!cur) return;
-  const num = id => { const v = parseFloat(String($(id).value).replace(',', '.')); return isFinite(v) ? v : NaN; };
-  const o = {type: graphType, lx: $('gLx').value, ly: $('gLy').value, lz: $('gLz').value, nums: $('gNums').checked, grid: $('gGrid').checked};
-  if(graphType !== '3d'){
-    Object.assign(o, {x0: num('gX0'), x1: num('gX1'), xs: Math.abs(num('gXs')), y0: num('gY0'), y1: num('gY1'), ys: Math.abs(num('gYs'))});
-    if(!(o.x1 > o.x0) || !(o.y1 > o.y0)){ $('gFnMsg').textContent = 'Each "to" must be bigger than its "from".'; return; }
-    try { o.fn = parseFn($('gFn').value); } catch(err){ $('gFnMsg').textContent = err.message; return; }
-  }
-  const [gx, gy] = toWorld(Math.max(40, W / 2 - 240 * cam.z), Math.max(40, H / 2 - 170 * cam.z));
-  const items = buildGraph(o, gx, gy);
+  const g = readGraph();
+  if(g.err){ $('gFnMsg').textContent = g.err; return; }
+  const S = g.o.look.size || 1;
+  const [gx, gy] = toWorld(Math.max(40, W / 2 - 240 * S * cam.z), Math.max(40, H / 2 - 170 * S * cam.z));
+  const items = buildGraph(g.o, gx, gy);
   hideModal('graphDlg');
   addItems(items);
   setTool('lasso'); setTimeout(() => selectIds(items.map(it => it.id)), 60);
@@ -5942,7 +6062,7 @@ const Ask = {
       if(it.f){ ctx.fillStyle = '#18212B'; for(const f of it.f){ if(f.k === 'tx' && f.v){ ctx.font = `${Math.max(8, f.h * it.h * 0.6)}px sans-serif`; ctx.fillText(String(f.v), it.x + f.x * it.w + 2, it.y + (f.y + f.h * 0.75) * it.h); } } }
     }
     for(const it of all.filter(i => i.t === 's').sort((a, b) => (b.hl || 0) - (a.hl || 0))){
-      ctx.globalAlpha = it.hl ? 0.4 : 1; ctx.fillStyle = inkColor(it.c, true, true); ctx.fill(strokePath(it, false));
+      ctx.globalAlpha = (it.hl ? 0.4 : 1) * opOf(it); ctx.fillStyle = inkColor(it.c, true, true); ctx.fill(strokePath(it, false));
     }
     ctx.globalAlpha = 1;
     for(const it of all.filter(i => i.t === 'x' || i.t === 'm')){

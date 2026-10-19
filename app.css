@@ -736,3 +736,16 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .g-signin .g-btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-height:48px;font-size:16px;align-self:stretch}
 .g-signin .g-btn svg{width:20px;height:20px;flex:none}
 .g-signin p{margin:0}
+/* 1.40: Fade popover (selection menu) and the Look part of the graph dialog */
+.fade-pop{width:250px}
+.fade-pop .hint{margin:6px 0 0}
+.g-look{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center;font-size:14px}
+.g-look > span{color:var(--muted)}
+.g-look .seg{min-width:0}
+.g-look .field{grid-column:1 / -1}
+.g-look .check-row{grid-column:1 / -1}
+.g-look-title{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+.g-sw{display:flex;flex-wrap:wrap;gap:2px}
+.g-sw .swatch{width:34px;height:34px}
+#gPrev{width:100%;height:190px;border-radius:12px;background:var(--panel2);display:block}
+@media (any-pointer:coarse){ .g-sw .swatch{width:44px;height:44px} }

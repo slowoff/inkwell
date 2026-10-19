@@ -117,6 +117,7 @@
           <button class="tb" id="selGroup" hidden>Group</button>
           <button class="tb" id="selUngroup" hidden>Ungroup</button>
           <button class="tb" id="selRot90" title="Rotate 90° clockwise" aria-label="Rotate 90°"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+          <button class="tb" id="selFade" title="Fade: make the selection lighter">Fade</button>
           <button class="tb" id="selCopy">Copy</button>
           <button class="tb" id="selDup">Duplicate</button>
           <button class="tb" id="selDel">Delete</button>
@@ -188,6 +189,11 @@
   <button class="btn ghost" id="compassOpen" title="Compass: circles and arcs from a centre point"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="4" r="1.6"/><path d="M11.3 5.5 6 19M12.7 5.5 18 19M5 15.5c4 3.2 10 3.2 14 0"/></svg>&nbsp;Compass</button>
   <button class="btn ghost" id="graphOpen"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3v18h16M5 3l-2 3M5 3l2 3M21 21l-3-2M21 21l-3 2"/><path d="M8 17c3-1 5-6 11-9"/></svg>&nbsp;Graph / axes</button>
   <p class="hint">Pick a shape, then drag on the page. Tap instead of dragging for a standard size. Compass: put the point on the centre, drag out to the radius, then go around for an arc.</p>
+</div>
+
+<div class="pop fade-pop" id="fadePop" hidden>
+  <label class="field"><span>Fade <b id="fadeVal">100 %</b></span><input type="range" id="fadeRange" min="10" max="100" step="5" value="100"></label>
+  <p class="hint">Lower = lighter. 100 % is normal.</p>
 </div>
 
 <div class="pop" id="newPop" hidden>
@@ -376,7 +382,19 @@
       <label class="field"><span>Plot a function (optional) <em>e.g. 2x+1, 0.5*9.81*x^2, sin(x)</em></span><input type="text" class="text-in" id="gFn" placeholder="y = …" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <p class="hint" id="gFnMsg"></p>
     </div>
-    <p class="hint">Inserted as ink and formulas: move or resize it with the lasso, tap a label to edit it.</p>
+    <div class="g-look-title">Look</div>
+    <canvas id="gPrev" aria-label="Preview of the graph"></canvas>
+    <div class="g-look">
+      <span>Size</span><div class="seg" id="gSize"><button data-v="0.75">Small</button><button data-v="1">Medium</button><button data-v="1.4">Large</button></div>
+      <span>Axes colour</span><div class="g-sw" id="gAxC"></div>
+      <span class="g2d">Curve colour</span><div class="g-sw g2d" id="gFnC"></div>
+      <span class="g2d">Curve</span><div class="seg g2d" id="gFnW"><button data-v="0.7">Thin</button><button data-v="1.15">Normal</button><button data-v="1.8">Thick</button></div>
+      <span class="g2d">Curve line</span><div class="seg g2d" id="gFnS"><button data-v="solid">Solid</button><button data-v="dash">Dashed</button><button data-v="dot">Dotted</button></div>
+      <label class="field g2d"><span>Grid lines <b id="gGridOv"></b></span><input type="range" id="gGridO" min="10" max="100" step="5"></label>
+      <label class="field"><span>Fade the whole graph <b id="gAllOv"></b></span><input type="range" id="gAllO" min="10" max="100" step="5"></label>
+      <label class="check-row"><input type="checkbox" id="gArrows"> Arrow tips on the axes</label>
+    </div>
+    <p class="hint">Inserted as ink and formulas: move or resize it with the lasso, tap a label to edit it. Select it later and tap Fade to make it lighter.</p>
     <div class="dlg-actions"><span></span><button class="btn primary" id="gInsert">Insert</button></div>
   </div>
 </div>

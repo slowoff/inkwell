@@ -691,6 +691,35 @@ const GD = {
       return j.id;
     }
   },
+  /* (1.46) Word -> PDF through Google Docs. The browser's own Word drawing (docx-preview) cannot do floating text boxes,
+     anchored pictures or EMF images, so pages came out scrambled. The .docx is uploaded as a Google Doc (Drive converts
+     it), exported as PDF, and the temporary Google Doc is deleted again. Needs Google sign-in; the caller falls back
+     to the old drawing without it. */
+  async wordToPdf(file){
+    let id = null, t;
+    try {
+      for(let k = 0; k < 2 && !id; k++){
+        t = await this.token(k > 0);
+        const b = 'inkwell' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        const meta = JSON.stringify({name: (file.name || 'Word file').replace(/\.docx$/i, '') + ' (Inkwell, temporary)', mimeType: 'application/vnd.google-apps.document', parents: t.folder ? [t.folder] : undefined});
+        const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n`, file, `\r\n--${b}--`]);
+        const r = await fetch(GD_UPLOAD, {method: 'POST', headers: {Authorization: 'Bearer ' + t.at, 'Content-Type': 'multipart/related; boundary=' + b}, body});
+        if(r.status === 401 && k === 0) continue;
+        const j = await r.json().catch(() => ({}));
+        if(!r.ok || !j.id) throw new Error('Google could not convert the Word file (' + r.status + ')');
+        id = j.id;
+      }
+      if(!id) throw new Error('Google sign-in expired');
+      const r = await fetch(GD_FILES + '/' + encodeURIComponent(id) + '/export?mimeType=application%2Fpdf', {headers: {Authorization: 'Bearer ' + t.at}});
+      if(!r.ok) throw new Error('Google could not make a PDF (' + r.status + ')');
+      const pdf = await r.blob();
+      if(pdf.size < 100) throw new Error('Google sent an empty PDF');
+      return pdf;
+    } finally {
+      // the temporary Google Doc was made by Inkwell only for this; remove it (a failure just leaves it in the Inkwell folder)
+      if(id) fetch(GD_FILES + '/' + encodeURIComponent(id), {method: 'DELETE', headers: {Authorization: 'Bearer ' + t.at}}).catch(() => {});
+    }
+  },
   async download(gid){
     for(let k = 0; k < 2; k++){
       const t = await this.token(k > 0);
@@ -4532,7 +4561,7 @@ $('impOther').addEventListener('click', resetImport);
 $('importFile').addEventListener('change', async () => {
   const f = $('importFile').files[0]; if(!f) return;
   $('importPick').hidden = true; $('importSetup').hidden = false; $('impStatus').textContent = 'Reading file';
-  try { await loadImport(f); $('impStatus').textContent = ''; if($('importDlg').hidden) dropImport(); }
+  try { const hint = await loadImport(f); $('impStatus').textContent = hint || ''; if($('importDlg').hidden) dropImport(); }
   catch(e){ console.warn(e); $('impStatus').textContent = e && e.name === 'OldWord' ? 'This is an old Word file (.doc). Open it in Word and save it as .docx or PDF, then import that.' : 'This file could not be opened. ' + (e && e.name === 'PasswordException' ? 'It is password protected.' : /\.docx$/i.test(f.name) ? (e && /load/i.test(e.message) ? e.message : 'Try saving it again in Word, or as PDF.') : 'Try saving it as PDF again.'); $('impGo').disabled = true; }
 });
 // Reads a PDF page's fillable fields. Returns {f: fields for the item, blank: [[annotationId, emptyValue]]}.
@@ -4608,6 +4637,20 @@ async function loadImport(f){
     for(let i = 1; i <= Math.min(5, pdf.numPages); i++){ const r = await renderPdfPage(pdf, i, 120); prev.appendChild(r.canvas); }
     if(pdf.numPages > 5){ const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ ${pdf.numPages - 5} more`; prev.appendChild(m); }
   } else if(/\.docx$/i.test(f.name) || f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'){
+    // (1.46) signed in: Google Docs turns it into a PDF, which then imports like any PDF (exact layout, searchable text)
+    if(Sync.user && navigator.onLine){
+      $('impStatus').textContent = 'Turning the Word file into a PDF…';
+      let pdf = null;
+      try { pdf = await GD.wordToPdf(f); } catch(e){ console.warn('word to pdf', e); }
+      if(pdf){
+        const name = f.name.replace(/\.docx$/i, '').trim();
+        await loadImport(new File([pdf], name + '.pdf', {type: 'application/pdf'}));
+        imp.name = name;
+        return '';
+      }
+    }
+    var hint = Sync.user ? 'Google could not convert this file, so Inkwell drew it itself: text boxes and some pictures may be out of place.'
+      : 'Not signed in, so Inkwell drew this Word file itself: text boxes and some pictures may be out of place. Sign in with Google (Settings) for exact pages.';
     // (1.46) only the layout and page 1 now; the other pages are made after "Print onto page", while you keep working
     const d = await openDocx(f);
     imp = {kind: 'docx', d, close: d.close, n: d.est, name: f.name.replace(/\.docx$/i, '').trim()};
@@ -4619,6 +4662,8 @@ async function loadImport(f){
     $('impCount').textContent = d.est > 1 ? `(about ${d.est} pages)` : '(1 page)';
     { const t = document.createElement('canvas'), k = 120 / pg.canvas.width; t.width = 120; t.height = Math.round(pg.canvas.height * k); t.getContext('2d').drawImage(pg.canvas, 0, 0, t.width, t.height); prev.appendChild(t); }
     if(d.est > 1){ const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ about ${d.est - 1} more`; prev.appendChild(m); }
+    $('impGo').disabled = false;
+    return hint;
   } else if(/\.doc$/i.test(f.name) || f.type === 'application/msword'){
     throw Object.assign(new Error('old Word'), {name: 'OldWord'});
   } else if(f.type.startsWith('image/') || /\.(jpe?g|png|heic|webp|gif)$/i.test(f.name)){

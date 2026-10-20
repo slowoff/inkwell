@@ -2656,7 +2656,7 @@ selRect.addEventListener('pointermove', e => {
     let tot = selDrag.base + delta;
     tot = ((tot % 360) + 540) % 360 - 180;
     const snap = Math.round(tot / 15) * 15;
-    if(Math.abs(tot - snap) < 4) tot = snap;   // clicks into 15° steps (0, 45, 90 ...) of the total angle
+    if(prefs.angleSnap !== false && Math.abs(tot - snap) < 4) tot = snap;   // clicks into 15° steps (0, 45, 90 ...) of the total angle; off with Snap to angles (1.51)
     tot = normDeg(tot);                          // whole degrees: what is shown is what is applied
     const lab = $('selAng'); lab.hidden = false; lab.textContent = tot + '°';
     tf = {r: normDeg(tot - selDrag.base) * Math.PI / 180, ax: selDrag.cx, ay: selDrag.cy};
@@ -5622,6 +5622,7 @@ $('setHold').addEventListener('click', e => {
 });
 // (1.50) Shapes popover switch "Snap lines to angles" (prefs angleSnap; missing = on): the line tools of the
 // Shapes menu (line, arrows, spring, dashed) click into 15° steps when drawn close to them; off = any angle.
+// (1.51) renamed "Snap to angles": also turning a selection with the rotate handle (shapes, ink, pictures).
 // 1.49 had this switch turn hold-to-straighten (snapHold) off by mistake: put that back once.
 if(!prefs.v150){
   if(+prefs.snapHold === 0 && +prefs.snapHoldLast > 0) prefs.snapHold = +prefs.snapHoldLast;
@@ -5630,7 +5631,7 @@ if(!prefs.v150){
 function renderSnapShapes(){ $('snapShapes').classList.toggle('on', prefs.angleSnap !== false); }
 $('snapShapes').addEventListener('click', () => {
   prefs.angleSnap = prefs.angleSnap === false; savePrefs(); renderSnapShapes();
-  toast(prefs.angleSnap ? 'Lines snap to 0°, 15°, 45°, 90° …' : 'Angle snapping off: lines go exactly where you drag');
+  toast(prefs.angleSnap ? 'Lines and turning snap to 0°, 15°, 45°, 90° …' : 'Angle snapping off: lines and turning go exactly where you drag');
 });
 renderSnapShapes();
 
@@ -5756,6 +5757,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.51', '2026-10-20', ['The Shapes menu switch is now "Snap to angles" and also covers turning: with it off, shapes and other selections turn to any angle instead of clicking into 15° steps']],
   ['1.50.1', '2026-10-20', ['Fix: a finger that lands on the ruler\'s Snap button still helps move and turn the ruler']],
   ['1.50', '2026-10-20', ['The switch in the Shapes menu is now "Snap lines to angles": turn it off and lines and arrows no longer click into 0°, 15°, 45°, 90°', 'Snap button on the ruler: turn it off and the ruler turns to any angle instead of clicking into 15° steps', 'Fix: a setting changed right before closing the app (like the ruler position) could be forgotten', 'Holding the pen still to straighten a stroke works as before 1.49 again (Settings → Straighten shapes)']],
   ['1.49', '2026-10-20', ['Shapes menu has a "Snap strokes to shapes" switch: turn it off and straight lines and shapes you draw stay as drawn']],

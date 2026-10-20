@@ -1,4 +1,5 @@
-# 1.50: Shapes popover -> "Snap lines to angles" switch (prefs angleSnap). On (default): a Line / Arrow drawn
+# 1.50: Shapes popover -> "Snap lines to angles" switch (prefs angleSnap); 1.51: renamed "Snap to angles", also
+# gates the 15 deg clicking when a selection is turned with the rotate handle. On (default): a Line / Arrow drawn
 # within ~3 deg of a 15 deg step clicks onto it (0, 15, 45, 90 ...). Off: the line keeps the exact dragged angle.
 # Hold-to-straighten (prefs snapHold) is not touched by the switch; 1.49's mistaken use of it is undone once.
 import asyncio, os, math
@@ -37,6 +38,24 @@ async def wobbly_line(page, x, y):
         await page.mouse.move(x + 5 * i, y + 4 * math.sin(i / 4)); await page.wait_for_timeout(8)
     await page.wait_for_timeout(1200)
     await page.mouse.up(); await page.wait_for_timeout(250)
+
+async def rotate_rect(page, x, y, deg):
+    # draw a rectangle from the Shapes menu (it ends up selected), then drag the rotate handle around its centre
+    await pick(page, 'rect'); await page.mouse.move(x, y); await page.mouse.down()
+    for i in range(1, 9): await page.mouse.move(x + 20 * i, y + 12 * i)
+    await page.mouse.up(); await page.wait_for_timeout(300)
+    h = await page.evaluate("(() => { const b = document.getElementById('selRot').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()")
+    cx, cy = x + 80, y + 48
+    R = math.hypot(h[0] - cx, h[1] - cy); a0 = math.atan2(h[1] - cy, h[0] - cx)
+    await page.mouse.move(*h); await page.mouse.down()
+    for i in range(1, 25):
+        a = a0 + math.radians(deg) * i / 24
+        await page.mouse.move(cx + R * math.cos(a), cy + R * math.sin(a))
+    lab = await page.inner_text('#selAng')
+    await page.mouse.up(); await page.wait_for_timeout(300)
+    ra = await page.evaluate("(() => { const s = [...__inkwell.cur.items.values()].filter(i => i.t === 's'); return s[s.length - 1].ra || 0; })()")
+    await page.evaluate("__inkwell.setTool('pen')")
+    return ra, lab.strip()
 
 async def switch(page):
     await page.click('#shapeBtn'); await page.wait_for_selector('#snapShapes', state='visible')
@@ -80,7 +99,7 @@ async def main():
         await page.click('#shapeBtn'); await page.wait_for_selector('#snapShapes', state='visible')
         on = await page.evaluate("document.getElementById('snapShapes').classList.contains('on')")
         label = await page.inner_text('#snapShapes')
-        check(on and 'angles' in label, f'switch "{label.strip()}" is on by default')
+        check(on and label.strip() == 'Snap to angles', f'switch "{label.strip()}" is on by default')
         await page.click('#shapeBtn'); await page.wait_for_timeout(150)
         await pick(page, 'line'); await drag(page, x0, y0, 43)
         s = await page.evaluate(STROKES)
@@ -88,6 +107,9 @@ async def main():
         await pick(page, 'arrow'); await drag(page, x0, y0 + 260, 2)
         s = await page.evaluate(STROKES)
         check(abs(angle(s[-2]) - 0) < 0.05, f'on: arrow at 2 deg snaps to 0 ({angle(s[-2]):.2f})')
+
+        ra, lab = await rotate_rect(page, x0 + 330, y0 + 300, 43)
+        check(ra == 45 and lab == '45°', f'on: shape turned 43 deg clicks to 45 (ra {ra}, label {lab})')
 
         # 2. off: angles kept exactly
         await switch(page)
@@ -100,6 +122,9 @@ async def main():
         await pick(page, 'line'); await drag(page, x0 + 300, y0 + 260, 89)
         s = await page.evaluate(STROKES)
         check(abs(angle(s[-1]) - 89) < 0.6, f'off: nearly vertical line keeps 89 deg ({angle(s[-1]):.2f})')
+
+        ra, lab = await rotate_rect(page, x0 + 20, y0 + 300, 43)
+        check(abs(ra - 43) <= 1 and ra != 45 and lab == f'{ra}°', f'off: shape turned 43 deg stays at {ra} (label {lab})')
 
         # 3. hold-to-straighten still works with the switch off
         await page.evaluate("__inkwell.setTool('pen')")

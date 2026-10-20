@@ -1152,6 +1152,11 @@ const elMap = new Map();  // item id -> DOM element (text, formula, image, tape)
 const tHandle = document.createElement('div');
 tHandle.id = 'tHandle'; tHandle.className = 't-handle'; tHandle.hidden = true; tHandle.title = 'Drag to change width';
 stage.appendChild(tHandle);
+// (1.45) move grip: a hand left of the text box being typed in; drag it to move the box
+const tMove = document.createElement('div');
+tMove.id = 'tMove'; tMove.className = 't-move'; tMove.hidden = true; tMove.title = 'Drag to move the text box';
+tMove.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5V4a1.5 1.5 0 0 1 3 0v7.5"/><path d="M14 11.5V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M17 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-1.2a6 6 0 0 1-4.6-2.2L4.6 15.6a1.6 1.6 0 0 1 2.4-2.1L8 14.6"/></svg>';
+stage.appendChild(tMove);
 
 const toWorld = (sx, sy) => [(sx - cam.ox) / cam.z, (sy - cam.oy) / cam.z];
 const viewRect = () => [-cam.ox / cam.z, -cam.oy / cam.z, (W - cam.ox) / cam.z, (H - cam.oy) / cam.z];
@@ -1623,7 +1628,7 @@ document.addEventListener('gesturestart', e => e.preventDefault());
 
 function onDown(e){
   if(!cur) return;
-  if(e.target.closest('.sel-menu,.fmt,.sel-rect,#tHandle')) return;
+  if(e.target.closest('.sel-menu,.fmt,.sel-rect,#tHandle,#tMove')) return;
   if(e.target.closest('.pf') && getComputedStyle(e.target.closest('.pf')).pointerEvents !== 'none') return;
   const editEl = editing && elMap.get(editing.id);
   const inEdit = !!(editEl && editEl.contains(e.target));
@@ -3053,7 +3058,7 @@ function syncEditingHTML(){
 function finishEditing(){
   if(!editing || !cur) { editing = null; return; }
   const ed = editing; editing = null;
-  $('fmtBar').hidden = true; tHandle.hidden = true; closePop('tcolorPop');
+  $('fmtBar').hidden = true; tHandle.hidden = true; tMove.hidden = true; closePop('tcolorPop');
   const el = elMap.get(ed.id);
   if(!el) return;
   el.removeAttribute('contenteditable');
@@ -3072,7 +3077,7 @@ function finishEditing(){
   cur.items.set(ed.id, nit); el._html = html; if(html !== it.html) cur.lastId = ed.id;
   prepTextEl(el);
   if(ed.isNew) commit([[ed.id, null]], [[ed.id, nit]]);
-  else if(ed.before.html !== html || ed.before.w !== nit.w) commit([[ed.id, ed.before]], [[ed.id, nit]]);
+  else if(ed.before.html !== html || ed.before.w !== nit.w || ed.before.x !== nit.x || ed.before.y !== nit.y) commit([[ed.id, ed.before]], [[ed.id, nit]]);
   changed();
 }
 worldFront.addEventListener('input', e => {
@@ -3085,7 +3090,7 @@ worldFront.addEventListener('input', e => {
 });
 worldFront.addEventListener('focusout', () => {
   setTimeout(() => {
-    if(!editing || keepEditing) return;
+    if(!editing || keepEditing || tmDrag) return;   // moving the box with its hand keeps it open
     const el = elMap.get(editing.id);
     if(el && (document.activeElement === el || el.contains(document.activeElement))) return;
     finishEditing();
@@ -3126,6 +3131,35 @@ tHandle.addEventListener('pointermove', e => {
   invalidate(0, 0, 1);
 });
 tHandle.addEventListener('pointerup', () => { thDrag = null; saveContentSoon(); });
+
+/* text move grip (1.45): the box keeps being edited while it moves; finishEditing makes it one undo step */
+let tmDrag = null;
+tMove.addEventListener('pointerdown', e => {
+  if(!editing) return;
+  e.preventDefault(); e.stopPropagation();
+  const it = cur.items.get(editing.id);
+  tmDrag = {id: e.pointerId, x: e.clientX, y: e.clientY, x0: it.x, y0: it.y};
+  tMove.classList.add('on');
+  try { tMove.setPointerCapture(e.pointerId); } catch {}
+});
+tMove.addEventListener('pointermove', e => {
+  if(!tmDrag || e.pointerId !== tmDrag.id || !editing) return;
+  e.preventDefault();
+  const it = cur.items.get(editing.id), el = elMap.get(editing.id);
+  if(!it || !el) return;
+  const nit = Object.assign({}, it, {x: tmDrag.x0 + (e.clientX - tmDrag.x) / cam.z, y: tmDrag.y0 + (e.clientY - tmDrag.y) / cam.z});
+  cur.items.set(it.id, nit);
+  el.style.left = nit.x + 'px'; el.style.top = nit.y + 'px'; frontXf(el);
+  invalidate(0, 0, 1);
+});
+const tmEnd = e => {
+  if(!tmDrag || e.pointerId !== tmDrag.id) return;
+  tmDrag = null; tMove.classList.remove('on'); saveContentSoon();
+  if(editing){ const el = elMap.get(editing.id); if(el) el.focus({preventScroll: true}); }
+};
+tMove.addEventListener('pointerup', tmEnd);
+tMove.addEventListener('touchstart', e => e.preventDefault(), {passive: false});   // iPad: keep the keyboard and the box open
+tMove.addEventListener('pointercancel', tmEnd);
 
 /* formatting bar */
 const fmtBar = $('fmtBar');
@@ -3288,6 +3322,9 @@ function positionOverlays(){
       tHandle.hidden = false;
       tHandle.style.left = (x + r.width - 5) + 'px';
       tHandle.style.top = (y + Math.min(r.height / 2, 40) - 16) + 'px';
+      tMove.hidden = false;
+      tMove.style.left = (x - 40) + 'px';
+      tMove.style.top = (y + Math.min(r.height / 2, 40) - 17) + 'px';
     }
   }
   if(prefs.ruler.on && rulerZ !== cam.z) renderRulerTicks();

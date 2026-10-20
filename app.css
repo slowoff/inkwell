@@ -262,6 +262,9 @@ select.pf-ls option:checked{background:#9fbbe8}
 }
 
 .t-handle{position:absolute;width:12px;height:32px;border-radius:6px;background:var(--accent);box-shadow:0 0 0 3px var(--paper);cursor:ew-resize;z-index:4;touch-action:none}
+.t-move{position:absolute;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--raise);border:1.5px solid var(--accent);color:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.25);cursor:grab;z-index:4;touch-action:none;-webkit-user-select:none;user-select:none}
+.t-move svg{width:20px;height:20px}
+.t-move.on{cursor:grabbing;background:var(--accent);color:#fff}
 .sel{position:absolute;inset:0;pointer-events:none}
 .sel-rect{position:absolute;border:1.5px dashed var(--accent);border-radius:4px;background:color-mix(in srgb,var(--accent) 6%,transparent);pointer-events:auto;cursor:move}
 .sel-handle{position:absolute;right:-14px;bottom:-14px;width:28px;height:28px;border-radius:50%;background:var(--accent);border:3px solid var(--paper);box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:nwse-resize}
@@ -689,6 +692,7 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 
 /* ---------- 1.26: touch targets at least 44 pt on touch screens (Apple's minimum); mouse layouts unchanged ---------- */
 @media (any-pointer:coarse){
+  .t-move{width:44px;height:44px;margin:-5px 0 0 -10px}
   .icon-btn{width:44px;height:44px}
   .tb{min-width:44px;height:44px}
   .title-in{height:44px}

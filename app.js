@@ -2725,9 +2725,13 @@ function tapAt(target, sx, sy){
     }
     if(it.t === 'm'){ openMath(it); return; }
   }
+  const wasEditing = !!editing;
   if(editing) finishEditing();
   clearSel();
   closePops();
+  // (1.44.1) with the Text or Formula tool a finger tap places a box too (before, only the Pencil could);
+  // a tap that just closes the box being typed in does not start a new one
+  if(!wasEditing && (prefs.tool === 'text' || prefs.tool === 'math')) placeAt({tool: prefs.tool, sx, sy, target, w0: toWorld(sx, sy)});
 }
 
 /* ---------- Answer lines on imported pages (typed text snaps onto them) ----------
@@ -2918,16 +2922,22 @@ function fitCell(id){
   if(!it || !it.ch || !el) return;
   const ch = it.ch, F0 = (it.fs0 || it.fs) * 17;
   let best = null;
-  for(const k of [1, 2, 3]){
-    const lh = ch / k;
-    for(let F = Math.min(F0, lh * 0.82); F >= 6; F *= 0.92){
-      el.style.fontSize = F + 'px'; el.style.lineHeight = lh + 'px';
-      if(el.scrollHeight <= ch + 4.5){ best = {fs: F / 17, lh}; break; }
-      if(k < 3 && F < lh * 0.6) break;   // rather another line than tiny letters
-    }
-    if(best) break;
+  // one line filling the cell (a short answer), as before
+  for(let F = Math.min(F0, ch * 0.82); F >= Math.min(F0, ch * 0.82) * 0.75 && F >= 6; F *= 0.92){
+    el.style.fontSize = F + 'px'; el.style.lineHeight = ch + 'px';
+    if(el.scrollHeight <= ch + 4.5){ best = {fs: F / 17, lh: ch}; break; }
   }
-  if(!best){ best = {fs: 6 / 17, lh: ch / 3}; el.style.fontSize = '6px'; el.style.lineHeight = best.lh + 'px'; }
+  // (1.44.1) more text (e.g. several pasted lines): normal line spacing, shrinking only down to a readable size;
+  // if it still does not fit, the box runs past the cell instead of turning tiny (before: 6 px letters, 3 huge lines)
+  if(!best){
+    const floor = Math.max(7, F0 * 0.6);
+    for(let F = Math.min(F0, ch * 0.82); ; F *= 0.92){
+      if(F < floor) F = floor;
+      const lh = Math.round(F * 1.3 * 100) / 100;
+      el.style.fontSize = F + 'px'; el.style.lineHeight = lh + 'px';
+      if(el.scrollHeight <= ch + 4.5 || F <= floor){ best = {fs: F / 17, lh}; break; }
+    }
+  }
   const r = n => Math.round(n * 1000) / 1000;
   if(r(best.fs) !== r(it.fs) || r(best.lh) !== r(it.lh || 0)) cur.items.set(id, Object.assign({}, it, {fs: r(best.fs), lh: r(best.lh)}));
 }
@@ -3020,6 +3030,7 @@ function startEditing(id, cx, cy, isNew){
   if(!editing) editing = {id, before: it, isNew: !!isNew, since: Date.now()};
   el.contentEditable = 'true';
   el.focus({preventScroll: true});
+  if(it.ch && !isNew){ fitCell(id); saveContentSoon(); }   // (1.44.1) a cell box squeezed by older versions is redone when tapped
   const s = getSelection();
   let r = null;
   if(cx != null){
@@ -4418,14 +4429,16 @@ document.addEventListener('pointerdown', e => {
   if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"]')) return;
   closePops();
 }, true);
-function showModal(id){ closePops(); $(id).hidden = false; }
+let modalAt = 0;
+function showModal(id){ closePops(); $(id).hidden = false; modalAt = Date.now(); }
 function hideModal(id){
   $(id).hidden = true;
   if(id === 'exportDlg' && typeof Pdf !== 'undefined') Pdf.abort = true;
   if(id === 'linkDlg' && keepEditing){ keepEditing = false; if(editing){ const el = elMap.get(editing.id); if(el) el.focus({preventScroll: true}); } }
 }
 document.querySelectorAll('.modal').forEach(m => {
-  m.addEventListener('click', e => { if(e.target === m || e.target.closest('[data-close]')) hideModal(m.id); });
+  // (1.44.1) the click a finger tap sends after lifting lands on the backdrop of a dialog that tap just opened: ignore it
+  m.addEventListener('click', e => { if(e.target === m && Date.now() - modalAt < 500) return; if(e.target === m || e.target.closest('[data-close]')) hideModal(m.id); });
 });
 
 /* page links */

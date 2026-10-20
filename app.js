@@ -49,7 +49,7 @@ const DEFAULT_PREFS = {
   tool: 'pen',
   pen: {c: 'auto', s: 40}, hl: {c: '#F5C400', s: 40}, eraser: {s: 30, mode: 'stroke'}, mark: {s: 40},
   wheel: 'right',
-  hwSearch: true,  // Claude reads handwriting in the background so search finds it  // Pencil menu on press and hold: 'right' (opens left of the pen), 'left', or 'off'
+  hwSearch: true,  // Claude reads handwriting in the background so search finds it (true = handwriting + imported pages, 'docs' = imported pages only (1.44), false = off)  // Pencil menu on press and hold: 'right' (opens left of the pen), 'left', or 'off'
   penFavs: ['auto', '#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF'],
   hlFavs: ['#F5C400', '#4CC26B', '#FF6FA3', '#3BA5F0'],
   finger: false,
@@ -3544,7 +3544,7 @@ async function renderSearch(q){
     hits.push(h);
   }
   const reading = PT.queue.length + (PT.busy ? 1 : 0);
-  $('pageList').innerHTML = hits.length ? hits.join('') : '<div class="empty"><strong>Nothing found</strong>No page contains that text.' + (prefs.hwSearch === false ? ' Reading handwriting and scans is off in the settings.' : reading ? ` ${reading} imported page${reading === 1 ? ' is' : 's are'} still being read.` : '') + '</div>';
+  $('pageList').innerHTML = hits.length ? hits.join('') : '<div class="empty"><strong>Nothing found</strong>No page contains that text.' + (hwMode() === 'off' ? ' Reading handwriting and scans is off in the settings.' : reading ? ` ${reading} imported page${reading === 1 ? ' is' : 's are'} still being read.` : '') + '</div>';
 }
 let searchT;
 $('search').addEventListener('input', () => {
@@ -5334,7 +5334,7 @@ function renderPrefSettings(){
     $('setZoomHint').textContent = lim ? 'You can zoom in up to ' + m + '%. Zoom to another level and tap Use current zoom to change it.' : 'You can zoom in up to 800%. Zoom in as far as you want, then come here and tap Use current zoom.'; }
   $('setLeftHint').textContent = prefs.leftEdge ? 'Pages stop at the left edge and only grow up, down and to the right.' : 'Pages go on forever in every direction.';
   $('setModel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.askModel || 'auto')));
-  $('setHw').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.hwSearch === false ? 'off' : 'on')));
+  $('setHw').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === hwMode()));
   renderHwStatus();
   $('setWheel').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.wheel || 'right')));
   $('setWheelHint').textContent = prefs.wheel === 'off' ? 'Holding the Pencil still does nothing special.' : `Press the Pencil on the page and hold it still to open a quick menu for tools, colours and thickness. It opens as a half circle around the Pencil tip, ${prefs.wheel === 'left' ? 'to the right' : 'to the left'}, away from your hand. Slide towards an option and lift, or tap it. The eraser picked here erases once, then you are back to your pen.`;
@@ -5361,8 +5361,12 @@ $('setModel').addEventListener('click', e => {
 });
 $('setHw').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
-  prefs.hwSearch = b.dataset.v === 'on'; savePrefs(); renderPrefSettings();
-  if(prefs.hwSearch){ HW.state = ''; PT.state = ''; HW.scanAll(); PT.scanAll(); } else { HW.queue.length = 0; PT.queue.length = 0; }
+  prefs.hwSearch = b.dataset.v === 'docs' ? 'docs' : b.dataset.v === 'on'; savePrefs();
+  HW.state = ''; PT.state = '';
+  if(!HW.on()){ HW.queue.length = 0; clearTimeout(HW.timer); }
+  if(!PT.on()){ PT.queue.length = 0; clearTimeout(PT.timer); }
+  renderPrefSettings();
+  HW.scanAll().catch(() => {}); PT.scanAll().catch(() => {});
 });
 $('setWheel').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
@@ -6798,6 +6802,10 @@ async function putAnswer(md, src){
    Result per page in page.data.hw = {c: {"cx,cy": {s: signature, t: text}}, at}
    ===================================================================== */
 const HW_CW = 1600, HW_CH = 1100;
+// Setting "Read handwriting & scans" (prefs.hwSearch): 'on' (true or missing), 'docs' (only imported pages), 'off' (false)
+const hwMode = () => prefs.hwSearch === false ? 'off' : prefs.hwSearch === 'docs' ? 'docs' : 'on';
+// signed in and allowed to use Claude (1.36: an account that is not allowed is not asked again until Inkwell restarts)
+const hwReady = () => !!Sync.sb && !!Sync.user && HW.noAccess !== Sync.user.id;
 const HW = {
   queue: [], busy: false, state: '', done: 0, timer: 0, lastScan: 0,
   cells(items){
@@ -6820,7 +6828,7 @@ const HW = {
     return Object.keys(c).sort((a, b) => { const [ax, ay] = a.split(',').map(Number), [bx, by] = b.split(',').map(Number); return ay - by || ax - bx; }).map(k => c[k].t || '').join(' ').trim();
   },
   // (1.36) an account that is not allowed to use Claude is not asked again until Inkwell restarts
-  on(){ return prefs.hwSearch !== false && !!Sync.sb && !!Sync.user && HW.noAccess !== Sync.user.id; },
+  on(){ return hwMode() === 'on' && hwReady(); },
   // which pages have ink that has not been read yet
   async scanAll(){
     if(!this.on()) return;
@@ -6884,11 +6892,17 @@ const HW = {
 };
 function renderHwStatus(){
   const el = $('setHwHint'); if(!el) return;
-  if(prefs.hwSearch === false){ el.textContent = 'Handwriting and scans are not read. Search finds typed text and the text of PDFs.'; return; }
-  if(!Sync.sb || !Sync.user){ el.textContent = 'Needs sync sign-in: Claude reads your handwriting and scans through your account.'; return; }
+  const mode = hwMode();
+  if(mode === 'off'){ el.textContent = 'Handwriting and scans are not read. Search finds typed text and the text of PDFs.'; return; }
+  if(!Sync.sb || !Sync.user){ el.textContent = 'Needs sync sign-in: Claude reads your ' + (mode === 'docs' ? 'imported pages' : 'handwriting and scans') + ' through your account.'; return; }
   const pages = [...docs.values()].filter(d => d.kind === 'page' && live(d) && d.data.hw).length;
   const pts = [...docs.values()].filter(d => d.kind === 'ptxt' && live(d)), nb = pts.filter(d => d.data && d.data.nb).length;
   const pics = pts.length - nb, wait = PT.queue.length + (PT.busy ? 1 : 0);
+  if(mode === 'docs'){
+    el.textContent = PT.state ? PT.state : `Only imported pages are read: Claude reads scans, photos and Word pages in the background so search finds them (about CHF 0.01 for 20 pages). PDF text is searchable without it. Handwriting is not read. ${pics} imported page${pics === 1 ? '' : 's'} searchable` + (wait ? `, ${wait} being read.` : '.')
+      + (nb ? ` ${nb} page${nb === 1 ? '' : 's'} skipped: Claude does not copy out text from some published books.` : '');
+    return;
+  }
   el.textContent = HW.state || PT.state ? (HW.state || PT.state) : `Claude reads your handwriting and scanned pages in the background so search finds them (about CHF 0.01 for 20 pages). PDF text is searchable without it. ${pages} page${pages === 1 ? '' : 's'} of handwriting read` + (HW.busy || HW.queue.length ? `, ${HW.queue.length + (HW.busy ? 1 : 0)} waiting` : '') + `; ${pics} imported page${pics === 1 ? '' : 's'} searchable` + (wait ? `, ${wait} being read.` : '.')
     + (nb ? ` ${nb} page${nb === 1 ? '' : 's'} skipped: Claude does not copy out text from some published books.` : '');
 }
@@ -6985,7 +6999,7 @@ function parseOcr(raw){
 // Background reader for page pictures that have no text yet (same on/off setting as handwriting).
 const PT = {
   queue: [], busy: false, state: '', done: 0, timer: 0,
-  on(){ return HW.on(); },
+  on(){ return hwMode() !== 'off' && hwReady(); },
   // pictures on live pages (open page first) that have no text doc yet
   async scanAll(){
     if(!this.on()) return;

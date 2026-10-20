@@ -913,17 +913,24 @@ async function mergeCurrent(row, base){
   const c = cur;
   if(editing) syncEditingHTML();
   const lrec = await IDB.get('docs', row.id);
-  const busy = !!((lrec && lrec.dirty) || saveContentSoon.pending() || editing || (c.crec && c.crec.dirty));
+  const isBusy = () => !!((lrec && lrec.dirty) || saveContentSoon.pending() || editing || act || (c.crec && c.crec.dirty));
+  const snap = () => {
+    const local = {bg: c.bg, items: [...c.items.values()].map(ser)};
+    if(c.lastId) local.last = c.lastId;
+    if(lrec && lrec.data) for(const k of Object.keys(lrec.data)) if(!(k in local)) local[k] = lrec.data[k];
+    return local;
+  };
+  // (1.48.1) the backup copy is saved first; the page is read and merged only after that, with no waiting in
+  // between, so a stroke finished while the backup was being written is part of the merge (it used to be lost)
+  if(isBusy()) await saveVersion(c.id, snap(), 'merge').catch(e => console.warn('version', e));
+  if(cur !== c) return false;
+  const busy = isBusy();
   let data, copies = 0;
   if(!busy){
     if(!base && lrec && lrec.updated >= row.updated_at) return false;
     data = row.data;
   } else {
-    const local = {bg: c.bg, items: [...c.items.values()].map(ser)};
-    if(c.lastId) local.last = c.lastId;
-    if(lrec && lrec.data) for(const k of Object.keys(lrec.data)) if(!(k in local)) local[k] = lrec.data[k];
-    await saveVersion(c.id, local, 'merge').catch(e => console.warn('version', e));
-    const m = mergeContent(base && base.d, local, row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing);
+    const m = mergeContent(base && base.d, snap(), row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing || !!act);
     data = m.data; copies = m.copies;
   }
   const next = new Map();
@@ -1805,7 +1812,9 @@ function onCancel(e){
   }
   if(e.pointerType === 'pen'){ penDown = false; penAt = performance.now(); }
   if(act && act.id === e.pointerId){
-    if(act.kind === 'stroke' && act.pts.length >= 6) endTool(e); else cancelAct();
+    // (1.48.1) iPadOS can cancel a Pencil stroke (system gesture, Scribble); keep whatever was drawn.
+    // A cancelled finger stroke is only kept with 2+ points (a resting palm is often cancelled)
+    if(act.kind === 'stroke' && act.pts.length >= (e.pointerType === 'pen' ? 3 : 6)) endTool(e); else cancelAct();
   }
 }
 function cancelAct(){
@@ -1921,6 +1930,12 @@ function toolMove(e){
     const pr = ev.pointerType === 'pen' ? (ev.pressure || 0.5) : 0.55;
     if(!act.moved && Math.hypot(sx - act.sx, sy - act.sy) > 4) act.moved = true;
     if(!act.far && Math.hypot(sx - act.sx, sy - act.sy) > 9){ act.far = true; clearTimeout(act.wheelT); }
+    // (1.48.1) a small letter written slowly stays within 9 px of where it started; once the Pencil has really
+    // drawn something (8 px of path), holding still no longer opens the Pencil menu (it used to drop the letter)
+    // (steps under 1.5 px are hand tremor while holding still and do not count)
+    if(!act.lp) act.lp = [act.sx, act.sy];
+    const st = Math.hypot(sx - act.lp[0], sy - act.lp[1]);
+    if(st >= 1.5){ act.trav = (act.trav || 0) + st; act.lp = [sx, sy]; if(act.trav > 8) clearTimeout(act.wheelT); }
     if(act.kind === 'stroke'){
       if(act.snapped){
         if(act.snapped === 'line'){ act.pts = densify([act.lineStart, toWorld(sx, sy)], false); }
@@ -5705,6 +5720,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.48.1', '2026-10-20', ['Fix: strokes could disappear right after writing (while a sync came in, while an update loaded, when iPadOS interrupted the Pencil, or when a small letter written slowly opened the Pencil menu)']],
   ['1.48', '2026-10-20', ['Tab in a text box moves the text forward to the next tab stop (Shift+Tab takes it back)']],
   ['1.47.1', '2026-10-20', ['See changes opens the change log in its own window']],
   ['1.47', '2026-10-20', ['Pencil ink follows smooth curves: fast writing no longer gets corners, and quick loops no longer shrink', 'Change log in Settings (this list)']],
@@ -8682,9 +8698,18 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
     setInterval(() => { if(document.visibilityState === 'visible') check(); }, 15 * 60000);
   }).catch(() => {});
   let reloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
+  // (1.48.1) never reload in the middle of a stroke or right after one: wait until writing has paused
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(reloaded) return; reloaded = true;
+    const t0 = Date.now();
+    const go = () => {
+      if((act || editing || selDrag || Date.now() - lastLocalEdit < 1500) && Date.now() - t0 < 60000){ setTimeout(go, 400); return; }
+      LSset('inkwell.opening', null); flushSaves().then(() => location.reload());
+    };
+    go();
+  });
 }
 
-window.__inkwell = {CHANGELOG, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

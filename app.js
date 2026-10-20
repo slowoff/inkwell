@@ -2775,9 +2775,29 @@ async function detectLines(aId){
     }
     if(rs >= 0) runs.push(rs, w - 1);
     flush();
+    // short marks with small gaps form a chain; letters on the same baseline (e.g. "the 1........") join it too,
+    // so the chain is cut wherever the spacing or mark size jumps, and each evenly spaced part is judged alone (1.43)
+    const parts = [];
     for(let i = 0; i < runs.length;){
       let j = i;
       while(j + 2 < runs.length && runs[j + 1] - runs[j] + 1 <= maxMark && runs[j + 3] - runs[j + 2] + 1 <= maxMark && runs[j + 2] - runs[j + 1] - 1 <= maxGapD) j += 2;
+      let a = i;
+      for(let k = i + 2; k <= j; k += 2){
+        const p0 = k - 2 > a ? runs[k - 2] - runs[k - 4] : -1, p1 = runs[k] - runs[k - 2];
+        const l0 = runs[k - 1] - runs[k - 2] + 1, l1 = runs[k + 1] - runs[k] + 1;
+        if((p0 >= 0 && Math.abs(p1 - p0) > Math.max(2, 0.3 * p0)) || Math.abs(l1 - l0) > Math.max(2, 0.5 * Math.max(l0, l1))){ parts.push(a, k - 2); a = k; }
+      }
+      parts.push(a, j);
+      i = j + 2;
+    }
+    for(let q = 0; q < parts.length; q += 2){
+      let i = parts[q], j = parts[q + 1];
+      if(j - i >= 6){   // drop an end mark whose spacing is off (the digit or letter right before the dots)
+        const ps = []; for(let k = i + 2; k <= j; k += 2) ps.push(runs[k] - runs[k - 2]);
+        const pm = ps.slice().sort((x, y) => x - y)[ps.length >> 1];
+        if(Math.abs(runs[i + 2] - runs[i] - pm) > 1) i += 2;
+        if(Math.abs(runs[j] - runs[j - 2] - pm) > 1) j -= 2;
+      }
       const cnt = (j - i) / 2 + 1, x1 = runs[i], x2 = runs[j + 1];
       if(cnt >= 6 && x2 - x1 + 1 >= minLen){
         let on = 0; const gaps = [], lens = [];
@@ -2788,7 +2808,6 @@ async function detectLines(aId){
         // evenly spaced marks of about the same size; letters in a text row never are
         if(gs <= 0.35 * gm + 1 && ls <= 0.35 * lm + 1 && fill >= 0.12 && fill < 0.95) segs.push({y, x1, x2, d: 1});
       }
-      i = j + 2;
     }
   }
   // join touching rows into lines; keep only thin ones with clear paper above and below (not text, not filled boxes)
@@ -2803,8 +2822,52 @@ async function detectLines(aId){
     if(b.y2 - b.y1 + 1 > maxT) continue;
     if(!clear(b.y1 - 3, b.x1, b.x2) || !clear(b.y2 + 3, b.x1, b.x2)) continue;
     // a dotted/dashed line needs empty paper just above and below it (text around it has letters there)
-    if(b.d){ const m = Math.max(4, Math.round(h * 0.003)); let ok = true; for(let k = 2; k <= m && ok; k++) ok = clear(b.y1 - k, b.x1, b.x2, 0.04) && clear(b.y2 + k, b.x1, b.x2, 0.04); if(!ok) continue; }
-    out.push({y: (b.y1 + b.y2 + 1) / 2 / h, x1: b.x1 / w, x2: (b.x2 + 1) / w});
+    // (1.43) the digit or letter right before the dots and the comma after them are cut off: the line is the longest
+    // stretch with nothing above or below, shrunk to the dots inside it
+    let x1 = b.x1, x2 = b.x2;
+    if(b.d){
+      const m = Math.max(4, Math.round(h * 0.003));
+      const hit = x => { for(let k = 2; k <= m; k++){ const ya = b.y1 - k, yb = b.y2 + k; if((ya >= 0 && ink[ya * w + x]) || (yb < h && ink[yb * w + x])) return true; } return false; };
+      let bs = -1, be = -2;
+      for(let x = b.x1, s = -1; x <= b.x2 + 1; x++){
+        if(x <= b.x2 && !hit(x)){ if(s < 0) s = x; }
+        else if(s >= 0){ if(x - 1 - s > be - bs) bs = s, be = x - 1; s = -1; }
+      }
+      if(bs < 0) continue;
+      const col = x => { for(let y = b.y1; y <= b.y2; y++) if(ink[y * w + x]) return true; return false; };
+      while(bs < be && !col(bs)) bs++;
+      while(be > bs && !col(be)) be--;
+      if(be - bs + 1 < minLen) continue;
+      x1 = bs; x2 = be;
+    }
+    out.push({y: (b.y1 + b.y2 + 1) / 2 / h, x1: x1 / w, x2: (x2 + 1) / w, _b: b, _x1: x1, _x2: x2});
+    if(b.d){ out[out.length - 1].d = 1; out[out.length - 1].yb = (b.y2 + 1) / h; }   // dots sit on the text baseline
+  }
+  // (1.43) size of the printed text: rows of ink (without the solid lines) form text rows; a row's height from the
+  // tops of tall letters to the bottoms of g/p/y is about 0.95 of the font size. Each line gets the size of the text
+  // on it or just above it (fs, page fraction); out.fs0 = the page's usual text size
+  const prof = new Int32Array(h);
+  for(let y = 0; y < h; y++){ let n = 0; const r = y * w; for(let x = 0; x < w; x++) n += ink[r + x]; prof[y] = n; }
+  for(const l of out) if(!l._b.d) for(let y = l._b.y1; y <= l._b.y2; y++){ const r = y * w; for(let x = l._x1; x <= l._x2; x++) prof[y] -= ink[r + x]; }
+  // a frame or a dark page edge puts the same few ink pixels in every row: count only what is above that
+  const pb = Array.from(prof).sort((x, y) => x - y)[Math.floor(h * 0.2)] || 0, rows = [];
+  for(let y = 0, s = -1; y <= h; y++){
+    if(y < h && prof[y] >= pb + 2){ if(s < 0) s = y; }
+    else if(s >= 0){ if(y - s >= 4 && y - s <= h * 0.08) rows.push({y1: s, y2: y - 1, hh: y - s}); s = -1; }
+  }
+  const med = a => { const b = a.slice().sort((x, y) => x - y); return b.length ? b[b.length >> 1] : 0; };
+  const m0 = med(rows.map(r => r.hh)), txt = rows.filter(r => r.hh >= 0.5 * m0 && r.hh <= 1.8 * m0);
+  const m1 = med(txt.map(r => r.hh));
+  if(txt.length >= 3 && m1 >= 6) out.fs0 = m1 / 0.95 / h;
+  for(const l of out){
+    const yc = (l._b.y1 + l._b.y2) / 2;
+    let r = txt.find(r => r.y1 <= yc && r.y2 >= yc);
+    if(!r){ const up = txt.filter(r => r.y2 < yc && yc - r.y2 <= 3 * (m1 || 20)); r = up[up.length - 1]; }
+    // a row without g/p/y (or without tall letters) measures smaller than its font, so the page's usual size is used
+    // unless the row is clearly bigger (a heading-size line)
+    const rf = r ? r.hh / 0.95 / h : 0;
+    if(out.fs0) l.fs = rf > 1.3 * out.fs0 ? rf : out.fs0; else if(rf) l.fs = rf;
+    delete l._b; delete l._x1; delete l._x2;
   }
   out.sort((a, b) => a.y - b.y);
   // table borders (since 1.29): thin solid vertical lines, for snapping text into table cells
@@ -2876,7 +2939,7 @@ function snapLineAt(wx, wy){
     const fr = lineReady.get(it.a);
     if(!fr){ pageLines(it.a); continue; }
     // world coordinates; skip the edges of fillable field boxes
-    const ls = fr.map(l => ({y: it.y + l.y * it.h, x1: it.x + l.x1 * it.w, x2: it.x + l.x2 * it.w}))
+    const ls = fr.map(l => ({y: it.y + l.y * it.h, x1: it.x + l.x1 * it.w, x2: it.x + l.x2 * it.w, f: l.fs ? l.fs * it.h : 0, yb: l.d ? it.y + l.yb * it.h : 0}))
       .filter(l => !(it.f || []).some(f => { const fx1 = it.x + f.x * it.w, fx2 = fx1 + f.w * it.w, fy1 = it.y + f.y * it.h, fy2 = fy1 + f.h * it.h;
         return Math.min(l.x2, fx2) - Math.max(l.x1, fx1) > 0 && (Math.abs(l.y - fy1) < 4 || Math.abs(l.y - fy2) < 4); }));
     const near = ls.filter(l => wx >= l.x1 - 24 && wx <= l.x2 + 24 && l.y >= wy - 10);
@@ -2889,9 +2952,20 @@ function snapLineAt(wx, wy){
     else if(pv && same(c, pv) && c.y - pv.y > 8 && c.y - pv.y < 90) d = c.y - pv.y;
     const dd = d || 30;
     if(c.y - wy > Math.max(dd * 1.3, 26)) continue;   // too far above the line (e.g. on the question text)
-    return {x1: c.x1, x2: c.x2, y: c.y, d: dd};
+    return {x1: c.x1, x2: c.x2, y: c.y, d: dd, rep: !!d, f: c.f, yb: c.yb};
   }
   return null;
+}
+// Font size (world px) of the printed text on the imported page at (wx, wy), or 0 if not known (yet).
+function pageTextAt(wx, wy){
+  if(!cur) return 0;
+  const imgs = [...cur.items.values()].filter(it => it.t === 'i' && wx >= it.x && wx <= it.x + it.w && wy >= it.y && wy <= it.y + it.h);
+  for(const it of imgs.reverse()){
+    const fr = lineReady.get(it.a);
+    if(!fr){ pageLines(it.a); continue; }
+    if(fr.fs0) return fr.fs0 * it.h;
+  }
+  return 0;
 }
 // distance from the top of the first line to the text baseline, for font size F and line height lh
 function baselineOf(F, lh){
@@ -2912,18 +2986,23 @@ function placeAt(a){
   if(a.tool === 'text'){
     if(it && it.t === 'x'){ startEditing(id, SR.left + a.sx, SR.top + a.sy); return; }
     if(it && it.t === 'm'){ openMath(it); return; }
-    const fs = clamp(1 / cam.z, 0.25, 6);
+    // (1.43) on an imported page, new text is as big as the page's printed text
+    const pf = prefs.snapLines ? pageTextAt(a.w0[0], a.w0[1]) : 0;
+    const fs = pf ? clamp(pf / 17, 0.25, 6) : clamp(1 / cam.z, 0.25, 6);
     let nt = {t: 'x', id: 'x' + newId(), x: a.w0[0] - 4 * fs, y: a.w0[1] - 16 * fs, w: clamp((W - a.sx - 16) / cam.z, 160 * fs, 460 * fs), fs, html: ''};
     const cell = prefs.snapLines ? snapCellAt(a.w0[0], a.w0[1]) : null;
     const sn = !cell && prefs.snapLines ? snapLineAt(a.w0[0], a.w0[1]) : null;
     if(cell){
       // inside a table cell: one line filling the cell, text shrinks to fit as it is typed (fitCell)
-      const ch = Math.round((cell.y2 - cell.y1 - 2) * 100) / 100, F = clamp(ch * 0.62, 7, 28);
+      const ch = Math.round((cell.y2 - cell.y1 - 2) * 100) / 100, F = clamp(pf ? Math.min(pf, ch * 0.62) : ch * 0.62, 6, 28);
       nt = {t: 'x', id: nt.id, x: cell.x1 - 3, y: cell.y1 - 1, w: Math.max(30, cell.x2 - cell.x1 + 6), fs: F / 17, fs0: F / 17, lh: ch, ch, html: ''};
     } else if(sn){
       // sit on the answer line; every further line of text lands on the next ruled line
-      const F = clamp(sn.d * 0.55, 8, 40), lh = Math.round(sn.d * 100) / 100;
-      nt = {t: 'x', id: nt.id, x: sn.x1 - 6, y: sn.y - 2 - baselineOf(F, lh) - F * 0.2, w: Math.max(60, sn.x2 - sn.x1 + 12), fs: F / 17, lh, html: ''};
+      const F = sn.f ? clamp(sn.f, 6, 60) : clamp(sn.d * 0.55, 8, 40);
+      const lh = Math.round((sn.rep ? sn.d : Math.max(sn.d, F * 1.35)) * 100) / 100;
+      // on a ruled line the letters sit just above it; on a dotted line they stand on the dots, like the printed words
+      const base = sn.yb ? sn.yb : sn.y - 2 - F * 0.2;
+      nt = {t: 'x', id: nt.id, x: sn.x1 - 6 + (sn.yb ? F * 0.3 : 0), y: base - baselineOf(F, lh), w: Math.max(60, sn.x2 - sn.x1 + 12), fs: F / 17, lh, html: ''};
     }
     cur.items.set(nt.id, nt); cur.lastId = nt.id;
     itemEl(nt); refreshPaper();
@@ -8298,6 +8377,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {WA, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {WA, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

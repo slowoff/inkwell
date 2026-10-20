@@ -44,7 +44,9 @@ async def switch(page):
     await page.click('#shapeBtn'); await page.wait_for_timeout(150)
 
 async def boot(page):
-    await page.wait_for_timeout(3000)
+    # a fresh browser installs the offline cache and reloads once; wait for that before touching anything
+    await page.wait_for_function('navigator.serviceWorker && navigator.serviceWorker.controller', timeout=30000)
+    await page.wait_for_timeout(2500)
     await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
 
 async def main():

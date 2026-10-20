@@ -13,7 +13,9 @@ def check(ok, what):
 RULER = "(() => { const r = __inkwell.prefs.ruler; return {a: r.a * 180 / Math.PI, cx: r.cx, cy: r.cy, snap: r.snap, on: document.getElementById('rulerSnap').classList.contains('on'), n: [...__inkwell.cur.items.values()].length}; })()"
 
 async def boot(page):
-    await page.wait_for_timeout(3000)
+    # a fresh browser installs the offline cache and reloads once; wait for that before touching anything
+    await page.wait_for_function('navigator.serviceWorker && navigator.serviceWorker.controller', timeout=30000)
+    await page.wait_for_timeout(2500)
     await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
 
 async def open_ruler(page):
@@ -100,7 +102,8 @@ async def main():
             def pts(t):
                 a = a0 + math.radians(deg) * t
                 return [(cx - 120 * math.cos(a), cy - 120 * math.sin(a)), (cx + 120 * math.cos(a), cy + 120 * math.sin(a))]
-            await touch('touchStart', pts(0)); await page.wait_for_timeout(50)
+            await touch('touchStart', pts(0)[:1]); await page.wait_for_timeout(40)
+            await touch('touchStart', pts(0)); await page.wait_for_timeout(60)
             for i in range(1, 16): await touch('touchMove', pts(i / 15)); await page.wait_for_timeout(16)
             await touch('touchEnd', []); await page.wait_for_timeout(300)
         await twist(44)

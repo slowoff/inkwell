@@ -118,11 +118,16 @@
           <button class="tb" id="selGroup" hidden>Group</button>
           <button class="tb" id="selUngroup" hidden>Ungroup</button>
           <button class="tb" id="selRot90" title="Rotate 90° clockwise" aria-label="Rotate 90°"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+          <button class="tb" id="selText" hidden title="Text of the imported page inside your lasso">Text</button>
           <button class="tb" id="selFade" title="Fade: make the selection lighter">Fade</button>
           <button class="tb" id="selCopy">Copy</button>
           <button class="tb" id="selDup">Duplicate</button>
           <button class="tb" id="selDel">Delete</button>
         </div>
+      </div>
+      <div class="ts" id="tsLayer" hidden>
+        <div class="ts-box" id="tsBox"></div>
+        <div class="sel-menu ts-menu" id="tsMenu"><span class="ts-n" id="tsN"></span><button class="tb" id="tsCopy">Copy</button><button class="tb" id="tsOpen" title="See the text, copy part of it or put it on the page">Text…</button></div>
       </div>
       <div class="fmt" id="fmtBar" hidden>
         <button class="tb" data-cmd="bold" aria-label="Bold"><b>B</b></button>
@@ -245,8 +250,9 @@
   <div class="dlg scan-dlg">
     <div class="dlg-head"><h3>Scan paper</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div class="import-pick" id="scanPick">
-      <p>Lay the sheet on a darker table, take the photo from above, and Inkwell straightens it.</p>
-      <label class="btn primary file-btn">Take photo<input type="file" id="scanFile" accept="image/*" capture="environment"></label>
+      <p id="scanPickMsg">Lay the sheet on a darker table, take the photo from above, and Inkwell straightens it.</p>
+      <div class="scan-picks"><label class="btn primary file-btn" id="scanTake">Take photo<input type="file" id="scanFile" accept="image/*" capture="environment"></label><label class="btn ghost file-btn">Choose photos<input type="file" id="scanFiles" accept="image/*" multiple></label></div>
+      <button class="btn ghost" id="scanDone" hidden>Done</button>
     </div>
     <div id="scanSetup" hidden class="scan-setup">
       <div class="scan-view" id="scanView"><canvas id="scanCv"></canvas><span class="scan-h"></span><span class="scan-h"></span><span class="scan-h"></span><span class="scan-h"></span></div>
@@ -256,6 +262,7 @@
         <button class="btn ghost" id="scanRetake">Retake</button>
       </div>
       <div class="dlg-actions"><button class="btn ghost" id="scanNext">Add &amp; scan next</button><button class="btn primary" id="scanGo">Add to page</button></div>
+      <button class="btn ghost scan-all" id="scanAll" hidden>Add all</button>
     </div>
     <p class="hint" id="scanStatus"></p>
   </div>
@@ -377,6 +384,15 @@
   </div>
 </div>
 
+<div class="modal" id="tsDlg" hidden>
+  <div class="dlg ts-dlg">
+    <div class="dlg-head"><h3>Text from the page</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="hint">Select part of it to copy or put only that part, or change it first.</p>
+    <textarea id="tsText" spellcheck="false"></textarea>
+    <div class="dlg-actions"><button class="btn ghost" id="tsDlgPut">Put on page</button><button class="btn primary" id="tsDlgCopy">Copy</button></div>
+  </div>
+</div>
+
 <div class="modal" id="graphDlg" hidden>
   <div class="dlg">
     <div class="dlg-head"><h3>Graph</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
@@ -427,7 +443,7 @@
     <button class="icon-btn" id="askClose" title="Close" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
   </div>
   <div class="ask-log" id="askLog"></div>
-  <div class="ask-att" id="askAtt" hidden><img alt="Scanned part of the page"><span>Scan attached</span><button class="icon-btn" id="askAttX" title="Remove the scan" aria-label="Remove the scan"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+  <div class="ask-att" id="askAtt" hidden><div class="ask-thumbs" id="askThumbs"></div><span id="askAttN">Scan attached</span><button class="btn ghost" id="askAttMore" title="Draw a box around another part; all scans go out together">+ Scan more</button><button class="icon-btn" id="askAttX" title="Remove all scans" aria-label="Remove all scans"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
   <div class="ask-foot">
     <button class="icon-btn" id="askScan" title="Scan a question: draw a box around it" aria-label="Scan a question"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg></button>
     <textarea id="askIn" rows="1" placeholder="Ask about your notes…"></textarea>

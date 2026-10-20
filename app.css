@@ -608,7 +608,13 @@ body.scanning .toast{bottom:calc(76px + var(--sab))}
 
 /* scan attached to the Ask message box (v22) */
 .ask-att{display:flex;align-items:center;gap:10px;padding:8px 12px 0;font-size:12.5px;color:var(--muted)}
-.ask-att img{width:64px;height:44px;object-fit:cover;object-position:top left;border-radius:6px;box-shadow:0 0 0 1px var(--line);background:#fff}
+.ask-att img{width:64px;height:44px;object-fit:cover;object-position:top left;border-radius:6px;box-shadow:0 0 0 1px var(--line);background:#fff;display:block}
+/* 1.52: several scans per question */
+.ask-thumbs{display:flex;gap:8px;flex-wrap:wrap;padding-top:8px}
+.ask-thumb{position:relative}
+.ask-thumb-x{position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--raise);color:var(--fg);box-shadow:0 0 0 1px var(--line),0 1px 3px rgba(0,0,0,.2)}
+.ask-thumb-x svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
+#askAttMore{height:30px;padding:0 10px;font-size:12.5px;flex:none}
 .ask-att span{flex:1}
 .ask-att .icon-btn{width:30px;height:30px}
 
@@ -783,3 +789,14 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 @media (any-pointer:coarse){ .g-sw .swatch{width:44px;height:44px} }
 /* 1.50: ruler Snap pill, touch size */
 @media (any-pointer:coarse){ .ruler-snap{height:44px;border-radius:22px;padding:0 12px 0 10px;font-size:13px} }
+/* 1.52: text of imported pages picked with the lasso */
+.ts{position:absolute;inset:0;pointer-events:none}
+.ts-box i{position:absolute;display:block;border-radius:3px;background:color-mix(in srgb,var(--accent) 24%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
+.ts-menu{gap:4px}
+.ts-n{font-size:12.5px;color:var(--muted);padding:0 6px 0 8px}
+.ts-dlg textarea{width:100%;min-height:220px;max-height:55vh;resize:vertical;font:15px/1.45 var(--f-ui);color:var(--fg);background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:6px 0 10px;-webkit-user-select:text;user-select:text}
+/* 1.52: several scans in a row */
+.scan-picks{display:flex;gap:10px;flex-wrap:wrap}
+#scanDone{margin-top:10px}
+.scan-all{width:100%;margin-top:8px}
+@media (any-pointer:coarse){ .ask-thumbs{padding-top:12px;gap:12px} .ask-thumb-x{width:30px;height:30px;top:-12px;right:-12px} #askAttMore{height:44px} }

@@ -1882,6 +1882,7 @@ function startTool(e, sx, sy, pr){
   const [wx, wy] = toWorld(sx, sy);
   const tool = prefs.tool;
   act = {tool, id: e.pointerId, sx, sy, moved: false, target: e.target, anchor: [sx, sy]};
+  TS.clear();
   if(pick){
     clearSel(); act.kind = 'pick'; act.w0 = [wx, wy]; act.w1 = null;
   } else if(tool === 'pen' || tool === 'hl' || tool === 'mark'){
@@ -2553,6 +2554,7 @@ function finishLasso(a){
     }
   }
   if(ids.length) selectIds(ids); else clearSel();
+  TS.find(wp, lb);   // (1.52) text of imported pages inside the loop
 }
 /* Groups: items with the same optional field g move, select and resize as one piece */
 function withGroups(ids){
@@ -2593,7 +2595,7 @@ function computeSel(){
   for(const id of sel.ids){ const q = itemBox(cur.items.get(id)); b = [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])]; }
   sel.b = b;
 }
-function clearSel(){ sel = null; $('selBox').hidden = true; if(!$('fadePop').hidden) closePop('fadePop'); }
+function clearSel(){ sel = null; $('selBox').hidden = true; if(!$('fadePop').hidden) closePop('fadePop'); TS.clear(); }
 function transformItem(it, tf){
   if(tf.r !== undefined) return rotateItem(it, tf.r, tf.ax, tf.ay);   // r can be 0 (back to start)
   const m = (x, y) => [tf.ax + (x - tf.ax) * tf.s + tf.dx, tf.ay + (y - tf.ay) * tf.s + tf.dy];
@@ -3415,6 +3417,7 @@ $('mathDel').addEventListener('click', () => { const m = mathEdit; hideModal('ma
 
 /* ---------- overlays ---------- */
 function positionOverlays(){
+  TS.place();
   if(sel && cur){
     computeSel();
     if(sel){
@@ -5757,6 +5760,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.52', '2026-10-20', ['Select text on imported pages: draw a lasso around text on a PDF or scanned page, then Copy it, or open Text… to copy part of it or put it on the page as a text box', 'PDFs imported from now on remember where each line is, so you can select one column of a page', 'Scan several pages in a row: after Add & scan next, tap Take next photo; or Choose photos to pick several at once, check each one or Add all', 'Ask Claude: scan up to 4 parts of the page into one question (+ Scan more)']],
   ['1.51', '2026-10-20', ['The Shapes menu switch is now "Snap to angles" and also covers turning: with it off, shapes and other selections turn to any angle instead of clicking into 15° steps']],
   ['1.50.1', '2026-10-20', ['Fix: a finger that lands on the ruler\'s Snap button still helps move and turn the ruler']],
   ['1.50', '2026-10-20', ['The switch in the Shapes menu is now "Snap lines to angles": turn it off and lines and arrows no longer click into 0°, 15°, 45°, 90°', 'Snap button on the ruler: turn it off and the ruler turns to any angle instead of clicking into 15° steps', 'Fix: a setting changed right before closing the app (like the ruler position) could be forgotten', 'Holding the pen still to straighten a stroke works as before 1.49 again (Settings → Straighten shapes)']],
@@ -6508,6 +6512,7 @@ async function renderDocx(file, onStatus){
 /* =====================================================================
    Ask Claude: scan a question (or just type) and get help in a floating window
    ===================================================================== */
+const ASK_MAX_SCANS = 4;   // (1.52) scans attached to one question
 const Ask = {
   msgs: [],        // API messages for this chat; scanned images are kept as assets: {type:'image', a: assetId}
   view: [],        // what the chat shows: {who:'user', text, a?, box?, page?} / {who:'bot', text, model?}
@@ -6544,8 +6549,9 @@ const Ask = {
     if(!this.view.length){ this.empty(); return; }
     for(const v of this.view){
       if(v.who === 'user'){
-        const d = this.bubble('user', (v.a ? '<img alt="Scanned question">' : '') + esc(v.text || '').replace(/\n/g, '<br>'));
-        if(v.a){ const img = d.querySelector('img'); const b = this.b64.get(v.a); if(b) img.src = 'data:image/jpeg;base64,' + b; else assetURL(v.a).then(u => { if(u) img.src = u; else img.replaceWith(Object.assign(document.createElement('div'), {className: 'am-noimg', textContent: 'Scan not downloaded yet'})); }); }
+        const as = Array.isArray(v.as) && v.as.length ? v.as : v.a ? [v.a] : [];   // (1.52) several scans in one question
+        const d = this.bubble('user', as.map(() => '<img alt="Scanned question">').join('') + esc(v.text || '').replace(/\n/g, '<br>'));
+        as.forEach((a, i) => { const img = d.querySelectorAll('img')[i]; const b = this.b64.get(a); if(b) img.src = 'data:image/jpeg;base64,' + b; else assetURL(a).then(u => { if(u) img.src = u; else img.replaceWith(Object.assign(document.createElement('div'), {className: 'am-noimg', textContent: 'Scan not downloaded yet'})); }); });
       } else this.botBubble(v.text, v.model);
     }
     $('askLog').scrollTop = $('askLog').scrollHeight;
@@ -6626,16 +6632,30 @@ const Ask = {
     try { url = await this.capture(x0, y0, x1, y1); } catch(e){ this.bubble('err', 'Could not read that part of the page: ' + esc(e.message || e)); return; }
     const typed = this.pageText([x0, y0, x1, y1]);
     // attach the scan to the message box; it goes out when Send is tapped, with whatever is typed
-    this.pending = {url, typed, box: [x0, y0, x1, y1]};
+    // (1.52) several scans can be attached (up to ASK_MAX_SCANS); they go out together in one question
+    if(!Array.isArray(this.pending)) this.pending = [];
+    if(this.pending.length >= ASK_MAX_SCANS){ toast('Up to ' + ASK_MAX_SCANS + ' scans per question'); return; }
+    this.pending.push({url, typed, box: [x0, y0, x1, y1]});
     this.renderPending();
     if(this.histOpen) this.showChat();
     try { $('askIn').focus({preventScroll: true}); } catch {}
   },
   renderPending(){
-    const a = $('askAtt'), p = this.pending;
+    const a = $('askAtt'), p = Array.isArray(this.pending) && this.pending.length ? this.pending : null;
+    if(!p) this.pending = null;
     a.hidden = !p;
-    if(p) a.querySelector('img').src = p.url;
-    $('askIn').placeholder = this.mode === 'practice' ? (p ? 'Add a note, or just Send' : 'Your answer, or scan your work') : p ? 'Ask about the scan, or just Send' : 'Ask about your notes…';
+    const th = $('askThumbs'); th.innerHTML = '';
+    if(p){
+      p.forEach((x, i) => {
+        const d = document.createElement('div'); d.className = 'ask-thumb';
+        d.innerHTML = `<img alt="Scan ${i + 1}"><button class="ask-thumb-x" data-i="${i}" title="Remove this scan" aria-label="Remove scan ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
+        d.querySelector('img').src = x.url; th.appendChild(d);
+      });
+      $('askAttN').textContent = p.length === 1 ? 'Scan attached' : p.length + ' scans attached';
+      $('askAttMore').hidden = p.length >= ASK_MAX_SCANS;
+    }
+    const many = p && p.length > 1;
+    $('askIn').placeholder = this.mode === 'practice' ? (p ? 'Add a note, or just Send' : 'Your answer, or scan your work') : p ? (many ? 'Ask about the scans, or just Send' : 'Ask about the scan, or just Send') : 'Ask about your notes…';
     $('askSend').disabled = this.busy;
   },
   // Send button / Enter: typed text, plus the attached scan if there is one
@@ -6645,7 +6665,11 @@ const Ask = {
     if(this.busy) return;
     $('askIn').value = ''; autoGrow();
     this.pending = null; this.renderPending();
-    if(p) this.send(t || (this.mode === 'practice' ? 'Here is my answer.' : prefs.askMode === 'solve' ? 'Solve this question.' : 'Help me with this question.'), p.url, p.typed, p.box);
+    if(p){
+      const many = p.length > 1;
+      const typed = many ? p.map((x, i) => x.typed ? 'Scan ' + (i + 1) + ':\n' + x.typed : '').filter(Boolean).join('\n\n') : p[0].typed;
+      this.send(t || (this.mode === 'practice' ? (many ? 'Here are my answers.' : 'Here is my answer.') : prefs.askMode === 'solve' ? (many ? 'Solve these questions.' : 'Solve this question.') : (many ? 'Help me with these.' : 'Help me with this question.')), p.map(x => x.url), typed, p[0].box);
+    }
     else this.send(t);
   },
   // API form of the chat: scans stored as assets go back in as base64
@@ -6666,7 +6690,7 @@ const Ask = {
   },
   async saveChat(){
     const first = this.view.find(v => v.who === 'user');
-    const auto = /^(Solve this question\.|Help me with this question\.)$/;
+    const auto = /^(Solve this question\.|Help me with this question\.|Solve these questions\.|Help me with these\.)$/;
     const page = first && first.page && getDoc(first.page);
     const title = first ? (first.text && !auto.test(first.text) ? first.text.split('\n')[0] : 'Scanned question' + (page && page.data.title ? ' · ' + page.data.title : '')) : 'Chat';
     const data = {title: title.slice(0, 80), at: Date.now(), page: first && first.page || null, mode: this.mode || prefs.askMode || 'tutor', msgs: this.msgs, view: this.view};
@@ -6706,12 +6730,15 @@ const Ask = {
     if(!session){ this.bubble('err', 'Sign in first: Settings (gear, top left) → Sync.'); return; }
     const content = [];
     let assetId = null;
-    if(imgURL){
+    const urls = Array.isArray(imgURL) ? imgURL : imgURL ? [imgURL] : [], assetIds = [];
+    for(const u of urls){
       // keep the scan as an asset so the chat history can show it and send it again later
-      try { assetId = await saveAsset(await (await fetch(imgURL)).blob()); this.b64.set(assetId, imgURL.split(',')[1]); content.push({type: 'image', a: assetId}); }
-      catch { content.push({type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: imgURL.split(',')[1]}}); }
+      try { const id = await saveAsset(await (await fetch(u)).blob()); this.b64.set(id, u.split(',')[1]); content.push({type: 'image', a: id}); assetIds.push(id); }
+      catch { content.push({type: 'image', source: {type: 'base64', media_type: 'image/jpeg', data: u.split(',')[1]}}); }
     }
+    assetId = assetIds[0] || null;
     let full = text;
+    if(urls.length > 1) full += '\n\n[' + urls.length + ' scanned parts of my page, in the order I scanned them]';
     if(typedInScan) full += '\n\n[Typed text inside the scanned area]\n' + typedInScan;
     if(opts.content){ content.push(...opts.content); full = null; }
     else if(!this.msgs.length && cur){
@@ -6721,9 +6748,9 @@ const Ask = {
     }
     if(full !== null) content.push({type: 'text', text: full});
     this.msgs.push({role: 'user', content});
-    const uv = {who: 'user', text}; if(assetId) uv.a = assetId; if(box && cur){ uv.box = box.map(v => Math.round(v * 10) / 10); uv.page = cur.id; } else if(cur) uv.page = cur.id;
+    const uv = {who: 'user', text}; if(assetId) uv.a = assetId; if(assetIds.length > 1) uv.as = assetIds; if(box && cur){ uv.box = box.map(v => Math.round(v * 10) / 10); uv.page = cur.id; } else if(cur) uv.page = cur.id;
     this.view.push(uv);
-    this.bubble('user', (imgURL ? `<img src="${imgURL}" alt="Scanned question">` : '') + esc(text).replace(/\n/g, '<br>'));
+    this.bubble('user', urls.map((u, i) => `<img src="${u}" alt="Scanned question${urls.length > 1 ? ' ' + (i + 1) : ''}">`).join('') + esc(text).replace(/\n/g, '<br>'));
     const out = this.bubble('bot', '<span class="typing"></span>');
     this.busy = true; $('askSend').disabled = true;
     let acc = '', last = 0;
@@ -6825,6 +6852,8 @@ $('askModeSel').addEventListener('change', () => {
 });
 $('askSend').addEventListener('click', () => Ask.submit());
 $('askAttX').addEventListener('click', () => { Ask.pending = null; Ask.renderPending(); });
+$('askThumbs').addEventListener('click', e => { const b = e.target.closest('.ask-thumb-x'); if(!b || !Array.isArray(Ask.pending)) return; Ask.pending.splice(+b.dataset.i, 1); Ask.renderPending(); });
+$('askAttMore').addEventListener('click', () => $('askScan').click());
 function autoGrow(){ const t = $('askIn'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
 $('askIn').addEventListener('input', autoGrow);
 $('askIn').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); $('askSend').click(); } });
@@ -7279,7 +7308,7 @@ const ptxtText = d => d && Array.isArray(d.l) ? d.l.map(x => x[1]).join('\n') : 
 async function pdfLines(page){
   let tc;
   try { tc = await page.getTextContent(); } catch(e){ console.warn('pdf text', e); return []; }
-  const vp = page.getViewport({scale: 1}), H = vp.height || 1, parts = [];
+  const vp = page.getViewport({scale: 1}), H = vp.height || 1, Wd = vp.width || 1, parts = [];
   for(const it of tc.items || []){
     if(!it.str || !it.str.trim()) continue;
     const tr = it.transform || [1, 0, 0, 1, 0, 0];
@@ -7294,10 +7323,20 @@ async function pdfLines(page){
     if(ln && Math.abs(p.y - ln.y) < Math.min(p.h, ln.h) * 0.5) ln.parts.push(p);
     else lines.push({y: p.y, h: p.h, parts: [p]});
   }
-  const out = [];
-  let total = 0;
+  // (1.52) a wide gap on the same height splits the line (columns, table cells), so one column can be selected
+  const segs = [];
   for(const ln of lines){
     ln.parts.sort((a, b) => a.x - b.x);
+    let seg = null, end = null;
+    for(const p of ln.parts){
+      if(!seg || p.x - end > Math.max(p.h, ln.h) * 1.5){ seg = {y: ln.y, h: ln.h, parts: []}; segs.push(seg); }
+      seg.parts.push(p); end = seg.parts.length === 1 ? p.x + p.w : Math.max(end, p.x + p.w);
+    }
+  }
+  segs.sort((a, b) => a.y - b.y || a.parts[0].x - b.parts[0].x);
+  const out = [];
+  let total = 0;
+  for(const ln of segs){
     let s = '', end = null;
     for(const p of ln.parts){
       if(end !== null && p.x - end > p.h * 0.18 && !/\s$/.test(s) && !/^\s/.test(p.s)) s += ' ';
@@ -7305,12 +7344,133 @@ async function pdfLines(page){
     }
     s = s.replace(/\s+/g, ' ').trim();
     if(!s) continue;
-    out.push([Math.round(clamp((ln.y - ln.h) / H, 0, 1) * 1000) / 1000, s]);
+    // (1.52) also where the line sits left to right and how tall it is, for selecting text on the page:
+    // [y, text, x0, x1, h] (older app versions only read y and text)
+    const r3 = v => Math.round(clamp(v, 0, 1) * 1000) / 1000;
+    let lx0 = Infinity, lx1 = -Infinity, lh = 0;
+    for(const p of ln.parts){ lx0 = Math.min(lx0, p.x); lx1 = Math.max(lx1, p.x + p.w); lh = Math.max(lh, p.h); }
+    out.push([r3((ln.y - ln.h) / H), s, r3(lx0 / Wd), r3(lx1 / Wd), r3(lh * 1.15 / H)]);
     total += s.length;
     if(total > 20000) break;
   }
   return out;
 }
+/* (1.52) Select text on imported pages: a lasso over an imported page (PDF, scan, photo) picks the lines of its
+   page text (ptxt) that lie inside the loop. They light up, and a small menu offers Copy and Text… (a window to pick
+   part of it, copy, or put it on the page as a text box). Lines with x0/x1 (PDFs imported from 1.52 on) are picked by
+   where they are; older lines (only y) count as the full page width, so the loop only decides which rows. Nothing is
+   stored; the selection is gone when anything else is done. If the loop also selected items, the selection menu gets
+   a Text button instead (`#selText`). */
+const TS = {
+  lines: [],   // {it (picture id), b: [x0, y0, x1, y1] world, s}
+  find(wp, lb){
+    this.clear();
+    if(!cur || wp.length < 6) return;
+    const lw = lb[2] - lb[0];
+    const out = [];
+    for(const it of cur.items.values()){
+      if(it.t !== 'i' || !it.a) continue;
+      if(it.x > lb[2] || it.x + it.w < lb[0] || it.y > lb[3] || it.y + it.h < lb[1]) continue;
+      const d = ptxtOf(it.a); if(!d || !Array.isArray(d.l) || !d.l.length) continue;
+      const L = d.l.filter(l => l && l[0] >= 0 && typeof l[1] === 'string').slice().sort((a, b) => a[0] - b[0]);
+      // height of a line without a stored height: the gap to the next line, capped
+      const gaps = []; for(let i = 1; i < L.length; i++){ const g = L[i][0] - L[i-1][0]; if(g > 0.004) gaps.push(g); }
+      gaps.sort((a, b) => a - b);
+      const gap0 = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0.02;
+      for(let i = 0; i < L.length; i++){
+        const l = L[i], hasX = l.length >= 4 && l[3] > l[2];
+        const hf = l[4] > 0 ? l[4] : Math.min(gap0, i + 1 < L.length && L[i+1][0] > l[0] ? L[i+1][0] - l[0] : gap0) * 0.92;
+        const b = [it.x + (hasX ? l[2] : 0) * it.w, it.y + l[0] * it.h, it.x + (hasX ? l[3] : 1) * it.w, it.y + (l[0] + hf) * it.h];
+        const my = (b[1] + b[3]) / 2;
+        if(my < lb[1] || my > lb[3]) continue;
+        const ox0 = Math.max(b[0], lb[0]), ox1 = Math.min(b[2], lb[2]);
+        if(ox1 <= ox0) continue;
+        if(hasX && ox1 - ox0 < Math.min(0.25 * (b[2] - b[0]), 0.6 * lw)) continue;   // the loop only grazes the line's end
+        let n = 0; for(let k = 1; k <= 5; k++) if(pip(ox0 + (ox1 - ox0) * k / 6, my, wp)) n++;
+        if(n >= 2) out.push({it: it.id, b, s: l[1]});
+      }
+    }
+    if(!out.length) return;
+    out.sort((a, b) => a.b[1] - b.b[1] || a.b[0] - b.b[0]);
+    this.lines = out;
+    if(sel){ $('selText').hidden = false; positionOverlays(); return; }   // items selected too: Text button in their menu
+    this.show();
+  },
+  text(){ return this.lines.map(l => l.s).join('\n'); },
+  show(){
+    const box = $('tsBox'); box.innerHTML = '';
+    for(const l of this.lines){ const d = document.createElement('i'); d.className = 'ts-line'; box.appendChild(d); l.el = d; }
+    $('tsN').textContent = this.lines.length === 1 ? '1 line' : this.lines.length + ' lines';
+    $('tsLayer').hidden = false;
+    this.place();
+  },
+  place(){
+    if($('tsLayer').hidden || !this.lines.length) return;
+    let u = [Infinity, Infinity, -Infinity, -Infinity];
+    for(const l of this.lines){
+      const x = l.b[0] * cam.z + cam.ox, y = l.b[1] * cam.z + cam.oy, w = (l.b[2] - l.b[0]) * cam.z, h = (l.b[3] - l.b[1]) * cam.z;
+      Object.assign(l.el.style, {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'});
+      u = [Math.min(u[0], x), Math.min(u[1], y), Math.max(u[2], x + w), Math.max(u[3], y + h)];
+    }
+    const m = $('tsMenu'), mw = m.offsetWidth || 220, mh = m.offsetHeight || 46;
+    let my = u[1] - mh - 10;
+    if(my < 8) my = u[3] + 12;
+    if(my > H - mh - 8) my = clamp(u[1] + 8, 8, H - mh - 8);
+    m.style.left = clamp((u[0] + u[2]) / 2 - mw / 2, 8, Math.max(8, W - mw - 8)) + 'px';
+    m.style.top = my + 'px';
+  },
+  clear(){
+    this.lines = [];
+    const L = $('tsLayer'); if(L && !L.hidden){ L.hidden = true; $('tsBox').innerHTML = ''; }
+    const b = $('selText'); if(b) b.hidden = true;
+  },
+  async copy(text){
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; }
+    catch {
+      const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(t); t.select(); t.setSelectionRange(0, text.length);
+      try { ok = document.execCommand('copy'); } catch {}
+      t.remove();
+    }
+    return ok;
+  },
+  open(){
+    if(!this.lines.length) return;
+    const lines = this.lines.slice();
+    $('tsText').value = this.text();
+    $('tsDlg').dataset.n = lines.length;
+    this.last = lines;
+    showModal('tsDlg');
+  },
+  // a text box with the (edited) text, right of the page the text came from, at the height of the first line
+  put(text){
+    const lines = this.last || [];
+    if(!cur || !text.trim()) return;
+    const first = lines[0], pic = first && cur.items.get(first.it);
+    const x = pic ? pic.x + pic.w + 30 : (first ? first.b[2] + 30 : (W / 2 - cam.ox) / cam.z);
+    const y = first ? first.b[1] : (H / 2 - cam.oy) / cam.z;
+    const html = cleanHTML(text.split(/\n/).map(l => '<p>' + (esc(l) || '<br>') + '</p>').join(''));
+    const it = {t: 'x', id: 'x' + newId(), x, y, w: 420, fs: 1, html};
+    addItems([it]);
+    return it;
+  },
+};
+$('tsLayer').addEventListener('pointerdown', e => e.stopPropagation());
+$('tsCopy').addEventListener('click', async () => { const n = TS.lines.length, ok = await TS.copy(TS.text()); toast(ok ? (n === 1 ? 'Copied 1 line' : 'Copied ' + n + ' lines') : 'Could not copy: use Text… and copy from there'); });
+$('tsOpen').addEventListener('click', () => { TS.open(); });
+$('selText').addEventListener('click', () => { const keep = TS.lines.slice(); clearSel(); TS.lines = keep; TS.open(); });
+$('tsDlgCopy').addEventListener('click', async () => {
+  const ta = $('tsText'), part = ta.selectionEnd > ta.selectionStart ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : ta.value;
+  const ok = await TS.copy(part);
+  toast(ok ? (part === ta.value ? 'Copied' : 'Copied the selected part') : 'Could not copy: select the text and use Copy from the iPad menu');
+});
+$('tsDlgPut').addEventListener('click', () => {
+  const ta = $('tsText'), part = ta.selectionEnd > ta.selectionStart ? ta.value.slice(ta.selectionStart, ta.selectionEnd) : ta.value;
+  hideModal('tsDlg'); clearSel();
+  if(TS.put(part)) toast('Put on the page as a text box');
+});
+
 // enough real text to be worth keeping (otherwise it is a scan and Claude reads the picture)
 const hasRealText = l => l.reduce((n, x) => n + (x[1].match(/[\p{L}\p{N}]/gu) || []).length, 0) >= 20;
 async function savePtxt(a, src, l, extra){
@@ -7664,6 +7824,31 @@ const Scan = {
   src: null,      // canvas with the photo (max 2600 px)
   q: null,        // corners in photo pixels [[x,y] x4] TL, TR, BR, BL
   mode: 'doc',
+  // (1.52) several scans in a row: queue = photos chosen together (one by one, or Add all), n = scans added since
+  // the window opened. iPad Safari only opens the camera right after a tap, so "scan next" shows a button for it.
+  queue: [], n: 0, total: 0,
+  reset(){ this.queue = []; this.n = 0; this.total = 0; this.pickView(); },
+  pickView(){
+    $('scanSetup').hidden = true; $('scanPick').hidden = false; $('scanStatus').textContent = '';
+    const n = this.n;
+    $('scanPickMsg').textContent = n ? (n === 1 ? '1 scan added.' : n + ' scans added.') + ' Take the next photo, choose more, or tap Done.' : 'Lay the sheet on a darker table, take the photo from above, and Inkwell straightens it.';
+    $('scanTake').firstChild.textContent = n ? 'Take next photo' : 'Take photo';
+    $('scanDone').hidden = !n;
+  },
+  ui(){
+    const left = this.queue.length, pos = this.total - left;
+    $('scanNext').textContent = left ? 'Add & next (' + pos + ' of ' + this.total + ')' : 'Add & scan next';
+    $('scanGo').textContent = left ? 'Add & finish' : 'Add to page';
+    $('scanAll').hidden = !left;
+    $('scanAll').textContent = 'Add all ' + (left + 1) + ' as they are';
+  },
+  async next(){
+    const f = this.queue.shift();
+    $('scanPick').hidden = true; $('scanSetup').hidden = false;
+    this.ui();
+    try { await this.load(f); } catch(e){ console.warn(e); $('scanStatus').textContent = 'This photo could not be opened.'; }
+    if(this.total > 1) $('scanStatus').textContent = 'Photo ' + (this.total - this.queue.length) + ' of ' + this.total + '. ' + $('scanStatus').textContent;
+  },
   async load(file){
     $('scanStatus').textContent = 'Reading photo';
     let bmp;
@@ -7706,10 +7891,29 @@ const Scan = {
   },
   async place(again){
     if(!this.src || !cur) return;
-    const go = $('scanGo'), go2 = $('scanNext'); go.disabled = go2.disabled = true;
+    const go = $('scanGo'), go2 = $('scanNext'), go3 = $('scanAll'); go.disabled = go2.disabled = go3.disabled = true;
     $('scanStatus').textContent = 'Straightening';
     await new Promise(r => setTimeout(r, 30));
     try {
+      await this.put();
+      if(again === 'all'){
+        // the rest of the chosen photos, with the corners Inkwell finds
+        while(this.queue.length){
+          const f = this.queue.shift();
+          $('scanStatus').textContent = 'Adding photo ' + (this.total - this.queue.length) + ' of ' + this.total;
+          try { await this.load(f); await this.put(); } catch(e){ console.warn('scan', e); }
+        }
+        toast(this.n === 1 ? 'Scan placed on the page' : this.n + ' scans placed on the page');
+        this.queue = []; hideModal('scanDlg');
+      } else if(this.queue.length && again !== false){ toast('Scan placed on the page'); await this.next(); }
+      else if(again){ toast('Scan placed on the page'); this.queue = []; this.pickView(); }
+      else { toast(this.n > 1 ? this.n + ' scans placed on the page' : 'Scan placed on the page'); this.queue = []; hideModal('scanDlg'); }
+    } catch(e){ console.warn(e); $('scanStatus').textContent = 'Could not process the photo: ' + (e.message || e); }
+    go.disabled = go2.disabled = go3.disabled = false;
+  },
+  // straighten the current photo and put it under everything on the page
+  async put(){
+    {   // (body kept from before 1.52)
       const out = warpSheet(this.src, this.q, 1700);
       if(this.mode === 'doc'){ $('scanStatus').textContent = 'Cleaning up'; await new Promise(r => setTimeout(r, 10)); cleanPaper(out); }
       const a = await saveAsset(await canvasBlob(out));
@@ -7720,12 +7924,9 @@ const Scan = {
       addItems([{t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wW, h: hW, a, doc: 1}]); PT.soon();
       setTool('pen');
       cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon();
-      toast('Scan placed on the page');
       this.src.width = this.src.height = 1; this.src = null;
-      if(again){ $('scanSetup').hidden = true; $('scanPick').hidden = false; $('scanStatus').textContent = ''; $('scanFile').click(); }
-      else hideModal('scanDlg');
-    } catch(e){ console.warn(e); $('scanStatus').textContent = 'Could not process the photo: ' + (e.message || e); }
-    go.disabled = go2.disabled = false;
+      this.n++;
+    }
   }
 };
 // Finds the sheet of paper: the biggest bright area, then its four outermost corners.
@@ -7837,14 +8038,18 @@ function cleanPaper(cv){
   }
   ctx.putImageData(img, 0, 0);
 }
-$('scanFile').addEventListener('change', async () => {
-  const f = $('scanFile').files[0]; $('scanFile').value = '';
-  if(!f) return;
-  $('scanPick').hidden = true; $('scanSetup').hidden = false;
-  try { await Scan.load(f); } catch(e){ console.warn(e); $('scanStatus').textContent = 'This photo could not be opened.'; }
+for(const id of ['scanFile', 'scanFiles']) $(id).addEventListener('change', async () => {
+  const fs = [...$(id).files]; $(id).value = '';
+  if(!fs.length) return;
+  if(Scan.src && !$('scanSetup').hidden && id === 'scanFile' && Scan.retake){ Scan.retake = false; Scan.queue.unshift(fs[0]); await Scan.next(); return; }
+  Scan.queue = fs; Scan.total = fs.length;
+  await Scan.next();
 });
-$('scanBtn').addEventListener('click', () => { hideModal('importDlg'); if(!cur){ toast('Open a page first'); return; } $('scanPick').hidden = false; $('scanSetup').hidden = true; $('scanStatus').textContent = ''; showModal('scanDlg'); });
-$('scanRetake').addEventListener('click', () => $('scanFile').click());
+$('scanBtn').addEventListener('click', () => { hideModal('importDlg'); if(!cur){ toast('Open a page first'); return; } Scan.reset(); showModal('scanDlg'); });
+$('scanDone').addEventListener('click', () => { hideModal('scanDlg'); Scan.queue = []; });
+$('scanAll').addEventListener('click', () => Scan.place('all'));
+// Retake replaces the photo being edited (the rest of a chosen batch stays queued)
+$('scanRetake').addEventListener('click', () => { Scan.retake = true; $('scanFile').click(); });
 $('scanRot').addEventListener('click', () => Scan.rotate());
 $('scanMode').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(!b) return; Scan.mode = b.dataset.v; $('scanMode').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); });
 $('scanGo').addEventListener('click', () => Scan.place(false));
@@ -8751,6 +8956,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

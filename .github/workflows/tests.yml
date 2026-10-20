@@ -20,7 +20,7 @@ jobs:
           python-version: '3.12'
       - name: Install Playwright and Chromium
         run: |
-          pip install playwright==1.56.0 pillow
+          pip install playwright==1.56.0 pillow python-docx reportlab
           python -m playwright install --with-deps chromium
       - name: Run tests
         run: tests/run.sh

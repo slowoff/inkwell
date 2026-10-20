@@ -1672,6 +1672,7 @@ async function saveContent(){
 }
 const saveContentSoon = debounce(() => saveContent(), 700);
 async function flushSaves(){
+  savePrefs.flush();   // (1.50) a settings change made just before the app closes was lost (saved 300 ms later)
   if(editing) syncEditingHTML();
   await saveContentSoon.flush();
   await saveTitleSoon.flush();
@@ -2404,7 +2405,7 @@ function rulerMove(){
     const a1 = Math.atan2(ts[1][1] - ts[0][1], ts[1][0] - ts[0][0]);
     let a = g.r0.a + (a1 - a0);
     const step = Math.PI / 12, snapA = Math.round(a / step) * step;
-    if(Math.abs(a - snapA) < 0.035) a = snapA;
+    if(r.snap !== false && Math.abs(a - snapA) < 0.035) a = snapA;
     r.a = a;
     r.cx = g.r0.cx + (ts[0][0] + ts[1][0]) / 2 - (g.t0[0][0] + g.t0[1][0]) / 2;
     r.cy = g.r0.cy + (ts[0][1] + ts[1][1]) / 2 - (g.t0[0][1] + g.t0[1][1]) / 2;
@@ -2436,7 +2437,7 @@ for(const h of ['rulerGrip', 'rulerTurnL', 'rulerTurnR']){
     if(d.turn){
       let a = d.r0.a + Math.atan2(sy - d.r0.cy, sx - d.r0.cx) - d.m0;
       const step = Math.PI / 12, snapA = Math.round(a / step) * step;   // clicks into 15° steps
-      if(Math.abs(a - snapA) < 0.05) a = snapA;
+      if(r.snap !== false && Math.abs(a - snapA) < 0.05) a = snapA;
       r.a = Math.atan2(Math.sin(a), Math.cos(a));
     } else { r.cx = d.r0.cx + sx - d.sx; r.cy = d.r0.cy + sy - d.sy; }
     renderRuler();
@@ -2444,8 +2445,24 @@ for(const h of ['rulerGrip', 'rulerTurnL', 'rulerTurnR']){
   const end = e => { if(!rulerDrag || rulerDrag.id !== e.pointerId) return; e.stopPropagation(); rulerDrag = null; savePrefs(); };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
 }
+// (1.50) Snap pill on the ruler: prefs.ruler.snap (missing = on) decides whether turning it (two fingers or the
+// turn handles) clicks into 15° steps. Tap (finger, Pencil or mouse) toggles; a drag that starts on it does nothing.
+{
+  const el = $('rulerSnap'); let down = null;
+  el.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); down = {id: e.pointerId, x: e.clientX, y: e.clientY}; });
+  el.addEventListener('pointerup', e => {
+    e.stopPropagation();
+    if(!down || down.id !== e.pointerId || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 12){ down = null; return; }
+    down = null;
+    const r = prefs.ruler; r.snap = r.snap === false; savePrefs(); renderRuler();
+    toast(r.snap ? 'Ruler snaps to 0°, 15°, 45°, 90° …' : 'Ruler snap off: it turns to any angle');
+  });
+  el.addEventListener('pointercancel', () => { down = null; });
+  el.addEventListener('click', e => e.stopPropagation());
+}
 function renderRuler(){
   const el = $('ruler'), r = prefs.ruler;
+  $('rulerSnap').classList.toggle('on', r.snap !== false); $('rulerSnap').setAttribute('aria-pressed', r.snap !== false);
   el.hidden = !r.on || !cur;
   $('rulerBtn').classList.toggle('on', !!r.on);
   if(!r.on) return;
@@ -5595,17 +5612,19 @@ $('setWheel').addEventListener('click', e => {
 });
 $('setHold').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
-  prefs.snapHold = +b.dataset.v; if(prefs.snapHold > 0) prefs.snapHoldLast = prefs.snapHold;
-  savePrefs(); renderPrefSettings(); renderSnapShapes();
+  prefs.snapHold = +b.dataset.v; savePrefs(); renderPrefSettings();
 });
-// (1.49) Shapes popover switch: off = snapHold 0 (same as Settings → Straighten shapes Off);
-// on = the speed used before (prefs snapHoldLast) or Normal
-function renderSnapShapes(){ $('snapShapes').classList.toggle('on', +prefs.snapHold > 0); }
+// (1.50) Shapes popover switch "Snap lines to angles" (prefs angleSnap; missing = on): the line tools of the
+// Shapes menu (line, arrows, spring, dashed) click into 15° steps when drawn close to them; off = any angle.
+// 1.49 had this switch turn hold-to-straighten (snapHold) off by mistake: put that back once.
+if(!prefs.v150){
+  if(+prefs.snapHold === 0 && +prefs.snapHoldLast > 0) prefs.snapHold = +prefs.snapHoldLast;
+  delete prefs.snapHoldLast; prefs.v150 = 1; savePrefs();
+}
+function renderSnapShapes(){ $('snapShapes').classList.toggle('on', prefs.angleSnap !== false); }
 $('snapShapes').addEventListener('click', () => {
-  if(+prefs.snapHold > 0){ prefs.snapHoldLast = +prefs.snapHold; prefs.snapHold = 0; }
-  else prefs.snapHold = +prefs.snapHoldLast > 0 ? +prefs.snapHoldLast : 550;
-  savePrefs(); renderSnapShapes(); renderPrefSettings();
-  toast(prefs.snapHold ? 'Strokes snap to shapes when you hold the pen still' : 'Shape snapping off: strokes stay as you draw them');
+  prefs.angleSnap = prefs.angleSnap === false; savePrefs(); renderSnapShapes();
+  toast(prefs.angleSnap ? 'Lines snap to 0°, 15°, 45°, 90° …' : 'Angle snapping off: lines go exactly where you drag');
 });
 renderSnapShapes();
 
@@ -5731,6 +5750,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.50', '2026-10-20', ['The switch in the Shapes menu is now "Snap lines to angles": turn it off and lines and arrows no longer click into 0°, 15°, 45°, 90°', 'Snap button on the ruler: turn it off and the ruler turns to any angle instead of clicking into 15° steps', 'Fix: a setting changed right before closing the app (like the ruler position) could be forgotten', 'Holding the pen still to straighten a stroke works as before 1.49 again (Settings → Straighten shapes)']],
   ['1.49', '2026-10-20', ['Shapes menu has a "Snap strokes to shapes" switch: turn it off and straight lines and shapes you draw stay as drawn']],
   ['1.48.1', '2026-10-20', ['Fix: strokes could disappear right after writing (while a sync came in, while an update loaded, when iPadOS interrupted the Pencil, or when a small letter written slowly opened the Pencil menu)']],
   ['1.48', '2026-10-20', ['Tab in a text box moves the text forward to the next tab stop (Shift+Tab takes it back)']],
@@ -6066,7 +6086,7 @@ function shapePolys(shape, b, w){
     // snap the angle to 15° steps when close
     let len = Math.hypot(x1 - x0, y1 - y0), ang = Math.atan2(y1 - y0, x1 - x0);
     const sn = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
-    if(Math.abs(sn - ang) < 0.06){ ang = sn; x1 = x0 + len * Math.cos(ang); y1 = y0 + len * Math.sin(ang); }
+    if(prefs.angleSnap !== false && Math.abs(sn - ang) < 0.06){ ang = sn; x1 = x0 + len * Math.cos(ang); y1 = y0 + len * Math.sin(ang); }
     const p0 = [x0, y0], p1 = [x1, y1], hs = clamp(Math.max(10, w * 5), 0, len * 0.45);
     if(shape === 'line') return [[[p0, p1], false]];
     if(shape === 'arrow') return [[[p0, p1], false], [arrowHead(p0, p1, hs), false]];

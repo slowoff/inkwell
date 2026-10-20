@@ -251,6 +251,12 @@ select.pf-ls option:checked{background:#9fbbe8}
 .ruler-angle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:600 13px var(--f-mono);color:var(--fg);background:var(--raise);padding:2px 8px;border-radius:6px}
 /* computer (mouse): a hand grip in the middle to move the ruler, turn handles at both ends */
 .ruler-grip,.ruler-turn{display:none}
+/* 1.50: Snap pill on the ruler (left of the middle); on = turning clicks into 15° steps */
+.ruler-snap{position:absolute;top:50%;left:calc(50% - 34px);transform:translate(-100%,-50%);display:flex;align-items:center;gap:4px;height:28px;padding:0 9px 0 7px;border-radius:14px;font:600 12px var(--f-ui,inherit);color:var(--muted);background:var(--raise);box-shadow:0 0 0 1px var(--rule-strong);pointer-events:auto;touch-action:none}
+.ruler-snap svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.ruler-snap span{pointer-events:none}
+.ruler-snap.on{color:var(--accent);box-shadow:0 0 0 1.5px var(--accent)}
+.ruler-snap:not(.on) span{text-decoration:line-through}
 @media (hover:hover) and (pointer:fine){
   .ruler-grip,.ruler-turn{position:absolute;top:50%;display:grid;place-items:center;width:30px;height:30px;margin-top:-15px;border-radius:50%;background:var(--raise);border:1.5px solid var(--accent);color:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.25);pointer-events:auto;touch-action:none}
   .ruler-grip{left:50%;margin-left:-15px;cursor:grab}
@@ -259,6 +265,7 @@ select.pf-ls option:checked{background:#9fbbe8}
   .ruler-grip:active{cursor:grabbing}
   .ruler-grip svg,.ruler-turn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
   .ruler-angle{transform:translate(calc(-50% + 46px),-50%)}
+  .ruler-snap{left:calc(50% - 22px)}
 }
 
 .t-handle{position:absolute;width:12px;height:32px;border-radius:6px;background:var(--accent);box-shadow:0 0 0 3px var(--paper);cursor:ew-resize;z-index:4;touch-action:none}
@@ -760,7 +767,7 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .assist-pop{width:280px}
 .assist-pop .toggle{justify-content:space-between;flex-direction:row-reverse;padding:0 2px;color:var(--fg);font-size:14px}
 .assist-pop .hint{margin:-4px 0 4px}
-/* 1.49: Snap strokes to shapes switch in the Shapes popover */
+/* 1.49/1.50: Snap lines to angles switch in the Shapes popover */
 .shape-snap{display:flex;width:100%;justify-content:space-between;flex-direction:row-reverse;padding:0 2px;margin-top:6px;color:var(--fg);font-size:14px}
 .tb.busy svg{animation:scribePulse 1s ease-in-out infinite alternate}
 .fade-pop .hint{margin:6px 0 0}
@@ -774,3 +781,5 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .g-sw .swatch{width:34px;height:34px}
 #gPrev{width:100%;height:190px;border-radius:12px;background:var(--panel2);display:block}
 @media (any-pointer:coarse){ .g-sw .swatch{width:44px;height:44px} }
+/* 1.50: ruler Snap pill, touch size */
+@media (any-pointer:coarse){ .ruler-snap{height:44px;border-radius:22px;padding:0 12px 0 10px;font-size:13px} }

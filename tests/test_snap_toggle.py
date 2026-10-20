@@ -1,5 +1,6 @@
-# 1.49: Shapes popover -> "Snap strokes to shapes" switch. Off = holding the pen still at the end of a stroke
-# no longer straightens it (same as Settings -> Straighten shapes Off); on again = the speed used before. Guest mode.
+# 1.50: Shapes popover -> "Snap lines to angles" switch (prefs angleSnap). On (default): a Line / Arrow drawn
+# within ~3 deg of a 15 deg step clicks onto it (0, 15, 45, 90 ...). Off: the line keeps the exact dragged angle.
+# Hold-to-straighten (prefs snapHold) is not touched by the switch; 1.49's mistaken use of it is undone once.
 import asyncio, os, math
 from playwright.async_api import async_playwright
 PORT = os.environ.get('INKWELL_PORT', '8766')
@@ -9,27 +10,42 @@ def check(ok, what):
     print(('ok   ' if ok else 'FAIL ') + what)
     if not ok: fails.append(what)
 
-LAST = """() => { const its = [...__inkwell.cur.items.values()].filter(i => i.t === 's'); const s = its[its.length - 1];
-  return s ? {n: its.length, p: Array.from(s.p)} : {n: 0}; }"""
+STROKES = """() => [...__inkwell.cur.items.values()].filter(i => i.t === 's').map(s => Array.from(s.p))"""
 
-def wobble(r):
-    P = r['p']; pts = [(P[i], P[i + 1]) for i in range(0, len(P), 3)]
+def angle(P):
+    return math.degrees(math.atan2(P[-2] - P[1], P[-3] - P[0]))
+
+def wobble(P):
+    pts = [(P[i], P[i + 1]) for i in range(0, len(P), 3)]
     (ax, ay), (bx, by) = pts[0], pts[-1]
     L = math.hypot(bx - ax, by - ay) or 1
     return max(abs((bx - ax) * (ay - y) - (ax - x) * (by - ay)) / L for x, y in pts)
 
+async def pick(page, shape):
+    await page.click('#shapeBtn'); await page.wait_for_selector('#shapeGrid', state='visible')
+    await page.click(f'#shapeGrid button[data-shape="{shape}"]'); await page.wait_for_timeout(150)
+
+async def drag(page, x, y, deg, length=240):
+    a = math.radians(deg)
+    await page.mouse.move(x, y); await page.mouse.down()
+    for i in range(1, 13): await page.mouse.move(x + length * math.cos(a) * i / 12, y + length * math.sin(a) * i / 12)
+    await page.mouse.up(); await page.wait_for_timeout(250)
+
 async def wobbly_line(page, x, y):
-    # a slightly wavy line, then the pen held still for 1.2 s before lifting
     await page.mouse.move(x, y); await page.mouse.down()
     for i in range(1, 61):
-        await page.mouse.move(x + 5 * i, y + 4 * math.sin(i / 4))
-        await page.wait_for_timeout(8)
+        await page.mouse.move(x + 5 * i, y + 4 * math.sin(i / 4)); await page.wait_for_timeout(8)
     await page.wait_for_timeout(1200)
     await page.mouse.up(); await page.wait_for_timeout(250)
 
-async def state(page):
-    return await page.evaluate("""() => ({hold: __inkwell.prefs.snapHold, on: document.getElementById('snapShapes').classList.contains('on'),
-      seg: [...document.querySelectorAll('#setHold button.on')].map(b => b.dataset.v).join(',')})""")
+async def switch(page):
+    await page.click('#shapeBtn'); await page.wait_for_selector('#snapShapes', state='visible')
+    await page.click('#snapShapes'); await page.wait_for_timeout(150)
+    await page.click('#shapeBtn'); await page.wait_for_timeout(150)
+
+async def boot(page):
+    await page.wait_for_timeout(3000)
+    await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
 
 async def main():
     async with async_playwright() as p:
@@ -39,51 +55,67 @@ async def main():
         page = await ctx.new_page()
         errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
-        await page.goto(URL); await page.wait_for_timeout(3000)
-        await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
-        await page.evaluate("async () => { await __inkwell.newPage(); __inkwell.setTool('pen'); }"); await page.wait_for_timeout(400)
+
+        # 0. migration: a 1.49 iPad that turned the old switch off gets hold-to-straighten back
+        await page.goto(URL); await boot(page)
+        await page.evaluate("""() => { const p = JSON.parse(localStorage.getItem('inkwell.prefs') || '{}');
+          p.snapHold = 0; p.snapHoldLast = 350; delete p.v150; localStorage.setItem('inkwell.prefs', JSON.stringify(p)); }""")
+        await page.reload(); await boot(page)
+        m = await page.evaluate("({h: __inkwell.prefs.snapHold, l: __inkwell.prefs.snapHoldLast, v: __inkwell.prefs.v150})")
+        check(m['h'] == 350 and m['l'] is None and m['v'] == 1, f'1.49 switch-off undone: snapHold back to 350 ({m})')
+        await page.evaluate("""() => { __inkwell.prefs.snapHold = 0; localStorage.setItem('inkwell.prefs', JSON.stringify(__inkwell.prefs)); }""")
+        await page.reload(); await boot(page)
+        m = await page.evaluate("__inkwell.prefs.snapHold")
+        check(m == 0, f'migration runs once: a later Off in Settings stays Off ({m})')
+        await page.evaluate("""() => { __inkwell.prefs.snapHold = 550; localStorage.setItem('inkwell.prefs', JSON.stringify(__inkwell.prefs)); }""")
+        await page.reload(); await boot(page)
+
+        await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(400)
         box = await page.evaluate("(() => { const r = document.getElementById('stage').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()")
-        x0, y0 = box[0] + 120, box[1] + 150
+        x0, y0 = box[0] + 120, box[1] + 120
 
-        # 1. default: switch on, a held wavy line is straightened
+        # 1. default on: Line drawn at 43 deg lands on 45, Arrow at 2 deg lands on 0
         await page.click('#shapeBtn'); await page.wait_for_selector('#snapShapes', state='visible')
-        s = await state(page)
-        check(s['on'] and s['hold'] == 550, f'switch is on by default ({s})')
-        await page.click('#shapeBtn'); await page.wait_for_timeout(200)
+        on = await page.evaluate("document.getElementById('snapShapes').classList.contains('on')")
+        label = await page.inner_text('#snapShapes')
+        check(on and 'angles' in label, f'switch "{label.strip()}" is on by default')
+        await page.click('#shapeBtn'); await page.wait_for_timeout(150)
+        await pick(page, 'line'); await drag(page, x0, y0, 43)
+        s = await page.evaluate(STROKES)
+        check(len(s) == 1 and abs(angle(s[-1]) - 45) < 0.05, f'on: line at 43 deg snaps to 45 ({angle(s[-1]):.2f})')
+        await pick(page, 'arrow'); await drag(page, x0, y0 + 260, 2)
+        s = await page.evaluate(STROKES)
+        check(abs(angle(s[-2]) - 0) < 0.05, f'on: arrow at 2 deg snaps to 0 ({angle(s[-2]):.2f})')
+
+        # 2. off: angles kept exactly
+        await switch(page)
+        st = await page.evaluate("({a: __inkwell.prefs.angleSnap, h: __inkwell.prefs.snapHold, on: document.getElementById('snapShapes').classList.contains('on')})")
+        check(st['a'] is False and not st['on'] and st['h'] == 550, f'switch off -> angleSnap false, hold-to-straighten untouched ({st})')
+        n0 = len(await page.evaluate(STROKES))
+        await pick(page, 'line'); await drag(page, x0 + 300, y0, 43)
+        s = await page.evaluate(STROKES)
+        check(len(s) == n0 + 1 and abs(angle(s[-1]) - 43) < 0.6, f'off: line keeps 43 deg ({angle(s[-1]):.2f})')
+        await pick(page, 'line'); await drag(page, x0 + 300, y0 + 260, 89)
+        s = await page.evaluate(STROKES)
+        check(abs(angle(s[-1]) - 89) < 0.6, f'off: nearly vertical line keeps 89 deg ({angle(s[-1]):.2f})')
+
+        # 3. hold-to-straighten still works with the switch off
         await page.evaluate("__inkwell.setTool('pen')")
-        await wobbly_line(page, x0, y0)
-        r = await page.evaluate(LAST)
-        check(r['n'] == 1 and wobble(r) < 0.5, f"on: held line straightened (n {r['n']}, wobble {wobble(r):.2f})")
+        await wobbly_line(page, x0, y0 + 420)
+        s = await page.evaluate(STROKES)
+        check(wobble(s[-1]) < 0.5, f'hold-to-straighten still on with angle switch off (wobble {wobble(s[-1]):.2f})')
 
-        # 2. switch off in the Shapes popover: same line stays as drawn
-        await page.click('#shapeBtn'); await page.wait_for_selector('#snapShapes', state='visible')
-        await page.click('#snapShapes'); await page.wait_for_timeout(150)
-        s = await state(page)
-        check(not s['on'] and s['hold'] == 0 and s['seg'] == '0', f'switch off -> snapHold 0, Settings shows Off ({s})')
-        await page.click('#shapeBtn'); await page.wait_for_timeout(200)
-        await page.evaluate("__inkwell.setTool('pen')")
-        await wobbly_line(page, x0, y0 + 80)
-        r = await page.evaluate(LAST)
-        check(r['n'] == 2 and wobble(r) > 2, f"off: held line keeps its shape (n {r['n']}, wobble {wobble(r):.2f})")
-        check(await page.evaluate("document.getElementById('shapePop').hidden"), 'popover closed again')
+        # 4. survives a reload, and turning back on snaps again
+        await page.reload(); await boot(page)
+        st = await page.evaluate("({a: __inkwell.prefs.angleSnap, on: document.getElementById('snapShapes').classList.contains('on')})")
+        check(st['a'] is False and not st['on'], f'off after reload ({st})')
+        await switch(page)
+        n0 = len(await page.evaluate(STROKES))
+        await pick(page, 'line'); await drag(page, x0 + 450, y0 + 60, 88, 200)
+        s = await page.evaluate(STROKES)
+        check(len(s) == n0 + 1 and abs(angle(s[-1]) - 90) < 0.05, f'on again: 88 deg snaps to 90 ({angle(s[-1]):.2f})')
 
-        # 3. survives a reload
-        await page.reload(); await page.wait_for_timeout(3000)
-        await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
-        s = await state(page)
-        check(not s['on'] and s['hold'] == 0, f'off after reload ({s})')
-
-        # 4. Settings speed is remembered: pick Fast in Settings, switch off and on again -> Fast
-        await page.evaluate("document.querySelector('#setHold button[data-v=\"350\"]').click()")
-        s = await state(page)
-        check(s['on'] and s['hold'] == 350, f'Settings Fast turns the switch on ({s})')
-        await page.evaluate("document.getElementById('snapShapes').click()")
-        await page.evaluate("document.getElementById('snapShapes').click()")
-        s = await state(page)
-        check(s['on'] and s['hold'] == 350 and s['seg'] == '350', f'off then on brings back Fast ({s})')
-
-        # 5. popover layout: switch visible inside the popover, full width, not overlapping the grid
-        await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(300)
+        # 5. layout
         await page.click('#shapeBtn'); await page.wait_for_selector('#snapShapes', state='visible')
         g = await page.evaluate("""() => { const p = document.getElementById('shapePop').getBoundingClientRect(), t = document.getElementById('snapShapes').getBoundingClientRect(),
           gr = document.getElementById('shapeGrid').getBoundingClientRect(); return {inside: t.left >= p.left && t.right <= p.right && t.bottom <= p.bottom, below: t.top >= gr.bottom, h: t.height}; }""")

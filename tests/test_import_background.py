@@ -51,7 +51,7 @@ async def main():
             await page.evaluate("() => { document.getElementById('toastText').textContent = ''; }")
             t0 = time.time()
             await page.set_input_files('#importFile', path)
-            await page.wait_for_function("document.getElementById('impStatus').textContent === '' && !document.getElementById('impGo').disabled && document.querySelector('#importPreview canvas')", timeout=60000)
+            await page.wait_for_function("!/^(Reading file|Turning)/.test(document.getElementById('impStatus').textContent) && !document.getElementById('impGo').disabled && document.querySelector('#importPreview canvas')", timeout=60000)
             return time.time() - t0
         async def wait_done(timeout=90000):
             await page.wait_for_function("/^(Placed|Import stopped)/.test(document.getElementById('toastText').textContent)", timeout=timeout)
@@ -62,6 +62,8 @@ async def main():
         dt = await pick(doc6)
         n_prev = await page.evaluate("document.querySelectorAll('#importPreview canvas').length")
         cnt = await page.evaluate("document.getElementById('impCount').textContent")
+        hint = await page.evaluate("document.getElementById('impStatus').textContent")
+        check('Not signed in' in hint, f'signed out: Word is drawn by Inkwell and the dialog says so ({hint!r})')
         check(n_prev == 1, f'the dialog only makes page 1 for the preview ({n_prev} pictures, {dt:.1f} s)')
         check('6' in cnt, f'page count shown before importing: {cnt!r}')
         await page.click('#impGo')
@@ -155,6 +157,44 @@ async def main():
         await page.wait_for_timeout(500)
         np = await page.evaluate("[...__inkwell.docs.values()].filter(d => d.kind === 'ptxt' && !d.deleted).length")
         check(np >= 4, f'PDF text is searchable right away ({np} pages of text)')
+
+        # --- signed in: Word goes through Google Docs and comes back as a PDF
+        calls = []
+        pdf_bytes = open(make_pdf(3, 'conv.pdf'), 'rb').read()
+        async def up(route):
+            calls.append(('upload', route.request.post_data_buffer or b''))
+            await route.fulfill(status=200, content_type='application/json', body='{"id":"gdoc1"}')
+        async def ex(route):
+            if route.request.method == 'DELETE':
+                calls.append(('delete', b'')); await route.fulfill(status=204, body='')
+            else:
+                calls.append(('export', route.request.url.encode())); await route.fulfill(status=200, content_type='application/pdf', body=pdf_bytes)
+        await page.route('**/upload/drive/v3/files**', up)
+        await page.route('**/drive/v3/files/gdoc1**', ex)
+        await page.evaluate("() => { __inkwell.Sync.user = {id: 'u1', email: 't@example.com'}; __inkwell.GD.token = async () => ({at: 'tok', folder: 'fold', exp: Date.now() + 3e6}); }")
+        await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(400)
+        await pick(doc6)
+        kinds = [c[0] for c in calls]
+        check(kinds[:2] == ['upload', 'export'], f'signed in: the Word file is converted by Google ({kinds})')
+        check(b'application/vnd.google-apps.document' in calls[0][1] and b'Worksheet page' not in calls[0][1][:0] and len(calls[0][1]) > 5000, 'uploaded as a Google Doc with the Word file in it')
+        check(b'mimeType=application%2Fpdf' in calls[1][1], 'exported as PDF')
+        await page.wait_for_timeout(300)
+        check('delete' in [c[0] for c in calls], 'the temporary Google Doc is deleted again')
+        cnt = await page.evaluate("document.getElementById('impCount').textContent")
+        st = await page.evaluate("document.getElementById('impStatus').textContent")
+        check(cnt == '(3 pages)' and st == '', f'the dialog shows the PDF pages, no warning ({cnt!r}, {st!r})')
+        await page.click('#impGo'); await wait_done()
+        ig = await page.evaluate(IMGS)
+        check(len(ig) == 3, f'converted Word file placed like a PDF ({len(ig)} pages)')
+        check(await page.evaluate("document.getElementById('title').value") == 'six', 'page named after the Word file')
+        # Google fails: falls back to Inkwell's own drawing with a warning
+        await page.unroute('**/upload/drive/v3/files**')
+        await page.route('**/upload/drive/v3/files**', lambda r: r.fulfill(status=500, body='{}'))
+        await pick(doc6)
+        st = await page.evaluate("document.getElementById('impStatus').textContent")
+        check('could not convert' in st and 'about' in await page.evaluate("document.getElementById('impCount').textContent"), f'conversion fails: Inkwell draws it itself and says so ({st!r})')
+        await page.click('#importDlg [data-close]'); await page.wait_for_timeout(300)
+        await page.evaluate("() => { __inkwell.Sync.user = null; }")
 
         # --- closing the dialog after picking a Word file leaves nothing behind
         await pick(doc6)

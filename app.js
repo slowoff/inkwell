@@ -1047,16 +1047,53 @@ const deser = it => it && it.t === 's' ? Object.assign({}, it, {p: decPts(it.p)}
 const r1 = v => Math.round(v * 10) / 10;
 
 function strokeShape(it){
-  const p = it.p, n = p.length / 3, base = it.w / 2;
-  const xs = new Array(n), ys = new Array(n), rs = new Array(n);
-  for(let i = 0; i < n; i++){
-    const mid = i > 0 && i < n - 1;
-    xs[i] = mid ? (p[i*3-3] + 2*p[i*3] + p[i*3+3]) / 4 : p[i*3];
-    ys[i] = mid ? (p[i*3-2] + 2*p[i*3+1] + p[i*3+4]) / 4 : p[i*3+1];
+  const p = it.p, m = p.length / 3, base = it.w / 2;
+  // light smoothing of the recorded points (1-2-1) against jitter, ends kept where the pen touched down and lifted.
+  // (1.47) only where points are close together: far apart (fast writing) it would shrink loops, and the curve below
+  // already rounds those.
+  const X = new Array(m), Y = new Array(m), Rr = new Array(m);
+  for(let i = 0; i < m; i++){
+    const mid = i > 0 && i < m - 1;
+    let f = 0;
+    if(mid){ const d = (Math.hypot(p[i*3] - p[i*3-3], p[i*3+1] - p[i*3-2]) + Math.hypot(p[i*3+3] - p[i*3], p[i*3+4] - p[i*3+1])) / 2; f = d <= 3 ? 1 : d >= 8 ? 0 : (8 - d) / 5; }
+    X[i] = f ? p[i*3] + f * ((p[i*3-3] + 2*p[i*3] + p[i*3+3]) / 4 - p[i*3]) : p[i*3];
+    Y[i] = f ? p[i*3+1] + f * ((p[i*3-2] + 2*p[i*3+1] + p[i*3+4]) / 4 - p[i*3+1]) : p[i*3+1];
     const pr = mid ? (p[i*3-1] + 2*p[i*3+2] + p[i*3+5]) / 4 : p[i*3+2];
-    rs[i] = it.hl ? base : Math.max(0.3, base * (0.3 + pr));
+    Rr[i] = it.hl ? base : Math.max(0.3, base * (0.3 + pr));
   }
-  return {xs, ys, rs, n};
+  if(m < 3) return {xs: X, ys: Y, rs: Rr, n: m};
+  // (1.47) smooth curves: between recorded points the line follows a centripetal Catmull-Rom curve instead of a
+  // straight piece, so fast writing (points far apart) gives round letters instead of corners. Rendering only;
+  // the stored points are unchanged, so older strokes get it too and the data format stays the same.
+  const step = Math.max(0.6, base * 0.5);
+  const xs = [X[0]], ys = [Y[0]], rs = [Rr[0]];
+  for(let i = 0; i < m - 1; i++){
+    const len = Math.hypot(X[i+1] - X[i], Y[i+1] - Y[i]);
+    const k = Math.min(16, Math.floor(len / step));
+    if(k >= 2){
+      const a = i > 0 ? i - 1 : i, d = i + 2 < m ? i + 2 : i + 1;
+      const P = [[X[a], Y[a]], [X[i], Y[i]], [X[i+1], Y[i+1]], [X[d], Y[d]]];
+      if(a === i) P[0] = [2*X[i] - X[i+1], 2*Y[i] - Y[i+1]];
+      if(d === i + 1) P[3] = [2*X[i+1] - X[i], 2*Y[i+1] - Y[i]];
+      const tj = (q, r) => Math.max(1e-4, Math.sqrt(Math.hypot(r[0] - q[0], r[1] - q[1])));
+      const t1 = tj(P[0], P[1]), t2 = t1 + tj(P[1], P[2]), t3 = t2 + tj(P[2], P[3]);
+      for(let j = 1; j < k; j++){
+        const t = t1 + (t2 - t1) * j / k;
+        const out = [0, 1].map(c => {
+          const A1 = ((t1 - t) * P[0][c] + t * P[1][c]) / t1;
+          const A2 = ((t2 - t) * P[1][c] + (t - t1) * P[2][c]) / (t2 - t1);
+          const A3 = ((t3 - t) * P[2][c] + (t - t2) * P[3][c]) / (t3 - t2);
+          const B1 = ((t2 - t) * A1 + t * A2) / t2;
+          const B2 = ((t3 - t) * A2 + (t - t1) * A3) / (t3 - t1);
+          return ((t2 - t) * B1 + (t - t1) * B2) / (t2 - t1);
+        });
+        if(!isFinite(out[0]) || !isFinite(out[1])) continue;
+        xs.push(out[0]); ys.push(out[1]); rs.push(Rr[i] + (Rr[i+1] - Rr[i]) * j / k);
+      }
+    }
+    xs.push(X[i+1]); ys.push(Y[i+1]); rs.push(Rr[i+1]);
+  }
+  return {xs, ys, rs, n: xs.length};
 }
 // Filled outline of a variable-width stroke, as a Path2D or an SVG path string.
 function strokePath(it, svg){
@@ -5651,6 +5688,73 @@ async function renderVersion(){
   const v = await appVersion();
   $('verInfo').textContent = 'Inkwell' + (v ? ' ' + v.replace(/^inkwell-/, '') : '');
 }
+/* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
+const CHANGELOG = [
+  ['1.47', '2026-10-20', ['Pencil ink follows smooth curves: fast writing no longer gets corners, and quick loops no longer shrink', 'Change log in Settings (this list)']],
+  ['1.46', '2026-10-20', ['Word files are turned into a PDF through your Google Drive, so they look like in Word', 'Imports close the dialog right away and pages appear one by one while you keep writing; Stop button, one undo removes the whole import']],
+  ['1.45', '2026-10-20', ['Hand grip next to a text box you are typing in, to move the box']],
+  ['1.44.1', '2026-10-20', ['A finger tap with the Text or Formula tool places a box', 'Text pasted into table cells stays readable']],
+  ['1.44', '2026-10-20', ['"Read handwriting & scans" has a Docs only choice']],
+  ['1.43', '2026-10-20', ['Dotted answer lines work with text snapping', 'Text on imported pages starts at the size of the printed text']],
+  ['1.42.2', '2026-10-20', ['Top bar no longer blurred by iPadOS 26']],
+  ['1.42.1', '2026-10-19', ['Reference line sits at the bottom of the letters (dots on i no longer move it)']],
+  ['1.42', '2026-10-19', ['Writing menu with Write to text and Reference line; ink is never moved any more']],
+  ['1.41.1', '2026-10-19', ['Lasso no longer grabs the whole imported page']],
+  ['1.41', '2026-10-19', ['Writing assist to try out (keep lines level, even word spacing)']],
+  ['1.40', '2026-10-19', ['Fade slider for selected items', 'Graph look options: size, colours, line style, grid fade, arrow tips']],
+  ['1.39', '2026-10-19', ['Compass in Shapes for circles and arcs']],
+  ['1.38', '2026-10-19', ['Copy and paste with the select tool']],
+  ['1.37', '2026-10-19', ['Max zoom setting']],
+  ['1.36', '2026-10-18', ['Each Google account keeps its own notes on the device', 'Drive notes copy and daily check run reliably; many smaller fixes']],
+  ['1.35', '2026-10-18', ['New server keys, daily Drive check, automatic tests']],
+  ['1.34', '2026-10-18', ['Sign in with Google only; pictures are saved in your own Google Drive']],
+  ['1.33', '2026-10-18', ['Copy of all notes in Google Drive']],
+  ['1.32', '2026-10-18', ['Clearer Google Drive connect errors']],
+  ['1.31', '2026-10-18', ['Privacy page']],
+  ['1.30', '2026-10-18', ['Google Drive for pictures (optional)']],
+  ['1.29', '2026-10-17', ['Typed text snaps into table cells of worksheets']],
+  ['1.28', '2026-10-17', ['Storage bar, heads-up when nearly full, Clean up']],
+  ['1.27', '2026-10-17', ['Page history, zip backups, upload when leaving the app, Claude spending cap']],
+  ['1.26', '2026-10-17', ['Edits from two devices are merged', 'Bigger touch targets']],
+  ['1.25', '2026-10-17', ['Setup guide for Import from OneNote']],
+  ['1.24', '2026-10-16', ['Import from OneNote']],
+  ['1.23', '2026-10-16', ['Drag to reorder notebooks, sections and pages']],
+  ['1.22', '2026-10-16', ['Mark for later removed from the Pencil menu']],
+  ['1.21', '2026-10-16', ['Eraser picked in the Pencil menu erases once']],
+  ['1.20', '2026-10-16', ['Pencil menu is a half-moon wheel that opens away from your hand']],
+  ['1.19', '2026-10-16', ['Pages Claude will not read are skipped']],
+  ['1.18', '2026-10-16', ['Shape rotation and ruler fixes']],
+  ['1.17', '2026-10-16', ['Claude panel steps aside while scanning']],
+  ['1.16', '2026-10-16', ['Finer mouse-wheel zoom']],
+  ['1.15', '2026-10-16', ['Erasers work on text boxes']],
+  ['1.14', '2026-10-16', ['Calculator']],
+  ['1.13', '2026-10-15', ['Tutor / Solve / Practice in one menu']],
+  ['1.12', '2026-10-15', ['Free up space']],
+  ['1.11', '2026-10-15', ['Instant sync between devices']],
+  ['1.10', '2026-10-15', ['Export a page as one PDF file']],
+  ['1.9', '2026-10-15', ['Practice from your notes']],
+  ['1.8', '2026-10-15', ['Write to text']],
+  ['1.7', '2026-10-15', ['Search inside imported PDFs and scans']],
+  ['1.6', '2026-10-15', ['Sharp typed text when zoomed in']],
+  ['1.5', '2026-10-15', ['Page slider only shows on a deliberate scroll']],
+  ['1.4', '2026-10-15', ['Long pages export in parts']],
+  ['1.3', '2026-10-15', ['Fix: correct password did not sign in on the iPad']],
+  ['1.2', '2026-10-15', ['Forgot password and Change password']],
+  ['1.1', '2026-10-15', ['Polish all over']],
+  ['1.0', '2026-10-15', ['First numbered release: notebooks, Pencil ink, text, formulas, PDF import, sync, Ask Claude']]
+];
+function renderChangelog(){
+  const day = d => new Date(d + 'T12:00:00').toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'});
+  $('changelog').innerHTML = CHANGELOG.map(([v, d, items]) => `<h4>${esc(v)}<small>${esc(day(d))}</small></h4><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`).join('');
+}
+$('logBtn').addEventListener('click', () => {
+  const box = $('changelog'), open = box.hidden;
+  if(open && !box.innerHTML) renderChangelog();
+  box.hidden = !open;
+  $('logBtn').textContent = open ? 'Hide changes' : 'See changes';
+  $('logBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  if(open) box.scrollTop = 0;
+});
 $('updBtn').addEventListener('click', async () => {
   const b = $('updBtn');
   if(b.dataset.ready && swReg && swReg.waiting){ b.textContent = 'Updating'; b.disabled = true; swReg.waiting.postMessage('skipWaiting'); return; }
@@ -8565,6 +8669,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloaded) return; reloaded = true; LSset('inkwell.opening', null); flushSaves().then(() => location.reload()); });
 }
 
-window.__inkwell = {WA, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {CHANGELOG, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

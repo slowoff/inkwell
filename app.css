@@ -401,6 +401,15 @@ select.pf-ls option:checked{background:#9fbbe8}
 .set-row > span{font-size:14.5px}
 .set-row + .hint{margin-top:-8px}
 .set-row .seg{flex:none;min-width:300px}
+/* (1.47) change log under the version line */
+.ver-wrap{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ver-wrap .link-btn.ver-log{margin:0;padding:4px 0;font-size:12.5px}
+.changelog{max-height:340px;overflow:auto;border-radius:10px;background:var(--well);padding:10px 14px;font-size:13px;line-height:1.45}
+.changelog h4{margin:10px 0 2px;font-size:13px}
+.changelog h4:first-child{margin-top:0}
+.changelog h4 small{font-weight:400;color:var(--muted);margin-left:6px}
+.changelog ul{margin:0;padding-left:18px}
+.changelog li{margin:1px 0}
 .trash-list{display:flex;flex-direction:column;gap:2px;max-height:60vh;overflow:auto}
 .trash-item{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line)}
 .trash-item:last-child{border-bottom:0}

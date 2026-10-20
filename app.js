@@ -4471,6 +4471,7 @@ function showModal(id){ closePops(); $(id).hidden = false; modalAt = Date.now();
 function hideModal(id){
   $(id).hidden = true;
   if(id === 'exportDlg' && typeof Pdf !== 'undefined') Pdf.abort = true;
+  if(id === 'importDlg' && typeof dropImport === 'function') dropImport();
   if(id === 'linkDlg' && keepEditing){ keepEditing = false; if(editing){ const el = elMap.get(editing.id); if(el) el.focus({preventScroll: true}); } }
 }
 document.querySelectorAll('.modal').forEach(m => {
@@ -4520,8 +4521,9 @@ $('insertBtn').addEventListener('click', () => {
   if(!cur){ toast('Open a page first'); return; }
   resetImport(); showModal('importDlg');
 });
+function dropImport(){ if(imp && imp.close) imp.close(); imp = null; }
 function resetImport(){
-  imp = null;
+  dropImport();
   $('importPick').hidden = false; $('importSetup').hidden = true;
   $('importFile').value = ''; $('importPreview').innerHTML = ''; $('impStatus').textContent = '';
   $('impGo').disabled = false;
@@ -4530,7 +4532,7 @@ $('impOther').addEventListener('click', resetImport);
 $('importFile').addEventListener('change', async () => {
   const f = $('importFile').files[0]; if(!f) return;
   $('importPick').hidden = true; $('importSetup').hidden = false; $('impStatus').textContent = 'Reading file';
-  try { await loadImport(f); $('impStatus').textContent = ''; }
+  try { await loadImport(f); $('impStatus').textContent = ''; if($('importDlg').hidden) dropImport(); }
   catch(e){ console.warn(e); $('impStatus').textContent = e && e.name === 'OldWord' ? 'This is an old Word file (.doc). Open it in Word and save it as .docx or PDF, then import that.' : 'This file could not be opened. ' + (e && e.name === 'PasswordException' ? 'It is password protected.' : /\.docx$/i.test(f.name) ? (e && /load/i.test(e.message) ? e.message : 'Try saving it again in Word, or as PDF.') : 'Try saving it as PDF again.'); $('impGo').disabled = true; }
 });
 // Reads a PDF page's fillable fields. Returns {f: fields for the item, blank: [[annotationId, emptyValue]]}.
@@ -4594,6 +4596,7 @@ async function renderPdfPage(pdf, n, targetW, blank){
   return {canvas: c, w: v1.width, h: v1.height};
 }
 async function loadImport(f){
+  dropImport();
   const prev = $('importPreview'); prev.innerHTML = '';
   const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
   if(isPdf){
@@ -4605,12 +4608,17 @@ async function loadImport(f){
     for(let i = 1; i <= Math.min(5, pdf.numPages); i++){ const r = await renderPdfPage(pdf, i, 120); prev.appendChild(r.canvas); }
     if(pdf.numPages > 5){ const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ ${pdf.numPages - 5} more`; prev.appendChild(m); }
   } else if(/\.docx$/i.test(f.name) || f.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'){
-    const pages = await renderDocx(f, t => { $('impStatus').textContent = t; });
-    imp = {kind: 'docx', pages, n: pages.length, name: f.name.replace(/\.docx$/i, '').trim()};
+    // (1.46) only the layout and page 1 now; the other pages are made after "Print onto page", while you keep working
+    const d = await openDocx(f);
+    imp = {kind: 'docx', d, close: d.close, n: d.est, name: f.name.replace(/\.docx$/i, '').trim()};
+    let pg;
+    try { pg = await d.next(); } catch(e){ d.close(); imp = null; throw e; }
+    if(!pg){ d.close(); imp = null; throw new Error('No pages found in this Word file'); }
+    imp.first = pg;
     $('impPagesWrap').hidden = false; $('impPages').value = '';
-    $('impCount').textContent = `(${pages.length} page${pages.length === 1 ? '' : 's'})`;
-    for(const pg of pages.slice(0, 5)){ const t = document.createElement('canvas'), k = 120 / pg.canvas.width; t.width = 120; t.height = Math.round(pg.canvas.height * k); t.getContext('2d').drawImage(pg.canvas, 0, 0, t.width, t.height); prev.appendChild(t); }
-    if(pages.length > 5){ const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ ${pages.length - 5} more`; prev.appendChild(m); }
+    $('impCount').textContent = d.est > 1 ? `(about ${d.est} pages)` : '(1 page)';
+    { const t = document.createElement('canvas'), k = 120 / pg.canvas.width; t.width = 120; t.height = Math.round(pg.canvas.height * k); t.getContext('2d').drawImage(pg.canvas, 0, 0, t.width, t.height); prev.appendChild(t); }
+    if(d.est > 1){ const m = document.createElement('span'); m.className = 'more'; m.textContent = `+ about ${d.est - 1} more`; prev.appendChild(m); }
   } else if(/\.doc$/i.test(f.name) || f.type === 'application/msword'){
     throw Object.assign(new Error('old Word'), {name: 'OldWord'});
   } else if(f.type.startsWith('image/') || /\.(jpe?g|png|heic|webp|gif)$/i.test(f.name)){
@@ -4638,69 +4646,120 @@ function parsePages(str, n){
   return [...out].sort((x, y) => x - y);
 }
 function canvasBlob(c){ return new Promise(res => c.toBlob(b => res(b), 'image/jpeg', 0.86)); }
+/* (1.46) "Print onto page" closes the dialog at once; pages are made one at a time and appear on the page as they
+   are ready, so you can keep writing meanwhile. The whole import stays one undo step (undo while it runs stops it).
+   If you leave the page, the rest still goes onto the page the import started on. */
+const impJobs = new Set();
+const impWait = ms => new Promise(r => setTimeout(r, ms));
+// let a stroke, pinch or drag finish before the next (slow) page picture is made
+async function impIdle(){ await impWait(30); for(let t = 0; t < 40 && (penDown || act || selDrag || gesture); t++) await impWait(120); }   // waits at most ~5 s
+async function impPlace(job, item){
+  if(cur && cur.id === job.pid){
+    if(job.op && job.cur === cur && !cur.undo.includes(job.op)){ job.stopped = 'undo'; return false; }
+    setItems([[item.id, item]]);
+    if(job.op && job.cur === cur){ job.op.a.push([item.id, item]); job.op.b.push([item.id, null]); }
+    else { job.cur = cur; commit([[item.id, null]], [[item.id, item]]); job.op = cur.undo[cur.undo.length - 1]; }
+    return true;
+  }
+  if(!getDoc(job.pid)){ job.stopped = 'gone'; return false; }
+  job.cur = job.op = null;
+  const rec = await IDB.get('docs', 'c_' + job.pid);
+  const ok = rec && !rec.deleted && rec.data;
+  const data = ok ? rec.data : {bg: Object.assign({}, prefs.bg), items: []};
+  const out = ok ? rec : {id: 'c_' + job.pid, kind: 'content', deleted: false};
+  out.data = Object.assign({}, data, {items: [...(data.items || []), ser(item)]});
+  await writeDoc(out);
+  // the page was opened while this was written: show the picture there too
+  if(cur && cur.id === job.pid && !cur.items.has(item.id)) setItems([[item.id, item]]);
+  return true;
+}
 $('impGo').addEventListener('click', async () => {
   if(!imp || !cur) return;
-  const size = +$('impSize').value / 100, go = $('impGo');
-  go.disabled = true;
-  // place below everything already on the page, then scroll there
+  const size = +$('impSize').value / 100, src = imp;
+  let pages = null, want = null;
+  if(src.kind === 'pdf'){
+    pages = parsePages($('impPages').value, src.n);
+    if(!pages.length){ $('impStatus').textContent = 'No pages match that range.'; return; }
+  } else if(src.kind === 'docx'){
+    const r = ($('impPages').value || '').trim().toLowerCase();
+    if(r && r !== 'all'){ want = new Set(parsePages(r, 300)); if(!want.size){ $('impStatus').textContent = 'No pages match that range.'; return; } }
+  }
+  // place below everything already on the page (and below imports still running there), then scroll there
   const cb = contentBox();
-  // empty, untitled page + PDF: the page takes the PDF's file name
-  const pageDoc = getDoc(cur.id), nameAfterPdf = (imp.kind === 'pdf' || imp.kind === 'docx') && !cb && !!imp.name && !!pageDoc && !(pageDoc.data.title || '').trim() && !$('title').value.trim();
+  const pageDoc = getDoc(cur.id), nameAfterPdf = (src.kind === 'pdf' || src.kind === 'docx') && !cb && !!src.name && !!pageDoc && !(pageDoc.data.title || '').trim() && !$('title').value.trim();
   const [vx, vy] = toWorld(W > 600 ? 48 : 16, 24);
-  const x0 = cb ? cb[0] : vx, y0 = cb ? cb[3] + 48 : vy;
-  let y = y0, nFields = 0; const items = [];
+  const x0 = cb ? cb[0] : vx;
+  let y0 = cb ? cb[3] + 48 : vy;
+  for(const j of impJobs) if(j.pid === cur.id) y0 = Math.max(y0, j.y + 24);
+  imp = null;   // the job owns the file now; closing the dialog must not drop it
+  hideModal('importDlg');
+  setTool('pen');
+  if(src.kind === 'img'){
+    const wWorld = A4W * size, hWorld = wWorld * src.h / src.w;
+    const scale = Math.min(1, 2400 / Math.max(src.w, src.h));
+    const c = document.createElement('canvas');
+    c.width = Math.round(src.w * scale); c.height = Math.round(src.h * scale);
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(src.img, 0, 0, c.width, c.height);
+    const a = await saveAsset(await canvasBlob(c));
+    if(!cur) return;
+    addItems([{t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wWorld, h: hWorld, a}]);
+    cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon(); PT.soon();
+    toast('Placed on the page');
+    return;
+  }
+  if(nameAfterPdf){ $('title').value = src.name; await patchDoc(pageDoc, {title: src.name}); refreshPageItem(pageDoc.id); }
+  cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon();
+  const job = {pid: cur.id, y: y0 - 24, n: 0, fields: 0, stopped: null, cur: null, op: null};
+  impJobs.add(job);
+  const total = pages ? pages.length : want ? want.size : src.n;
+  const about = !pages && !want && total > 1 ? 'about ' : '';
+  const say = () => toast(`Placing page ${job.n + 1} of ${about}${Math.max(total, job.n + 1)}…`, 'Stop', () => { job.stopped = 'user'; });
+  let err = null;
   try {
-    if(imp.kind === 'pdf'){
-      const pages = parsePages($('impPages').value, imp.n);
-      if(!pages.length){ $('impStatus').textContent = 'No pages match that range.'; go.disabled = false; return; }
-      for(let k = 0; k < pages.length; k++){
-        $('impStatus').textContent = `Printing page ${k + 1} of ${pages.length}`;
-        const page = await imp.pdf.getPage(pages[k]); const v1 = page.getViewport({scale: 1});
+    if(src.kind === 'pdf'){
+      for(let k = 0; k < pages.length && !job.stopped; k++){
+        await impIdle(); if(job.stopped) break;
+        say();
+        const page = await src.pdf.getPage(pages[k]); const v1 = page.getViewport({scale: 1});
         const pf = await pdfFields(page), lines = await pdfLines(page); page.cleanup();
         const wWorld = v1.width / 595.28 * A4W * size, hWorld = wWorld * v1.height / v1.width;
         const px = Math.round(clamp(wWorld * 2.4, 900, 2000));
-        const r = await renderPdfPage(imp.pdf, pages[k], px, pf.f.length ? pf.blank : null);
+        const r = await renderPdfPage(src.pdf, pages[k], px, pf.f.length ? pf.blank : null);
         const a = await saveAsset(await canvasBlob(r.canvas));
         r.canvas.width = r.canvas.height = 1;
-        const item = {t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a, doc: 1};
+        if(job.stopped) break;
+        const item = {t: 'i', id: 'i' + newId(), x: x0, y: job.y + 24, w: wWorld, h: hWorld, a, doc: 1};
         if(hasRealText(lines)) await savePtxt(a, 'pdf', lines);   // searchable right away; scans are read by Claude later
-        if(pf.f.length){ item.f = pf.f; nFields += pf.f.length; }
-        items.push(item);
-        y += hWorld + 24;
-      }
-    } else if(imp.kind === 'docx'){
-      const pages = parsePages($('impPages').value, imp.n);
-      if(!pages.length){ $('impStatus').textContent = 'No pages match that range.'; go.disabled = false; return; }
-      for(let k = 0; k < pages.length; k++){
-        $('impStatus').textContent = `Printing page ${k + 1} of ${pages.length}`;
-        const pg = imp.pages[pages[k] - 1];
-        const wWorld = pg.w / A4W * A4W * size, hWorld = wWorld * pg.h / pg.w;
-        const a = await saveAsset(await canvasBlob(pg.canvas));
-        items.push({t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a, doc: 1});
-        y += hWorld + 24;
+        if(pf.f.length) item.f = pf.f;
+        if(!await impPlace(job, item)) break;
+        job.n++; job.fields += pf.f.length; job.y += 24 + hWorld;
       }
     } else {
-      $('impStatus').textContent = 'Placing image';
-      const wWorld = A4W * size, hWorld = wWorld * imp.h / imp.w;
-      const scale = Math.min(1, 2400 / Math.max(imp.w, imp.h));
-      const c = document.createElement('canvas');
-      c.width = Math.round(imp.w * scale); c.height = Math.round(imp.h * scale);
-      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
-      ctx.drawImage(imp.img, 0, 0, c.width, c.height);
-      const a = await saveAsset(await canvasBlob(c));
-      items.push({t: 'i', id: 'i' + newId(), x: x0, y, w: wWorld, h: hWorld, a});
+      const last = want ? Math.max(...want) : Infinity;
+      for(let i = 1; i <= last && !job.stopped; i++){
+        let pg;
+        if(i === 1) pg = src.first;
+        else { await impIdle(); if(job.stopped) break; if(!want || want.has(i)) say(); pg = await src.d.next(); }
+        if(!pg) break;
+        if(want && !want.has(i)){ pg.canvas.width = pg.canvas.height = 1; continue; }
+        const wWorld = A4W * size, hWorld = wWorld * pg.h / pg.w;
+        const a = await saveAsset(await canvasBlob(pg.canvas));
+        pg.canvas.width = pg.canvas.height = 1;
+        if(job.stopped) break;
+        if(!await impPlace(job, {t: 'i', id: 'i' + newId(), x: x0, y: job.y + 24, w: wWorld, h: hWorld, a, doc: 1})) break;
+        job.n++; job.y += 24 + hWorld;
+      }
     }
-  } catch(e){
-    console.warn(e);
-    $('impStatus').textContent = 'Import stopped: ' + (e.message || e);
-    go.disabled = false;
-    if(!items.length) return;
-  }
-  const pd = nameAfterPdf && items.length && getDoc(cur.id);
-  if(pd && !(pd.data.title || '').trim() && !$('title').value.trim()){ $('title').value = imp.name; await patchDoc(pd, {title: imp.name}); refreshPageItem(cur.id); }
-  if(items.length){ addItems(items); setTool('pen'); cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon(); PT.soon(); }
-  hideModal('importDlg');
-  toast((items.length === 1 ? 'Placed on the page' : `Placed ${items.length} pages`) + (nFields ? ` · ${nFields} fillable field${nFields === 1 ? '' : 's'}` : ''));
+  } catch(e){ console.warn(e); err = e; }
+  finally { impJobs.delete(job); if(src.close) src.close(); }
+  if(job.n) PT.soon();
+  const placed = job.n === 1 ? '1 page placed' : `${job.n} pages placed`;
+  if(err) toast(`Import stopped: ${err.message || err}` + (job.n ? ` (${placed})` : ''));
+  else if(job.stopped === 'undo') toast('Import stopped');
+  else if(job.stopped === 'gone') toast('Import stopped: the page was deleted');
+  else if(job.stopped === 'user') toast(`Import stopped · ${placed}`);
+  else toast((job.n === 1 ? 'Placed on the page' : `Placed ${job.n} pages`) + (job.fields ? ` · ${job.fields} fillable field${job.fields === 1 ? '' : 's'}` : ''));
 });
 
 /* =====================================================================
@@ -6148,60 +6207,80 @@ async function wordLibs(){
   if(!window.docx || !window.docx.renderAsync) await loadScript('lib/docx/docx-preview.min.js');
   if(!window.html2canvas) await loadScript('lib/docx/html2canvas.min.js');
 }
-// Renders every page of a .docx to a canvas (about 2 px per CSS px). Long sections without page breaks are
-// cut into page-sized pieces at blank rows between lines of text.
-async function renderDocx(file, onStatus){
+// Opens a .docx for page-by-page rendering (1.46). The Word layout itself is quick; turning each page into a picture
+// (html2canvas, about 2 px per CSS px) is the slow part, so it happens one page at a time through `next()`, which the
+// import calls after the dialog has closed. Long sections without page breaks are cut into page-sized pieces at blank
+// rows between lines of text. Returns {est (estimated page count), next() -> {canvas, w, h} | null, close()}.
+async function openDocx(file){
   await wordLibs();
   const box = document.createElement('div');
   box.className = 'docx-render';
   box.style.cssText = 'position:absolute;left:0;top:0;z-index:-5;background:#fff;color:#000;color-scheme:light;width:max-content;pointer-events:none';
   document.body.appendChild(box);
+  let sections;
   try {
     await window.docx.renderAsync(await file.arrayBuffer(), box, box, {inWrapper: false, breakPages: true, ignoreLastRenderedPageBreak: false, ignoreWidth: false, ignoreHeight: false, renderHeaders: true, renderFooters: true, renderFootnotes: true, useBase64URL: true, experimental: true});
     if(document.fonts && document.fonts.ready) await document.fonts.ready;
     await new Promise(r => setTimeout(r, 60));
-    const sections = [...box.querySelectorAll('section.docx')];
+    sections = [...box.querySelectorAll('section.docx')];
     if(!sections.length) throw new Error('No pages found in this Word file');
-    const pages = [], scale = 2;
-    for(let si = 0; si < sections.length; si++){
-      const sec = sections[si];
-      // only this section in the layout, so it sits at the top of the document while it is captured
-      sections.forEach(o => { o.style.display = o === sec ? '' : 'none'; });
-      const cs = getComputedStyle(sec);
-      const pw = sec.offsetWidth, padT = parseFloat(cs.paddingTop) || 0, padB = parseFloat(cs.paddingBottom) || 0;
-      const ph = Math.max(parseFloat(cs.minHeight) || 0, 100) || pw * 1.414;
-      const total = sec.scrollHeight, r = sec.getBoundingClientRect(), top = r.top + scrollY, left = r.left + scrollX;
-      let srcY = 0, first = true;
-      while(srcY < total - padB - 2 || first){
-        onStatus && onStatus(`Reading page ${pages.length + 1}`);
-        const avail = Math.max(50, first ? ph - padB : ph - padT - padB);
-        const take = Math.min(avail, total - srcY);
-        const cv = await html2canvas(sec, {scale, backgroundColor: '#ffffff', logging: false, useCORS: true,
-          x: left, y: top + srcY, width: pw, height: take, scrollX: 0, scrollY: 0, windowWidth: Math.max(pw + 40, innerWidth),
-          ignoreElements: el => el !== document.body && el !== document.documentElement && el.tagName !== 'HEAD' && !box.contains(el) && !el.contains(box)});
-        let cut = take;
-        if(srcY + take < total - padB - 2){
-          // find a blank row in the lowest quarter so no line of text is cut in half
-          const ctx = cv.getContext('2d'), y0 = Math.floor(cv.height * 0.72), data = ctx.getImageData(0, y0, cv.width, cv.height - y0).data, rowW = cv.width * 4;
-          for(let y = cv.height - y0 - 1; y >= 0; y--){
-            let blank = true;
-            for(let x = 0; x < rowW; x += 16){ if(data[y * rowW + x] < 235 || data[y * rowW + x + 1] < 235 || data[y * rowW + x + 2] < 235){ blank = false; break; } }
-            if(blank){ cut = (y0 + y) / scale; break; }
-          }
-        }
-        const page = document.createElement('canvas');
-        page.width = Math.round(pw * scale); page.height = Math.round(ph * scale);
-        const pc = page.getContext('2d');
-        pc.fillStyle = '#fff'; pc.fillRect(0, 0, page.width, page.height);
-        pc.drawImage(cv, 0, 0, cv.width, Math.round(cut * scale), 0, Math.round((first ? 0 : padT) * scale), cv.width, Math.round(cut * scale));
-        cv.width = cv.height = 1;
-        pages.push({canvas: page, w: pw, h: ph});
-        srcY += Math.max(cut, 20); first = false;
-        if(pages.length > 300) break;
+  } catch(e){ box.remove(); throw e; }
+  const measure = sec => {
+    sections.forEach(o => { o.style.display = o === sec ? '' : 'none'; });
+    const cs = getComputedStyle(sec);
+    const pw = sec.offsetWidth, padT = parseFloat(cs.paddingTop) || 0, padB = parseFloat(cs.paddingBottom) || 0;
+    const ph = Math.max(parseFloat(cs.minHeight) || 0, 100) || pw * 1.414;
+    return {pw, padT, padB, ph, total: sec.scrollHeight};
+  };
+  let est = 0;
+  for(const sec of sections){ const m = measure(sec); est += 1 + Math.max(0, Math.ceil((m.total - m.ph) / Math.max(50, m.ph - m.padT - m.padB))); }
+  const scale = 2;
+  let closed = false, si = -1, m = null, srcY = 0, first = true, count = 0;
+  const close = () => { closed = true; box.remove(); };
+  async function next(){
+    if(closed) return null;
+    // move on to the next section once this one is used up
+    while(!m || !(srcY < m.total - m.padB - 2 || first)){
+      if(++si >= sections.length || count >= 300){ close(); return null; }
+      m = measure(sections[si]); srcY = 0; first = true;
+    }
+    const sec = sections[si];
+    sections.forEach(o => { o.style.display = o === sec ? '' : 'none'; });
+    const {pw, padT, padB, ph, total} = m;
+    const r = sec.getBoundingClientRect(), top = r.top + scrollY, left = r.left + scrollX;
+    const avail = Math.max(50, first ? ph - padB : ph - padT - padB);
+    const take = Math.min(avail, total - srcY);
+    const cv = await html2canvas(sec, {scale, backgroundColor: '#ffffff', logging: false, useCORS: true,
+      x: left, y: top + srcY, width: pw, height: take, scrollX: 0, scrollY: 0, windowWidth: Math.max(pw + 40, innerWidth),
+      ignoreElements: el => el !== document.body && el !== document.documentElement && el.tagName !== 'HEAD' && !box.contains(el) && !el.contains(box)});
+    if(closed){ cv.width = cv.height = 1; return null; }
+    let cut = take;
+    if(srcY + take < total - padB - 2){
+      // find a blank row in the lowest quarter so no line of text is cut in half
+      const ctx = cv.getContext('2d'), y0 = Math.floor(cv.height * 0.72), data = ctx.getImageData(0, y0, cv.width, cv.height - y0).data, rowW = cv.width * 4;
+      for(let y = cv.height - y0 - 1; y >= 0; y--){
+        let blank = true;
+        for(let x = 0; x < rowW; x += 16){ if(data[y * rowW + x] < 235 || data[y * rowW + x + 1] < 235 || data[y * rowW + x + 2] < 235){ blank = false; break; } }
+        if(blank){ cut = (y0 + y) / scale; break; }
       }
     }
-    return pages;
-  } finally { box.remove(); }
+    const page = document.createElement('canvas');
+    page.width = Math.round(pw * scale); page.height = Math.round(ph * scale);
+    const pc = page.getContext('2d');
+    pc.fillStyle = '#fff'; pc.fillRect(0, 0, page.width, page.height);
+    pc.drawImage(cv, 0, 0, cv.width, Math.round(cut * scale), 0, Math.round((first ? 0 : padT) * scale), cv.width, Math.round(cut * scale));
+    cv.width = cv.height = 1;
+    srcY += Math.max(cut, 20); first = false; count++;
+    return {canvas: page, w: pw, h: ph};
+  }
+  return {est, next, close};
+}
+// every page at once (kept for scripts and tests)
+async function renderDocx(file, onStatus){
+  const d = await openDocx(file), pages = [];
+  try { for(let pg; onStatus && onStatus(`Reading page ${pages.length + 1}`), (pg = await d.next());) pages.push(pg); }
+  finally { d.close(); }
+  return pages;
 }
 
 /* =====================================================================

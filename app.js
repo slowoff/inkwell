@@ -5595,8 +5595,19 @@ $('setWheel').addEventListener('click', e => {
 });
 $('setHold').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
-  prefs.snapHold = +b.dataset.v; savePrefs(); renderPrefSettings();
+  prefs.snapHold = +b.dataset.v; if(prefs.snapHold > 0) prefs.snapHoldLast = prefs.snapHold;
+  savePrefs(); renderPrefSettings(); renderSnapShapes();
 });
+// (1.49) Shapes popover switch: off = snapHold 0 (same as Settings → Straighten shapes Off);
+// on = the speed used before (prefs snapHoldLast) or Normal
+function renderSnapShapes(){ $('snapShapes').classList.toggle('on', +prefs.snapHold > 0); }
+$('snapShapes').addEventListener('click', () => {
+  if(+prefs.snapHold > 0){ prefs.snapHoldLast = +prefs.snapHold; prefs.snapHold = 0; }
+  else prefs.snapHold = +prefs.snapHoldLast > 0 ? +prefs.snapHoldLast : 550;
+  savePrefs(); renderSnapShapes(); renderPrefSettings();
+  toast(prefs.snapHold ? 'Strokes snap to shapes when you hold the pen still' : 'Shape snapping off: strokes stay as you draw them');
+});
+renderSnapShapes();
 
 /* Recently deleted */
 const inTrash = d => !!(d && d.deleted && d.data && d.data._del);
@@ -5720,6 +5731,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.49', '2026-10-20', ['Shapes menu has a "Snap strokes to shapes" switch: turn it off and straight lines and shapes you draw stay as drawn']],
   ['1.48.1', '2026-10-20', ['Fix: strokes could disappear right after writing (while a sync came in, while an update loaded, when iPadOS interrupted the Pencil, or when a small letter written slowly opened the Pencil menu)']],
   ['1.48', '2026-10-20', ['Tab in a text box moves the text forward to the next tab stop (Shift+Tab takes it back)']],
   ['1.47.1', '2026-10-20', ['See changes opens the change log in its own window']],
@@ -6098,7 +6110,7 @@ function insertShape(shape, b){
   addItems(items);
   setTool('lasso'); selectIds(items.map(it => it.id));
 }
-$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } openPop('shapePop', e.currentTarget); });
+$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); openPop('shapePop', e.currentTarget); });
 $('shapeGrid').addEventListener('click', e => {
   const b = e.target.closest('button[data-shape]'); if(!b) return;
   closePops();

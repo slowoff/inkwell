@@ -2831,6 +2831,8 @@ $('selCopy').addEventListener('click', () => Clip.copy());
 const Paste = {
   note(t){ try { localStorage.setItem('inkwell.clipSys', JSON.stringify(t)); } catch {} },
   away: 0,   // last time Inkwell lost focus (another app may have put something on the clipboard since)
+  sysAt: 0,  // (1.53.1) last copy to the system clipboard made inside Inkwell (page text, Copy as picture, text in a box)
+  mark(){ this.sysAt = Date.now(); this.note(null); },
   noted(){ return LSget('inkwell.clipSys', null); },
   got: 0,
   async handle(images, text){
@@ -2881,7 +2883,7 @@ const Paste = {
   async read(){
     const mine = Clip.get();
     // copied in Inkwell and never left it since: paste that right away (no iPad Paste bubble, no clipboard read)
-    if(mine && mine.at > this.away){ Clip.paste(); return; }
+    if(mine && mine.at > this.away && mine.at > this.sysAt){ Clip.paste(); return; }
     if(!navigator.clipboard){ if(mine) Clip.paste(); else toast('Nothing to paste'); return; }
     const late = ms => new Promise((_, no) => setTimeout(() => no(new Error('clipboard timeout')), ms));
     try {
@@ -2903,10 +2905,14 @@ const Paste = {
 };
 $('pasteBtn').addEventListener('click', () => Paste.read());
 addEventListener('blur', () => { Paste.away = Date.now(); });
+document.addEventListener('copy', () => Paste.mark(), true);
+document.addEventListener('cut', () => Paste.mark(), true);
 document.addEventListener('visibilitychange', () => { if(document.hidden) Paste.away = Date.now(); });
 document.addEventListener('paste', e => {
-  const t = e.target, ae = document.activeElement;
-  const typing = (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) || (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)));
+  const t = e.target, ae = document.activeElement, catcher = $('pasteCatch');
+  const caught = t === catcher || ae === catcher;
+  if(caught) setTimeout(() => catcher.blur(), 0);
+  const typing = !caught && ((t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) || (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))));
   if(typing || editing || !cur) return;
   const dt = e.clipboardData; if(!dt) return;
   e.preventDefault(); Paste.got = Date.now();
@@ -5867,6 +5873,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.53.1', '2026-10-20', ['Fix: after copying page text, Copy as picture, or text from a text box, Paste put back an older Inkwell copy instead', 'Fix: Cmd+V on an iPad keyboard pastes']],
   ['1.53', '2026-10-20', ['Select tool: choose Free or Box. Box selects everything in a rectangle and can Copy as picture, like a screenshot of that part', 'Paste from other apps with Ctrl+V or the Paste button: pictures and screenshots become a picture, text a text box']],
   ['1.52', '2026-10-20', ['Select text on imported pages: draw a lasso around text on a PDF or scanned page, then Copy it, or open Text… to copy part of it or put it on the page as a text box', 'PDFs imported from now on remember where each line is, so you can select one column of a page', 'Scan several pages in a row: after Add & scan next, tap Take next photo; or Choose photos to pick several at once, check each one or Add all', 'Ask Claude: scan up to 4 parts of the page into one question (+ Scan more)']],
   ['1.51', '2026-10-20', ['The Shapes menu switch is now "Snap to angles" and also covers turning: with it off, shapes and other selections turn to any angle instead of clicking into 15° steps']],
@@ -7556,6 +7563,7 @@ const TS = {
       try { ok = document.execCommand('copy'); } catch {}
       t.remove();
     }
+    if(ok) Paste.mark();
     return ok;
   },
   open(){
@@ -7589,7 +7597,7 @@ const TS = {
       if(!navigator.clipboard || !window.ClipboardItem) throw new Error('no clipboard');
       await navigator.clipboard.write([new ClipboardItem({'image/png': pr})]); ok = true;
     } catch(e){ console.warn('copy picture', e); }
-    if(ok){ Paste.note(null); toast('Picture copied: paste it anywhere, or here with Ctrl+V'); return; }
+    if(ok){ Paste.mark(); toast('Picture copied: paste it anywhere, or here with Ctrl+V'); return; }
     let blob; try { blob = await pr; } catch(e){ toast('Could not make the picture'); return; }
     const url = URL.createObjectURL(blob);
     if(this.shotUrl) URL.revokeObjectURL(this.shotUrl);
@@ -8410,7 +8418,11 @@ document.addEventListener('keydown', e => {
     else if(k === 'y'){ e.preventDefault(); redo(); }
     else if(k === 'c' && sel){ e.preventDefault(); Clip.copy(); }
     else if(k === 'x' && sel){ e.preventDefault(); Clip.copy(); const ids = sel ? sel.ids.slice() : []; clearSel(); removeItems(ids); }
-    else if(k === 'v'){ const t0 = Date.now(); setTimeout(() => { if(Paste.got < t0) Paste.read(); }, 150); }   // (1.53) paste event first
+    else if(k === 'v'){
+      // (1.53.1) iPad Safari only sends a paste event to a focused text field: focus a hidden one so Cmd+V lands there
+      const c = $('pasteCatch'); c.value = ''; try { c.focus({preventScroll: true}); } catch {}
+      const t0 = Date.now(); setTimeout(() => { if(document.activeElement === c) c.blur(); if(Paste.got < t0) Paste.read(); }, 150);
+    }
     return;
   }
   if(e.altKey) return;

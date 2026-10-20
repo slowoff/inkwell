@@ -126,7 +126,7 @@ async def main():
 
         # 9. clipboard refused: window with the picture, Put on page
         await page.keyboard.press('Escape'); await page.click('#lassoMode [data-m="box"]')
-        await page.evaluate("() => { navigator.clipboard.write = () => Promise.reject(new Error('NotAllowed')); }")
+        await page.evaluate("() => { window.__write = navigator.clipboard.write; navigator.clipboard.write = () => Promise.reject(new Error('NotAllowed')); }")
         await drag(80, 90, 400, 240)
         await page.click('#selShot'); await page.wait_for_timeout(1500)
         d = await page.evaluate("(() => ({open: !document.getElementById('shotDlg').hidden, src: document.getElementById('shotImg').src.slice(0, 5), w: document.getElementById('shotImg').naturalWidth}))()")
@@ -135,6 +135,7 @@ async def main():
         await page.click('#shotPut'); await page.wait_for_timeout(1000)
         r = await page.evaluate("(() => { const ims = [...__inkwell.cur.items.values()].filter(i => i.t === 'i'); const it = ims[ims.length - 1]; return {n: ims.length, x: it.x, w: it.w}; })()")
         check(r['n'] == n0 + 1 and r['x'] > 400 and abs(r['w'] - 320) < 2, f'Put on page puts it right of the box, same size ({r})')
+        await page.evaluate("() => { delete navigator.clipboard.write; }")
 
         # 10. Box over PDF text: lines picked too, with Copy as picture in the same menu
         await page.evaluate("""async () => { const W = __inkwell; await W.newPage(); W.setTool('lasso');
@@ -146,6 +147,43 @@ async def main():
         s = await state()
         lines = await page.evaluate("__inkwell.TS.lines.map(l => l.s)")
         check(lines == ['Alpha', 'Beta'] and s['ts'] and s['tsCopy'] and s['tsShot'] and s['area'], f'box over PDF text: lines + Copy as picture ({lines}, {s})')
+
+        # 10b. (1.53.1) an older Inkwell copy exists and we never left the app: copying page text, then Paste,
+        # gives that text (it used to paste the older Inkwell copy again)
+        await page.evaluate("() => { const W = __inkwell; W.addItems([{t: 's', id: 'sZ', c: '#000', w: 2, p: [700,700,.5,760,700,.5]}]); W.selectIds(['sZ']); }")
+        await page.keyboard.press('Control+c'); await page.wait_for_timeout(200)
+        await drag(40, 75, 300, 130)
+        await page.click('#tsCopy'); await page.wait_for_timeout(300)
+        await page.keyboard.press('Escape')
+        nx0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'x').length")
+        ns0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 's').length")
+        await page.click('#pasteBtn'); await page.wait_for_timeout(800)
+        r = await page.evaluate("(() => { const xs = [...__inkwell.cur.items.values()].filter(i => i.t === 'x'); return {nx: xs.length, ns: [...__inkwell.cur.items.values()].filter(i => i.t === 's').length, text: xs.length ? __inkwell.htmlText(xs[xs.length - 1].html) : ''}; })()")
+        check(r['nx'] == nx0 + 1 and r['ns'] == ns0 and 'Alpha' in r['text'], f'page text copied after an Inkwell copy: Paste gives the text, not the old copy ({r})')
+        # Copy as picture, then Paste: the picture
+        await page.keyboard.press('Escape')
+        await drag(40, 75, 300, 130)
+        await page.click('#tsShot'); await page.wait_for_timeout(1500)
+        ni0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'i').length")
+        await page.click('#pasteBtn'); await page.wait_for_timeout(1200)
+        ni = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'i').length")
+        check(ni == ni0 + 1, f'Copy as picture, then Paste: the picture is pasted ({ni0} -> {ni})')
+        # text copied from a text box with the system Copy (copy event), then Paste
+        await page.keyboard.press('Escape')
+        await page.evaluate("() => { __inkwell.selectIds(['sZ']); }"); await page.keyboard.press('Control+c'); await page.wait_for_timeout(200)
+        await page.keyboard.press('Escape')
+        await page.evaluate("async () => { await navigator.clipboard.writeText('From a text box'); document.dispatchEvent(new Event('copy')); }")
+        nx0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'x').length")
+        await page.click('#pasteBtn'); await page.wait_for_timeout(800)
+        r = await page.evaluate("(() => { const xs = [...__inkwell.cur.items.values()].filter(i => i.t === 'x'); return {nx: xs.length, text: __inkwell.htmlText(xs[xs.length - 1].html)}; })()")
+        check(r['nx'] == nx0 + 1 and r['text'] == 'From a text box', f'text copied with the system Copy inside Inkwell pastes as text ({r})')
+        # Ctrl+V lands in the hidden paste field (iPad Safari needs a focused field) and leaves no focus behind
+        await page.keyboard.press('Escape')
+        await page.evaluate("navigator.clipboard.writeText('Via keyboard')")
+        await page.evaluate("() => { window.__pt = ''; document.addEventListener('paste', e => { window.__pt = e.target.id; }, {capture: true, once: true}); }")
+        await page.keyboard.press('Control+v'); await page.wait_for_timeout(600)
+        r = await page.evaluate("({t: window.__pt, focus: document.activeElement && document.activeElement.id, text: __inkwell.htmlText([...__inkwell.cur.items.values()].filter(i => i.t === 'x').pop().html)})")
+        check(r['t'] == 'pasteCatch' and r['focus'] != 'pasteCatch' and r['text'] == 'Via keyboard', f'Ctrl+V goes through the hidden paste field ({r})')
 
         # 11. Free mode still draws a free loop (the old way)
         await page.click('#lassoMode [data-m="free"]')

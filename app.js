@@ -2446,18 +2446,24 @@ for(const h of ['rulerGrip', 'rulerTurnL', 'rulerTurnR']){
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
 }
 // (1.50) Snap pill on the ruler: prefs.ruler.snap (missing = on) decides whether turning it (two fingers or the
-// turn handles) clicks into 15° steps. Tap (finger, Pencil or mouse) toggles; a drag that starts on it does nothing.
+// turn handles) clicks into 15° steps. A short tap (finger, Pencil or mouse) toggles it.
+// (1.50.1) a finger on the pill still counts for moving/turning the ruler (the pill used to swallow it, so a
+// two-finger twist with one finger on the pill only dragged the ruler); only a tap that stays put toggles.
 {
   const el = $('rulerSnap'); let down = null;
-  el.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); down = {id: e.pointerId, x: e.clientX, y: e.clientY}; });
-  el.addEventListener('pointerup', e => {
-    e.stopPropagation();
-    if(!down || down.id !== e.pointerId || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 12){ down = null; return; }
-    down = null;
+  el.addEventListener('pointerdown', e => {
+    if(e.pointerType !== 'touch' || pick || prefs.tool === 'space'){ e.stopPropagation(); e.preventDefault(); }   // Pencil/mouse (or a finger while placing a shape / using Space) would draw instead
+    down = {id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), far: false};
+  });
+  addEventListener('pointermove', e => { if(down && down.id === e.pointerId && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 12) down.far = true; }, true);
+  addEventListener('pointerup', e => {
+    if(!down || down.id !== e.pointerId) return;
+    const d = down; down = null;
+    if(d.far || touches.size > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12 || performance.now() - d.t > 700) return;
     const r = prefs.ruler; r.snap = r.snap === false; savePrefs(); renderRuler();
     toast(r.snap ? 'Ruler snaps to 0°, 15°, 45°, 90° …' : 'Ruler snap off: it turns to any angle');
-  });
-  el.addEventListener('pointercancel', () => { down = null; });
+  }, true);
+  addEventListener('pointercancel', e => { if(down && down.id === e.pointerId) down = null; }, true);
   el.addEventListener('click', e => e.stopPropagation());
 }
 function renderRuler(){
@@ -5750,6 +5756,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.50.1', '2026-10-20', ['Fix: a finger that lands on the ruler\'s Snap button still helps move and turn the ruler']],
   ['1.50', '2026-10-20', ['The switch in the Shapes menu is now "Snap lines to angles": turn it off and lines and arrows no longer click into 0°, 15°, 45°, 90°', 'Snap button on the ruler: turn it off and the ruler turns to any angle instead of clicking into 15° steps', 'Fix: a setting changed right before closing the app (like the ruler position) could be forgotten', 'Holding the pen still to straighten a stroke works as before 1.49 again (Settings → Straighten shapes)']],
   ['1.49', '2026-10-20', ['Shapes menu has a "Snap strokes to shapes" switch: turn it off and straight lines and shapes you draw stay as drawn']],
   ['1.48.1', '2026-10-20', ['Fix: strokes could disappear right after writing (while a sync came in, while an update loaded, when iPadOS interrupted the Pencil, or when a small letter written slowly opened the Pencil menu)']],

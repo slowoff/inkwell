@@ -118,6 +118,37 @@ async def main():
         r = await page.evaluate(RULER)
         check(abs(r['a'] + 15) < 0.05, f'snap on: two-finger twist to -14 snaps to -15 ({r["a"]:.2f})')
 
+        # (1.50.1) a twist with one finger starting right on the pill turns the ruler and does not toggle snap
+        await page.evaluate("__inkwell.prefs.ruler.a = 0")
+        st = await page.evaluate("(() => { const b = document.getElementById('stage').getBoundingClientRect(); return [b.left, b.top]; })()")
+        rr = await page.evaluate(RULER)
+        cx, cy = st[0] + rr['cx'], st[1] + rr['cy']
+        pc = await page.evaluate("(() => { const b = document.getElementById('rulerSnap').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()")
+        R0 = math.hypot(pc[0] - cx, pc[1] - cy); b0 = math.atan2(pc[1] - cy, pc[0] - cx)
+        def pts2(t):
+            a = math.radians(29) * t
+            return [(cx + R0 * math.cos(b0 + a), cy + R0 * math.sin(b0 + a)), (cx + 150 * math.cos(a), cy + 150 * math.sin(a))]
+        await touch('touchStart', pts2(0)[:1]); await page.wait_for_timeout(40)
+        await touch('touchStart', pts2(0)); await page.wait_for_timeout(60)
+        for i in range(1, 16): await touch('touchMove', pts2(i / 15)); await page.wait_for_timeout(16)
+        await touch('touchEnd', []); await page.wait_for_timeout(300)
+        r = await page.evaluate(RULER)
+        check(abs(r['a'] - 30) < 0.05 and r['snap'] is True, f'twist with a finger on the pill turns the ruler (29 -> {r["a"]:.2f}) and keeps snap on ({r["snap"]})')
+        # a one-finger drag that starts on the pill moves the ruler and does not toggle
+        pc = await page.evaluate("(() => { const b = document.getElementById('rulerSnap').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()")
+        await touch('touchStart', [pc]); await page.wait_for_timeout(40)
+        for i in range(1, 11): await touch('touchMove', [(pc[0], pc[1] + 6 * i)]); await page.wait_for_timeout(16)
+        await touch('touchEnd', []); await page.wait_for_timeout(300)
+        r2 = await page.evaluate(RULER)
+        check(abs(r2['cy'] - r['cy'] - 60) < 2 and r2['snap'] is True, f'drag from the pill moves the ruler 60 px ({r2["cy"] - r["cy"]:.1f}) and keeps snap on')
+        # a finger tap on the pill while the Text tool is on toggles and places no text box
+        await page.evaluate("__inkwell.setTool('text')"); await page.wait_for_timeout(100)
+        n = (await page.evaluate(RULER))['n']
+        pc = await page.evaluate("(() => { const b = document.getElementById('rulerSnap').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()")
+        await touch('touchStart', [pc]); await page.wait_for_timeout(60); await touch('touchEnd', []); await page.wait_for_timeout(500)
+        r3 = await page.evaluate(RULER)
+        check(r3['snap'] is False and r3['n'] == n, f'tap on the pill with the Text tool toggles, no text box ({r3})')
+
         check(not errs, f'no page errors ({errs[:2]})')
         await b.close()
     print('PASS' if not fails else f'{len(fails)} FAILED')

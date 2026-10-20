@@ -208,7 +208,7 @@ select.pf-ls option:checked{background:#9fbbe8}
   .pf:focus{background-color:rgba(60,110,230,.07);box-shadow:0 0 0 1.5px #3b6fe0}
 }
 @media print{.pf-layer{display:none}}
-.it-text{-webkit-user-select:none;user-select:none;min-width:40px;min-height:30px;padding:2px 6px;border-radius:4px;font-size:17px;line-height:1.55;outline:none;overflow-wrap:anywhere;cursor:text}
+.it-text{tab-size:8;-moz-tab-size:8;-webkit-user-select:none;user-select:none;min-width:40px;min-height:30px;padding:2px 6px;border-radius:4px;font-size:17px;line-height:1.55;outline:none;overflow-wrap:anywhere;cursor:text}
 .it-text[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;box-shadow:0 0 0 1.5px var(--accent);background:color-mix(in srgb,var(--paper) 88%,transparent)}
 .it-text:empty::before{content:"Type here";color:var(--faint)}
 .it-text p,.it-text div{margin:0}

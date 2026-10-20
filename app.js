@@ -3170,6 +3170,21 @@ worldFront.addEventListener('click', e => {
   const li = e.target.closest('ul.check > li');
   if(li && e.clientX - li.getBoundingClientRect().left < 28 * cam.z){ li.classList.toggle('done'); syncEditingHTML(); saveContentSoon(); }
 });
+// (1.48) Tab in a text box types a tab (jumps to the next tab stop) instead of leaving the box; Shift+Tab removes
+// the tab right before the cursor. The tab sits in a white-space:pre span, which cleanHTML keeps.
+worldFront.addEventListener('keydown', e => {
+  if(!editing || e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey) return;
+  e.preventDefault();
+  if(e.shiftKey){
+    const s = getSelection(); if(!s.rangeCount || !s.isCollapsed) return;
+    const r = s.getRangeAt(0); let n = r.startContainer, o = r.startOffset;
+    if(n.nodeType === 3 && o > 0 && n.data[o - 1] === '\t'){ document.execCommand('delete'); return; }
+    if(n.nodeType === 3 && o === 0){ const sp = n.parentNode && n.parentNode.previousSibling; if(sp && sp.nodeType === 1 && sp.classList.contains('tab')){ sp.remove(); syncEditingHTML(); saveContentSoon(); invalidate(0, 0, 1); } }
+    else if(n.nodeType === 1 && o > 0){ const sp = n.childNodes[o - 1]; if(sp && sp.nodeType === 1 && sp.classList.contains('tab')){ sp.remove(); syncEditingHTML(); saveContentSoon(); invalidate(0, 0, 1); } }
+    return;
+  }
+  document.execCommand('insertHTML', false, '<span class="tab" style="white-space:pre">\t</span>');
+});
 worldFront.addEventListener('paste', e => {
   if(!editing) return;
   e.preventDefault();
@@ -5690,6 +5705,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.48', '2026-10-20', ['Tab in a text box moves the text forward to the next tab stop (Shift+Tab takes it back)']],
   ['1.47.1', '2026-10-20', ['See changes opens the change log in its own window']],
   ['1.47', '2026-10-20', ['Pencil ink follows smooth curves: fast writing no longer gets corners, and quick loops no longer shrink', 'Change log in Settings (this list)']],
   ['1.46', '2026-10-20', ['Word files are turned into a PDF through your Google Drive, so they look like in Word', 'Imports close the dialog right away and pages appear one by one while you keep writing; Stop button, one undo removes the whole import']],

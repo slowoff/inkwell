@@ -131,6 +131,12 @@ html,body{background:var(--paper)}
 .main{display:flex;flex-direction:column;min-width:0;min-height:0;padding-right:var(--sar);grid-column:-2/-1}
 .bar1,.bar2{display:flex;align-items:center;gap:4px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;min-width:0}
 .bar2{overflow-x:auto;scrollbar-width:none}
+/* 1.42.2: iPadOS 26 draws a "scroll edge" blur over the top of a Home Screen web app unless a
+   fixed/sticky full-width box with one solid colour sits at the top edge. The strip fills the
+   status-bar area with the bar colour, and the top bar is sticky (nothing scrolls it, so it looks the same). */
+.edge-top{position:fixed;left:0;right:0;top:0;height:var(--sat);background:var(--panel);z-index:19;pointer-events:none}
+.bar1{position:sticky;top:0;z-index:3}
+@media (display-mode: standalone){html,body{background:var(--panel)}}
 .bar2::-webkit-scrollbar{display:none}
 .title-in{flex:1;min-width:60px;height:38px;border:0;background:transparent;font-family:var(--f-display);font-weight:700;font-size:19px;padding:0 8px;border-radius:8px;outline:none;text-overflow:ellipsis}
 .title-in:focus{background:var(--paper)}
@@ -376,7 +382,7 @@ select.pf-ls option:checked{background:#9fbbe8}
 @media print{
   @page{size:A4;margin:0}
   html,body{height:auto;overflow:visible;background:#fff}
-  .app,.pop,.modal,.toast,.scan-bar{display:none!important}
+  .app,.edge-top,.pop,.modal,.toast,.scan-bar{display:none!important}
   #printRoot{display:block}
   .print-sheet{position:relative;width:210mm;height:297mm;overflow:hidden;contain:size layout paint;page-break-after:always;break-after:page;background:#fff}
   .print-sheet:last-child{page-break-after:auto;break-after:auto}

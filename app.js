@@ -5690,6 +5690,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.47.1', '2026-10-20', ['See changes opens the change log in its own window']],
   ['1.47', '2026-10-20', ['Pencil ink follows smooth curves: fast writing no longer gets corners, and quick loops no longer shrink', 'Change log in Settings (this list)']],
   ['1.46', '2026-10-20', ['Word files are turned into a PDF through your Google Drive, so they look like in Word', 'Imports close the dialog right away and pages appear one by one while you keep writing; Stop button, one undo removes the whole import']],
   ['1.45', '2026-10-20', ['Hand grip next to a text box you are typing in, to move the box']],
@@ -5747,13 +5748,12 @@ function renderChangelog(){
   const day = d => new Date(d + 'T12:00:00').toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'});
   $('changelog').innerHTML = CHANGELOG.map(([v, d, items]) => `<h4>${esc(v)}<small>${esc(day(d))}</small></h4><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`).join('');
 }
+// (1.47.1) the change log opens in its own window on top of Settings (it was cut off at the bottom of Settings)
 $('logBtn').addEventListener('click', () => {
-  const box = $('changelog'), open = box.hidden;
-  if(open && !box.innerHTML) renderChangelog();
-  box.hidden = !open;
-  $('logBtn').textContent = open ? 'Hide changes' : 'See changes';
-  $('logBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
-  if(open) box.scrollTop = 0;
+  if(!$('changelog').innerHTML) renderChangelog();
+  $('logVer').textContent = $('verInfo').textContent;
+  $('logDlg').hidden = false; modalAt = Date.now();
+  $('logDlg').querySelector('.dlg').scrollTop = 0;
 });
 $('updBtn').addEventListener('click', async () => {
   const b = $('updBtn');

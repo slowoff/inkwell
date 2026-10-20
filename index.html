@@ -364,8 +364,15 @@
     <div class="set-row clean-row"><span class="hint" id="cleanInfo">Images nothing uses any more</span><button class="btn ghost" id="cleanBtn">Free up space</button></div>
     <div class="set-row clean-row"><span class="hint">Bring over your OneNote notebooks</span><button class="btn ghost" id="onBtn">Import from OneNote</button></div>
     <hr>
-    <div class="set-row"><span class="ver-wrap"><span class="hint" id="verInfo">Inkwell</span><button class="link-btn ver-log" id="logBtn" aria-expanded="false">See changes</button></span><button class="btn ghost" id="updBtn">Check for update</button></div>
-    <div class="changelog" id="changelog" hidden></div>
+    <div class="set-row"><span class="ver-wrap"><span class="hint" id="verInfo">Inkwell</span><button class="link-btn ver-log" id="logBtn">See changes</button></span><button class="btn ghost" id="updBtn">Check for update</button></div>
+  </div>
+</div>
+
+<div class="modal" id="logDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>What's new</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="hint" id="logVer"></p>
+    <div class="changelog" id="changelog"></div>
   </div>
 </div>
 

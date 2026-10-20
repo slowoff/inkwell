@@ -404,7 +404,7 @@ select.pf-ls option:checked{background:#9fbbe8}
 /* (1.47) change log under the version line */
 .ver-wrap{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .ver-wrap .link-btn.ver-log{margin:0;padding:4px 0;font-size:12.5px}
-.changelog{max-height:340px;overflow:auto;border-radius:10px;background:var(--well);padding:10px 14px;font-size:13px;line-height:1.45}
+.changelog{border-radius:10px;background:var(--well);padding:10px 14px;font-size:13px;line-height:1.45}
 .changelog h4{margin:10px 0 2px;font-size:13px}
 .changelog h4:first-child{margin-top:0}
 .changelog h4 small{font-weight:400;color:var(--muted);margin-left:6px}

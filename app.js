@@ -55,6 +55,7 @@ const DEFAULT_PREFS = {
   finger: false,
   autoText: false,   // Write to text: pen writing becomes a typed text box (needs sign-in)
   snapLines: true,
+  lassoMode: 'free', // (1.53) Select tool: 'free' loop or 'box' rectangle
   refLine: false,   // Reference line (1.42): faint line under the handwriting line being written
   ruler: {on: false, cx: null, cy: null, a: 0},
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
@@ -1904,7 +1905,7 @@ function startTool(e, sx, sy, pr){
     clearSel(); act.kind = 'erase'; act.mode = prefs.eraser.mode === 'area' ? 'area' : 'stroke';
     act.removed = []; act.added = new Map(); act.cursor = [sx, sy]; act.lastW = null; eraseAt(sx, sy);
   } else if(tool === 'lasso'){
-    act.kind = 'lasso'; act.poly = [sx, sy];
+    act.kind = 'lasso'; act.poly = [sx, sy]; act.box = prefs.lassoMode === 'box';
   } else if(tool === 'tape'){
     clearSel(); act.kind = 'tape'; act.w0 = [wx, wy]; act.w1 = [wx, wy];
   } else {
@@ -1951,7 +1952,7 @@ function toolMove(e){
       if(Math.hypot(sx - act.anchor[0], sy - act.anchor[1]) > 3){ act.anchor = [sx, sy]; armHold(); }
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
     else if(act.kind === 'space'){ moveSpace(toWorld(sx, sy)[1] - act.y0); }
-    else if(act.kind === 'lasso'){ act.poly.push(sx, sy); }
+    else if(act.kind === 'lasso'){ if(act.box){ act.poly = boxPoly(act.sx, act.sy, sx, sy); act.b1 = [sx, sy]; } else act.poly.push(sx, sy); }
     else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){ act.w1 = toWorld(sx, sy); if(act.kind === 'pick') compassTrack(act); }
   }
   drawLiveSoon();
@@ -2014,6 +2015,7 @@ function drawLive(){
     liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     liveCtx.beginPath(); liveCtx.moveTo(p[0], p[1]);
     for(let i = 2; i < p.length; i += 2) liveCtx.lineTo(p[i], p[i+1]);
+    if(act.box) liveCtx.closePath();
     liveCtx.setLineDash([6, 5]); liveCtx.lineWidth = 1.5; liveCtx.strokeStyle = tokens.accent; liveCtx.stroke(); liveCtx.setLineDash([]);
   } else if(act.kind === 'tape' && act.w1){
     liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
@@ -2523,6 +2525,12 @@ function hitItem(sx, sy, target){
   }
   return null;
 }
+// (1.53) rectangle as a loop (screen px), once around with 8 points per side so the lasso tests work unchanged
+function boxPoly(x0, y0, x1, y1){
+  const C = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], out = [];
+  for(let i = 0; i < 4; i++){ const [ax, ay] = C[i], [bx, by] = C[(i + 1) % 4]; for(let k = 0; k < 8; k++) out.push(ax + (bx - ax) * k / 8, ay + (by - ay) * k / 8); }
+  return out;
+}
 function finishLasso(a){
   const poly = a.poly;
   if(!a.moved || poly.length < 12){
@@ -2533,6 +2541,9 @@ function finishLasso(a){
   const wp = [];
   for(let i = 0; i < poly.length; i += 2) wp.push(...toWorld(poly[i], poly[i+1]));
   const ids = [];
+  // (1.53) Box mode: the rectangle (world) can also be copied as a picture
+  let area = null;
+  if(a.box && a.b1){ const [ax, ay] = toWorld(a.sx, a.sy), [bx, by] = toWorld(a.b1[0], a.b1[1]); area = [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)]; }
   let lb = [Infinity, Infinity, -Infinity, -Infinity];
   for(let i = 0; i < wp.length; i += 2){ lb[0] = Math.min(lb[0], wp[i]); lb[1] = Math.min(lb[1], wp[i+1]); lb[2] = Math.max(lb[2], wp[i]); lb[3] = Math.max(lb[3], wp[i+1]); }
   const lw = lb[2] - lb[0], lh = lb[3] - lb[1];
@@ -2554,7 +2565,7 @@ function finishLasso(a){
     }
   }
   if(ids.length) selectIds(ids); else clearSel();
-  TS.find(wp, lb);   // (1.52) text of imported pages inside the loop
+  TS.find(wp, lb, area);   // (1.52) text of imported pages inside the loop; (1.53) box area
 }
 /* Groups: items with the same optional field g move, select and resize as one piece */
 function withGroups(ids){
@@ -2783,6 +2794,11 @@ const Clip = {
     try { localStorage.setItem('inkwell.clip', JSON.stringify({at: Date.now(), page: cur.id, b: sel.b, items})); }
     catch { toast('Too much to copy at once'); return; }
     toast(items.length === 1 ? 'Copied' : 'Copied ' + items.length + ' items', 'Paste', () => Clip.paste());
+    // (1.53) the system clipboard gets the typed text of the selection (or a short note), so Ctrl+V knows that the
+    // newest copy is this one and other apps get something useful
+    const txt = items.filter(it => it.t === 'x').map(it => htmlText(it.html)).join('\n').trim() || ('Inkwell: ' + (items.length === 1 ? '1 item' : items.length + ' items'));
+    Paste.note(txt);
+    try { navigator.clipboard.writeText(txt).catch(() => {}); } catch {}
     renderOpts();
   },
   paste(){
@@ -2809,7 +2825,95 @@ const Clip = {
   }
 };
 $('selCopy').addEventListener('click', () => Clip.copy());
-$('pasteBtn').addEventListener('click', () => Clip.paste());
+/* (1.53) Paste from other apps: pictures (screenshots, photos) become a picture on the page, text a text box.
+   Ctrl/Cmd+V (paste event; falls back to the async clipboard if the browser sends none) and the Paste button of the
+   Select tool. Inkwell's own copy (Clip) wins when the system clipboard still holds what Clip.copy put there. */
+const Paste = {
+  note(t){ try { localStorage.setItem('inkwell.clipSys', JSON.stringify(t)); } catch {} },
+  away: 0,   // last time Inkwell lost focus (another app may have put something on the clipboard since)
+  noted(){ return LSget('inkwell.clipSys', null); },
+  got: 0,
+  async handle(images, text){
+    if(!cur){ toast('Open a page first'); return; }
+    text = (text || '').replace(/\r\n?/g, '\n');
+    const mine = Clip.get(), n = this.noted();
+    if(mine && (n !== null && text.trim() === String(n).trim() && !images.length || !images.length && !text.trim())){ Clip.paste(); return; }
+    if(images.length){
+      const ids = [];
+      let at = null;
+      for(const b of images){ const it = await this.image(b, at, null, true); if(it){ ids.push(it.id); at = [it.x, it.y + it.h + 16 / cam.z]; } }
+      if(ids.length){ setTool('lasso'); selectIds(ids); toast(ids.length === 1 ? 'Picture pasted' : ids.length + ' pictures pasted'); }
+      return;
+    }
+    if(text.trim()){
+      const [cx, cy] = toWorld(W / 2, H / 2), w = Math.min(460, W * 0.6 / cam.z);
+      const html = cleanHTML(text.replace(/\n+$/, '').split('\n').map(l => '<p>' + (esc(l) || '<br>') + '</p>').join(''));
+      const it = {t: 'x', id: 'x' + newId(), x: cx - w / 2, y: cy - 40, w, fs: 1, html};
+      addItems([it]); setTool('lasso'); selectIds([it.id]); toast('Text pasted');
+      return;
+    }
+    toast('Nothing to paste');
+  },
+  // picture blob → picture item; at = top left (world), wWorld = width (world); default: centred, 70 % of the view
+  async image(blob, at, wWorld, quiet){
+    let bmp;
+    try { bmp = await createImageBitmap(blob); } catch { if(!quiet) toast('That picture could not be read'); return null; }
+    let w0 = bmp.width, h0 = bmp.height, out = blob;
+    const k = Math.min(1, 2400 / Math.max(w0, h0));
+    if(k < 1 || blob.size > 4e6 || !/^image\/(png|jpeg)$/.test(blob.type)){
+      const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w0 * k)); c.height = Math.max(1, Math.round(h0 * k));
+      const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(bmp, 0, 0, c.width, c.height);
+      out = blob.type === 'image/png' && c.width * c.height < 3e6 ? await new Promise(r => c.toBlob(r, 'image/png')) : await canvasBlob(c);
+      c.width = c.height = 1;
+    }
+    if(bmp.close) bmp.close();
+    const a = await saveAsset(out);
+    const w = wWorld || Math.min(w0 / (window.devicePixelRatio > 1 ? 2 : 1), W * 0.7) / cam.z, h = w * h0 / w0;
+    let x, y;
+    if(at){ [x, y] = at; } else { const [cx, cy] = toWorld(W / 2, H / 2); x = cx - w / 2; y = cy - h / 2; }
+    if(prefs.leftEdge && x < 0) x = 0;
+    const it = {t: 'i', id: 'i' + newId(), x, y, w, h, a};
+    addItems([it]);
+    if(!quiet){ setTool('lasso'); selectIds([it.id]); }
+    return it;
+  },
+  // Paste button / no paste event: read the clipboard (iPad shows its own small Paste bubble first)
+  async read(){
+    const mine = Clip.get();
+    // copied in Inkwell and never left it since: paste that right away (no iPad Paste bubble, no clipboard read)
+    if(mine && mine.at > this.away){ Clip.paste(); return; }
+    if(!navigator.clipboard){ if(mine) Clip.paste(); else toast('Nothing to paste'); return; }
+    const late = ms => new Promise((_, no) => setTimeout(() => no(new Error('clipboard timeout')), ms));
+    try {
+      if(navigator.clipboard.read){
+        const items = await Promise.race([navigator.clipboard.read(), late(8000)]), imgs = []; let text = '';
+        for(const ci of items){
+          const it = ci.types.find(t => /^image\//.test(t));
+          if(it) imgs.push(await ci.getType(it));
+          else if(!text && ci.types.includes('text/plain')) text = await (await ci.getType('text/plain')).text();
+        }
+        return this.handle(imgs, text);
+      }
+      return this.handle([], await Promise.race([navigator.clipboard.readText(), late(8000)]));
+    } catch(e){
+      console.warn('paste', e);
+      if(Clip.get()) Clip.paste(); else toast('Pasting was not allowed. Try again and tap Paste when the iPad asks.');
+    }
+  }
+};
+$('pasteBtn').addEventListener('click', () => Paste.read());
+addEventListener('blur', () => { Paste.away = Date.now(); });
+document.addEventListener('visibilitychange', () => { if(document.hidden) Paste.away = Date.now(); });
+document.addEventListener('paste', e => {
+  const t = e.target, ae = document.activeElement;
+  const typing = (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) || (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)));
+  if(typing || editing || !cur) return;
+  const dt = e.clipboardData; if(!dt) return;
+  e.preventDefault(); Paste.got = Date.now();
+  const imgs = [...(dt.files || [])].filter(f => /^image\//.test(f.type));
+  if(!imgs.length) for(const i of dt.items || []) if(i.kind === 'file' && /^image\//.test(i.type)){ const f = i.getAsFile(); if(f) imgs.push(f); }
+  Paste.handle(imgs, dt.getData('text/plain'));
+});
 $('selMenu').addEventListener('pointerdown', e => e.stopPropagation());
 
 /* ---------- taps ---------- */
@@ -4017,9 +4121,11 @@ function setTool(t){
 }
 function renderOpts(){
   const t = prefs.tool, ink = t === 'pen' || t === 'hl';
-  const paste = t === 'lasso' && !!Clip.get();
+  const paste = t === 'lasso';   // (1.53) always: pastes Inkwell copies and pictures/text from other apps
   $('opts').hidden = !(ink || t === 'eraser' || t === 'mark' || paste);
   $('pasteBtn').hidden = !paste; $('sizeWrap').hidden = t === 'lasso';
+  $('lassoMode').hidden = t !== 'lasso';
+  if(t === 'lasso') $('lassoMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.lassoMode === 'box' ? 'box' : 'free')));
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   $('assistBtn').hidden = t !== 'pen';
@@ -4050,6 +4156,7 @@ addEventListener('resize', barFade);
 if(window.ResizeObserver) new ResizeObserver(barFade).observe($('toolbar'));
 // iOS only shows :active (pressed) styles when the page listens for touches
 document.addEventListener('touchstart', () => {}, {passive: true});
+$('lassoMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.lassoMode = b.dataset.m; savePrefs(); renderOpts(); });
 $('eraseMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.eraser.mode = b.dataset.m; savePrefs(); renderOpts(); });
 document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if(b) setTool(b.dataset.tool); });
 $('size').addEventListener('input', () => { const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
@@ -5760,6 +5867,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.53', '2026-10-20', ['Select tool: choose Free or Box. Box selects everything in a rectangle and can Copy as picture, like a screenshot of that part', 'Paste from other apps with Ctrl+V or the Paste button: pictures and screenshots become a picture, text a text box']],
   ['1.52', '2026-10-20', ['Select text on imported pages: draw a lasso around text on a PDF or scanned page, then Copy it, or open Text… to copy part of it or put it on the page as a text box', 'PDFs imported from now on remember where each line is, so you can select one column of a page', 'Scan several pages in a row: after Add & scan next, tap Take next photo; or Choose photos to pick several at once, check each one or Add all', 'Ask Claude: scan up to 4 parts of the page into one question (+ Scan more)']],
   ['1.51', '2026-10-20', ['The Shapes menu switch is now "Snap to angles" and also covers turning: with it off, shapes and other selections turn to any angle instead of clicking into 15° steps']],
   ['1.50.1', '2026-10-20', ['Fix: a finger that lands on the ruler\'s Snap button still helps move and turn the ruler']],
@@ -6595,9 +6703,10 @@ const Ask = {
     parts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     return parts.map(p => p[2]).join('\n').slice(0, 8000);
   },
-  async capture(x0, y0, x1, y1){
-    const pad = 6; x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
-    const w = x1 - x0, h = y1 - y0, s = clamp(1500 / Math.max(w, h), 0.2, 3);
+  async capture(x0, y0, x1, y1, opt){
+    opt = opt || {};   // (1.53) {png, pad, max} for Copy as picture
+    const pad = opt.pad ?? 6; x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    const w = x1 - x0, h = y1 - y0, s = clamp((opt.max || 1500) / Math.max(w, h), 0.2, 3);
     const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
     const ctx = c.getContext('2d');
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
@@ -6624,7 +6733,7 @@ const Ask = {
     }
     // hide-answer tape stays closed for Claude too
     for(const it of all.filter(i => i.t === 'tp')){ ctx.fillStyle = '#E9B949'; ctx.fillRect(it.x, it.y, it.w, it.h); }
-    return c.toDataURL('image/jpeg', 0.85);
+    return opt.png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.85);
   },
   async scan(x0, y0, x1, y1){
     this.open();
@@ -7363,9 +7472,11 @@ async function pdfLines(page){
    a Text button instead (`#selText`). */
 const TS = {
   lines: [],   // {it (picture id), b: [x0, y0, x1, y1] world, s}
-  find(wp, lb){
+  area: null,  // (1.53) box of the Box lasso (world), for Copy as picture
+  find(wp, lb, area){
     this.clear();
     if(!cur || wp.length < 6) return;
+    this.area = area || null;
     const lw = lb[2] - lb[0];
     const out = [];
     for(const it of cur.items.values()){
@@ -7390,23 +7501,34 @@ const TS = {
         if(n >= 2) out.push({it: it.id, b, s: l[1]});
       }
     }
-    if(!out.length) return;
     out.sort((a, b) => a.b[1] - b.b[1] || a.b[0] - b.b[0]);
     this.lines = out;
-    if(sel){ $('selText').hidden = false; positionOverlays(); return; }   // items selected too: Text button in their menu
-    this.show();
+    if(sel){   // items selected too: Text / Copy as picture buttons in their menu
+      $('selText').hidden = !out.length; $('selShot').hidden = !this.area;
+      positionOverlays(); return;
+    }
+    if(out.length || this.area) this.show();
   },
   text(){ return this.lines.map(l => l.s).join('\n'); },
   show(){
     const box = $('tsBox'); box.innerHTML = '';
+    if(this.area){ const d = document.createElement('b'); d.className = 'ts-area'; box.appendChild(d); this.areaEl = d; } else this.areaEl = null;
     for(const l of this.lines){ const d = document.createElement('i'); d.className = 'ts-line'; box.appendChild(d); l.el = d; }
-    $('tsN').textContent = this.lines.length === 1 ? '1 line' : this.lines.length + ' lines';
+    const n = this.lines.length;
+    $('tsN').textContent = n === 1 ? '1 line' : n + ' lines';
+    $('tsN').hidden = $('tsCopy').hidden = $('tsOpen').hidden = !n;
+    $('tsShot').hidden = !this.area;
     $('tsLayer').hidden = false;
     this.place();
   },
   place(){
-    if($('tsLayer').hidden || !this.lines.length) return;
+    if($('tsLayer').hidden || !(this.lines.length || this.area)) return;
     let u = [Infinity, Infinity, -Infinity, -Infinity];
+    if(this.area && this.areaEl){
+      const b = this.area, x = b[0] * cam.z + cam.ox, y = b[1] * cam.z + cam.oy, w = (b[2] - b[0]) * cam.z, h = (b[3] - b[1]) * cam.z;
+      Object.assign(this.areaEl.style, {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'});
+      u = [x, y, x + w, y + h];
+    }
     for(const l of this.lines){
       const x = l.b[0] * cam.z + cam.ox, y = l.b[1] * cam.z + cam.oy, w = (l.b[2] - l.b[0]) * cam.z, h = (l.b[3] - l.b[1]) * cam.z;
       Object.assign(l.el.style, {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'});
@@ -7420,9 +7542,10 @@ const TS = {
     m.style.top = my + 'px';
   },
   clear(){
-    this.lines = [];
+    this.lines = []; this.area = null;
     const L = $('tsLayer'); if(L && !L.hidden){ L.hidden = true; $('tsBox').innerHTML = ''; }
     const b = $('selText'); if(b) b.hidden = true;
+    const c = $('selShot'); if(c) c.hidden = true;
   },
   async copy(text){
     let ok = false;
@@ -7455,8 +7578,34 @@ const TS = {
     addItems([it]);
     return it;
   },
+  // (1.53) Copy as picture: the box drawn like a screenshot (ink, pictures, imported pages, text) as a PNG on the
+  // clipboard. The picture is made while the copy is already under way, so iPad Safari still counts the tap.
+  // If the clipboard refuses, a window shows the picture to press and hold (Copy / Save) or put on the page.
+  async shot(area){
+    if(!cur || !area) return;
+    const pr = Ask.capture(area[0], area[1], area[2], area[3], {png: true, pad: 0, max: 2400}).then(u => fetch(u)).then(r => r.blob());
+    let ok = false;
+    try {
+      if(!navigator.clipboard || !window.ClipboardItem) throw new Error('no clipboard');
+      await navigator.clipboard.write([new ClipboardItem({'image/png': pr})]); ok = true;
+    } catch(e){ console.warn('copy picture', e); }
+    if(ok){ Paste.note(null); toast('Picture copied: paste it anywhere, or here with Ctrl+V'); return; }
+    let blob; try { blob = await pr; } catch(e){ toast('Could not make the picture'); return; }
+    const url = URL.createObjectURL(blob);
+    if(this.shotUrl) URL.revokeObjectURL(this.shotUrl);
+    this.shotUrl = url; this.shotBlob = blob; this.shotArea = area.slice();
+    $('shotImg').src = url;
+    showModal('shotDlg');
+  },
 };
 $('tsLayer').addEventListener('pointerdown', e => e.stopPropagation());
+$('tsShot').addEventListener('click', () => { const a = TS.area; clearSel(); TS.shot(a); });
+$('selShot').addEventListener('click', () => { const a = TS.area; clearSel(); TS.shot(a); });
+$('shotPut').addEventListener('click', async () => {
+  const blob = TS.shotBlob, area = TS.shotArea; hideModal('shotDlg');
+  if(!blob || !cur) return;
+  await Paste.image(blob, area ? [area[2] + 24 / cam.z, area[1]] : null, area ? area[2] - area[0] : null);
+});
 $('tsCopy').addEventListener('click', async () => { const n = TS.lines.length, ok = await TS.copy(TS.text()); toast(ok ? (n === 1 ? 'Copied 1 line' : 'Copied ' + n + ' lines') : 'Could not copy: use Text… and copy from there'); });
 $('tsOpen').addEventListener('click', () => { TS.open(); });
 $('selText').addEventListener('click', () => { const keep = TS.lines.slice(); clearSel(); TS.lines = keep; TS.open(); });
@@ -8261,7 +8410,7 @@ document.addEventListener('keydown', e => {
     else if(k === 'y'){ e.preventDefault(); redo(); }
     else if(k === 'c' && sel){ e.preventDefault(); Clip.copy(); }
     else if(k === 'x' && sel){ e.preventDefault(); Clip.copy(); const ids = sel ? sel.ids.slice() : []; clearSel(); removeItems(ids); }
-    else if(k === 'v' && Clip.get()){ e.preventDefault(); Clip.paste(); }
+    else if(k === 'v'){ const t0 = Date.now(); setTimeout(() => { if(Paste.got < t0) Paste.read(); }, 150); }   // (1.53) paste event first
     return;
   }
   if(e.altKey) return;
@@ -8956,6 +9105,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

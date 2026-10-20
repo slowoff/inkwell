@@ -91,10 +91,11 @@
       <span class="sep"></span>
       <div class="opts" id="opts">
         <div class="swatches" id="swatches"></div>
+        <div class="seg" id="lassoMode" hidden><button data-m="free" title="Draw a loop around what you want">Free</button><button data-m="box" title="Drag a rectangle; it can also be copied as a picture">Box</button></div>
         <div class="seg" id="eraseMode" hidden><button data-m="stroke" title="Removes whole strokes">Stroke</button><button data-m="area" title="Rubs out only the ink under it">Partial</button></div>
         <button class="tb" id="colorBtn" title="More colours" aria-label="More colours"><span class="rainbow"></span></button>
         <button class="tb" id="assistBtn" hidden title="Writing: Write to text, Reference line" aria-label="Writing options"><svg viewBox="0 0 24 24"><path d="M3 17h18" stroke-dasharray="3 2.5"/><path d="M4 13c1.5-5 3-5 3.5 0s2-5 3.5 0M14 13c1-4 2.5-4 3 0s1.5-3 3-1"/></svg></button>
-        <button class="tb" id="pasteBtn" hidden title="Paste what you copied with the Select tool">Paste</button>
+        <button class="tb" id="pasteBtn" hidden title="Paste: what you copied here, or a picture or text from another app (Ctrl+V)">Paste</button>
         <label class="size" id="sizeWrap" title="Thickness"><span class="size-dot" id="sizeDot"></span><input type="range" id="size" min="1" max="100" aria-label="Thickness"></label>
       </div>
       <span class="spacer"></span>
@@ -119,6 +120,7 @@
           <button class="tb" id="selUngroup" hidden>Ungroup</button>
           <button class="tb" id="selRot90" title="Rotate 90° clockwise" aria-label="Rotate 90°"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
           <button class="tb" id="selText" hidden title="Text of the imported page inside your lasso">Text</button>
+          <button class="tb" id="selShot" hidden title="Copy the box as a picture, like a screenshot">Copy as picture</button>
           <button class="tb" id="selFade" title="Fade: make the selection lighter">Fade</button>
           <button class="tb" id="selCopy">Copy</button>
           <button class="tb" id="selDup">Duplicate</button>
@@ -127,7 +129,7 @@
       </div>
       <div class="ts" id="tsLayer" hidden>
         <div class="ts-box" id="tsBox"></div>
-        <div class="sel-menu ts-menu" id="tsMenu"><span class="ts-n" id="tsN"></span><button class="tb" id="tsCopy">Copy</button><button class="tb" id="tsOpen" title="See the text, copy part of it or put it on the page">Text…</button></div>
+        <div class="sel-menu ts-menu" id="tsMenu"><span class="ts-n" id="tsN"></span><button class="tb" id="tsCopy">Copy</button><button class="tb" id="tsOpen" title="See the text, copy part of it or put it on the page">Text…</button><button class="tb" id="tsShot" hidden title="Copy the box as a picture, like a screenshot">Copy as picture</button></div>
       </div>
       <div class="fmt" id="fmtBar" hidden>
         <button class="tb" data-cmd="bold" aria-label="Bold"><b>B</b></button>
@@ -381,6 +383,15 @@
     <div class="dlg-head"><h3>What's new</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint" id="logVer"></p>
     <div class="changelog" id="changelog"></div>
+  </div>
+</div>
+
+<div class="modal" id="shotDlg" hidden>
+  <div class="dlg shot-dlg">
+    <div class="dlg-head"><h3>Picture of the box</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <p class="hint">Copying straight to the clipboard was not allowed here. Press and hold the picture, then Copy or Save.</p>
+    <img id="shotImg" alt="Picture of the selected box">
+    <div class="dlg-actions"><span></span><button class="btn ghost" id="shotPut">Put on page</button></div>
   </div>
 </div>
 

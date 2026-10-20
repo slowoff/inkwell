@@ -29,7 +29,7 @@ async def main():
         await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
         src = await page.evaluate("async () => { const W = __inkwell; await W.newPage(); W.addItems(" + ITEMS + "); await W.flushSaves(); return W.cur.id; }")
         await page.keyboard.press('l')
-        check(await page.evaluate("document.getElementById('pasteBtn').hidden"), 'no Paste button before anything is copied')
+        check(await page.evaluate("!document.getElementById('pasteBtn').hidden"), 'Paste button with the Select tool (since 1.53 always: it also pastes from other apps)')
         await page.evaluate("__inkwell.selectIds(['s_a','m_a','x_a','i_a'])")
         await page.wait_for_selector('#selCopy', state='visible')
         await page.click('#selCopy')

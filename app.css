@@ -275,7 +275,7 @@ select.pf-ls option:checked{background:#9fbbe8}
 .sel{position:absolute;inset:0;pointer-events:none}
 .sel-rect{position:absolute;border:1.5px dashed var(--accent);border-radius:4px;background:color-mix(in srgb,var(--accent) 6%,transparent);pointer-events:auto;cursor:move}
 .sel-handle{position:absolute;right:-14px;bottom:-14px;width:28px;height:28px;border-radius:50%;background:var(--accent);border:3px solid var(--paper);box-shadow:0 1px 4px rgba(0,0,0,.3);cursor:nwse-resize}
-.sel-menu{position:absolute;display:flex;align-items:center;gap:2px;padding:4px;background:var(--raise);border-radius:12px;box-shadow:var(--shadow);pointer-events:auto;white-space:nowrap}
+.sel-menu{position:absolute;display:flex;align-items:center;gap:2px;padding:4px;background:var(--raise);border-radius:12px;box-shadow:var(--shadow);pointer-events:auto;white-space:nowrap;flex-wrap:wrap;justify-content:center;max-width:calc(100% - 16px)}
 .sel-colors{display:flex;gap:0}
 .sel-colors .swatch{width:30px}
 
@@ -800,3 +800,6 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 #scanDone{margin-top:10px}
 .scan-all{width:100%;margin-top:8px}
 @media (any-pointer:coarse){ .ask-thumbs{padding-top:12px;gap:12px} .ask-thumb-x{width:30px;height:30px;top:-12px;right:-12px} #askAttMore{height:44px} }
+/* 1.53: Box lasso area and Copy as picture */
+.ts-box b{position:absolute;display:block;border:1.5px dashed var(--accent);border-radius:2px;background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.shot-dlg img{display:block;max-width:100%;max-height:60vh;margin:8px auto 12px;border-radius:6px;box-shadow:0 0 0 1px var(--line);background:#fff;-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto}

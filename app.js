@@ -3262,6 +3262,7 @@ function startEditing(id, cx, cy, isNew){
   if(!r){ r = document.createRange(); r.selectNodeContents(el); r.collapse(false); }
   s.removeAllRanges(); s.addRange(r);
   $('fmtBar').hidden = false;
+  TSize.label();
   invalidate(0, 0, 1);
 }
 function syncEditingHTML(){
@@ -3274,7 +3275,7 @@ function syncEditingHTML(){
 function finishEditing(){
   if(!editing || !cur) { editing = null; return; }
   const ed = editing; editing = null;
-  $('fmtBar').hidden = true; tHandle.hidden = true; tMove.hidden = true; closePop('tcolorPop');
+  $('fmtBar').hidden = true; tHandle.hidden = true; tMove.hidden = true; closePop('tcolorPop'); closePop('tsizePop');
   const el = elMap.get(ed.id);
   if(!el) return;
   el.removeAttribute('contenteditable');
@@ -3451,6 +3452,8 @@ fmtBar.addEventListener('click', e => {
     else if(!getSelection().isCollapsed) applySentinelColor('mark', null, el);
   } else if(b.dataset.act === 'tcolor'){
     openPop('tcolorPop', b); return;
+  } else if(b.dataset.act === 'tsize'){
+    TSize.open(b); return;
   } else if(b.dataset.act === 'link'){
     openLinkPicker(); return;
   } else if(b.dataset.act === 'done'){
@@ -3468,6 +3471,130 @@ $('tcolorPop').addEventListener('click', e => {
   closePop('tcolorPop');
   syncEditingHTML(); saveContentSoon();
 });
+
+/* (1.54) text size dropdown in the formatting bar. Sizes are world px (17 = the normal size of a text box).
+   Selected text gets <span style="font-size:Npx">; with nothing selected the whole box changes size;
+   an empty box changes its own size (fs), so what is typed next comes out at that size.
+   Plain inline styles: older app versions show them as they are, nothing new is stored. */
+const TEXT_SIZES = [10, 12, 14, 17, 20, 24, 28, 32, 40, 48, 64];
+const TSize = {
+  // size (world px) at the cursor, or at the start of the selection
+  at(el){
+    const s = getSelection();
+    let n = s.rangeCount && el.contains(s.anchorNode) ? s.anchorNode : el;
+    if(s.rangeCount && !s.isCollapsed){
+      // first character actually selected (the start often sits at the very end of the text before it)
+      const r = s.getRangeAt(0), w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for(let t = w.nextNode(); t; t = w.nextNode()){
+        if(!r.intersectsNode(t) || !t.length) continue;
+        if(t === r.startContainer && r.startOffset >= t.length) continue;
+        if(t === r.endContainer && r.endOffset === 0) continue;
+        n = t; break;
+      }
+    }
+    if(n.nodeType !== 1) n = n.parentNode;
+    if(!n || !el.contains(n)) n = el;
+    return Math.round(parseFloat(getComputedStyle(n).fontSize) || 17);
+  },
+  label(){
+    if(!editing) return;
+    const el = elMap.get(editing.id); if(!el) return;
+    $('tsizeVal').textContent = TSize.at(el);
+  },
+  open(b){
+    const el = elMap.get(editing.id); if(!el) return;
+    const now = TSize.at(el);
+    $('tsizeList').innerHTML = TEXT_SIZES.map(px => `<button data-px="${px}" class="${px === now ? 'on' : ''}"><span>${px}${px === 17 ? '<small>normal</small>' : ''}</span><span class="aa" style="font-size:${Math.min(px, 30)}px">Aa</span></button>`).join('');
+    openPop('tsizePop', b);
+    const on = $('tsizeList').querySelector('.on');
+    if(on) on.scrollIntoView({block: 'nearest'});
+  },
+  // character offsets of the selection inside el (to put it back after the box is rewritten; the text itself never changes)
+  offsets(el){
+    const s = getSelection(); if(!s.rangeCount) return null;
+    const r = s.getRangeAt(0); if(!el.contains(r.startContainer) || !el.contains(r.endContainer)) return null;
+    const at = (n, o) => { const pre = document.createRange(); pre.selectNodeContents(el); pre.setEnd(n, o); return pre.toString().length; };
+    return [at(r.startContainer, r.startOffset), at(r.endContainer, r.endOffset)];
+  },
+  restore(el, o){
+    const s = getSelection(), r = document.createRange();
+    const point = off => {
+      const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let left = off, last = null;
+      for(let t = w.nextNode(); t; t = w.nextNode()){ if(left <= t.length) return [t, left]; left -= t.length; last = t; }
+      return last ? [last, last.length] : null;
+    };
+    const a = o && point(o[0]), b = o && point(o[1]);
+    if(a && b){ r.setStart(a[0], a[1]); r.setEnd(b[0], b[1]); }
+    else { r.selectNodeContents(el); r.collapse(false); }
+    s.removeAllRanges(); s.addRange(r);
+  },
+  apply(px){
+    if(!editing || !cur) return;
+    const el = elMap.get(editing.id), it = cur.items.get(editing.id);
+    if(!el || !it) return;
+    if(document.activeElement !== el) el.focus({preventScroll: true});
+    const s = getSelection();
+    if(!el.textContent.trim() && !el.querySelector('a.pl')){
+      // empty box: the box itself gets the size
+      const fs = Math.round(px / 17 * 1000) / 1000;
+      el.querySelectorAll('[style]').forEach(n => { n.style.fontSize = ''; if(!n.getAttribute('style')) n.removeAttribute('style'); });
+      const html = el.innerHTML;
+      cur.items.set(it.id, Object.assign({}, it, {fs, html}, it.ch ? {fs0: fs} : {}));
+      el._html = html;
+      el.style.fontSize = px + 'px';
+      if(it.ch) fitCell(it.id);
+      saveContentSoon(); invalidate(0, 0, 1); TSize.label();
+      return;
+    }
+    const whole = !s.rangeCount || s.isCollapsed || !el.contains(s.anchorNode) || !el.contains(s.focusNode);
+    const keep = TSize.offsets(el);
+    if(whole){ const r = document.createRange(); r.selectNodeContents(el); s.removeAllRanges(); s.addRange(r); }
+    // execCommand only knows sizes 1..7: mark with size 7, then turn the new marks into a px size
+    const before = new Map([...el.querySelectorAll('font[size]')].map(f => [f, f.getAttribute('size')]));
+    document.execCommand('styleWithCSS', false, false);
+    document.execCommand('fontSize', false, '7');
+    const marks = [...el.querySelectorAll('font[size="7"]')].filter(f => before.get(f) !== '7');
+    for(const f of marks){
+      // whatever was sized inside before takes the new size
+      f.querySelectorAll('[style]').forEach(n => { n.style.fontSize = ''; if(!n.getAttribute('style')) n.removeAttribute('style'); });
+      f.querySelectorAll('font[size]').forEach(n => n.removeAttribute('size'));
+      f.removeAttribute('size');
+      let n = f;
+      if(f.attributes.length === 0 || (f.attributes.length === 1 && f.hasAttribute('style'))){
+        n = document.createElement('span');
+        if(f.getAttribute('style')) n.setAttribute('style', f.getAttribute('style'));
+        n.append(...f.childNodes); f.replaceWith(n);
+      }
+      n.style.fontSize = px + 'px';
+      // the mark fills an older size span completely: give that span the size instead of nesting
+      for(let q = n.parentElement; q && q !== el && el.contains(q) && q.textContent === n.textContent; q = q.parentElement){
+        if(!q.style.fontSize) continue;
+        q.style.fontSize = px + 'px';
+        if(n.tagName === 'SPAN' && n.style.length === 1){ n.replaceWith(...n.childNodes); }
+        else { n.style.fontSize = ''; if(!n.getAttribute('style')) n.removeAttribute('style'); }
+        break;
+      }
+    }
+    // with the whole box picked, headings and list items keep no older inline size either
+    if(whole) el.querySelectorAll('[style]').forEach(n => { if(n.parentNode && !n.closest('span[style*="font-size"],font[style*="font-size"]')) { n.style.fontSize = ''; if(!n.getAttribute('style')) n.removeAttribute('style'); } });
+    // tidy: a size span directly inside another of the same size is merged away
+    el.querySelectorAll('span[style]').forEach(n => {
+      const p = n.parentElement && n.parentElement.closest('[style]');
+      if(n.style.length === 1 && n.style.fontSize && p && el.contains(p) && p !== el && p.style.fontSize === n.style.fontSize) n.replaceWith(...n.childNodes);
+    });
+    TSize.restore(el, whole && keep ? [keep[1], keep[1]] : keep);
+    syncEditingHTML(); fitCell(editing.id); saveContentSoon(); invalidate(0, 0, 1); TSize.label();
+  }
+};
+$('tsizePop').addEventListener('pointerdown', e => { if(e.target.closest('button')) e.preventDefault(); });
+$('tsizePop').addEventListener('mousedown', e => { if(e.target.closest('button')) e.preventDefault(); });
+$('tsizePop').addEventListener('click', e => {
+  const b = e.target.closest('[data-px]'); if(!b) return;
+  closePop('tsizePop');
+  TSize.apply(+b.dataset.px);
+});
+document.addEventListener('selectionchange', () => { if(editing && !$('fmtBar').hidden) TSize.label(); });
 
 /* ---------- formulas ---------- */
 const MATH_KEYS = [
@@ -4696,9 +4823,9 @@ function openPop(id, anchor){
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }
-function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop']) closePop(id); }
+function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop']) closePop(id); }
 document.addEventListener('pointerdown', e => {
-  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"]')) return;
+  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"]')) return;
   closePops();
 }, true);
 let modalAt = 0;
@@ -5873,6 +6000,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.54', '2026-10-21', ['Text size dropdown in the text formatting bar: select words to resize them, or pick a size with nothing selected to resize the whole text box']],
   ['1.53.1', '2026-10-20', ['Fix: after copying page text, Copy as picture, or text from a text box, Paste put back an older Inkwell copy instead', 'Fix: Cmd+V on an iPad keyboard pastes']],
   ['1.53', '2026-10-20', ['Select tool: choose Free or Box. Box selects everything in a rectangle and can Copy as picture, like a screenshot of that part', 'Paste from other apps with Ctrl+V or the Paste button: pictures and screenshots become a picture, text a text box']],
   ['1.52', '2026-10-20', ['Select text on imported pages: draw a lasso around text on a PDF or scanned page, then Copy it, or open Text… to copy part of it or put it on the page as a text box', 'PDFs imported from now on remember where each line is, so you can select one column of a page', 'Scan several pages in a row: after Add & scan next, tap Take next photo; or Choose photos to pick several at once, check each one or Add all', 'Ask Claude: scan up to 4 parts of the page into one question (+ Scan more)']],
@@ -9117,6 +9245,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {TSize, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

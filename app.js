@@ -1247,7 +1247,24 @@ const toWorld = (sx, sy) => [(sx - cam.ox) / cam.z, (sy - cam.oy) / cam.z];
 const viewRect = () => [-cam.ox / cam.z, -cam.oy / cam.z, (W - cam.ox) / cam.z, (H - cam.oy) / cam.z];
 const pt = e => [e.clientX - SR.left, e.clientY - SR.top];
 
+// (1.58.11) iPadOS 26 bug: a Home Screen app gets a viewport that is short by about the status bar height, which left
+// an empty strip at the bottom. When the app runs from the Home Screen across the whole screen, it is stretched to
+// the real screen height (only for a small gap, so split view, Stage Manager and the keyboard are left alone).
+function fitScreen(){
+  const app = document.querySelector('.app'); if(!app) return;
+  const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  let hgt = '';
+  if(standalone && screen.width && screen.height){
+    const land = innerWidth > innerHeight;
+    const sw = land ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
+    const sh = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+    const gap = sh - innerHeight;
+    if(Math.abs(innerWidth - sw) <= 2 && gap > 2 && gap <= 64) hgt = sh + 'px';
+  }
+  if(app.style.height !== hgt) app.style.height = hgt;
+}
 function resize(){
+  fitScreen();
   const r = stage.getBoundingClientRect();
   SR = r; W = r.width; H = r.height;
   dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -1260,6 +1277,7 @@ function resize(){
   invalidate();
 }
 new ResizeObserver(resize).observe(stage);
+addEventListener('resize', fitScreen);
 addEventListener('scroll', () => { SR = stage.getBoundingClientRect(); }, true);
 
 let rafId = 0, need = {bg: 0, ink: 0, over: 0}, frontZ = 1;
@@ -6254,6 +6272,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.11', '2026-10-21', ['Fix: the empty strip at the bottom of the screen is gone, the page now reaches the bottom edge (iPad Home Screen app)']],
   ['1.58.10', '2026-10-21', ['Fix: a custom text colour is kept even if the text box closed while the colour picker was open']],
   ['1.58.9', '2026-10-21', ['Custom colour for text: pick any colour in the text colour menu, like for the pen']],
   ['1.58.8', '2026-10-21', ['Snap text to lines also finds pale grey answer lines on worksheets, and thin lines that got lost when a big page was read']],

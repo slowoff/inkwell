@@ -32,13 +32,21 @@ async def main():
             info = await page.evaluate("""(() => { const d = document.getElementById('logDlg'), c = document.getElementById('changelog'), dl = d.querySelector('.dlg'), r = dl.getBoundingClientRect();
               const top = document.elementFromPoint(r.left + r.width / 2, r.top + 20);
               return {hidden: d.hidden, onTop: !!(top && top.closest('#logDlg')), first: c.querySelector('h4') && c.querySelector('h4').firstChild.textContent, n: c.querySelectorAll('h4').length,
-                      top: r.top, bottom: r.bottom, right: r.right, vh: innerHeight, scroll: dl.scrollHeight > dl.clientHeight, title: d.querySelector('h3').textContent,
+                      top: r.top, bottom: r.bottom, right: r.right, vh: innerHeight, scroll: c.scrollHeight > c.clientHeight && dl.scrollHeight <= dl.clientHeight + 1, headTop: d.querySelector('h3').getBoundingClientRect().top, title: d.querySelector('h3').textContent,
                       settings: !document.getElementById('settingsDlg').hidden}; })()""")
             check(not info['hidden'] and info['onTop'], f'[{vw}px] tapping it opens a window on top ({info})')
             check(info['title'] == "What's new" and info['n'] >= 50, f'[{vw}px] window lists the versions ({info["n"]})')
             check(info['first'] == ver, f'[{vw}px] newest entry is the current version {ver} ({info["first"]})')
             check(info['top'] >= 0 and info['bottom'] <= info['vh'] + 0.5 and info['right'] <= vw + 0.5, f'[{vw}px] window fits the screen, nothing cut off ({info})')
-            check(info['scroll'], f'[{vw}px] the long list scrolls inside the window')
+            check(info['scroll'], f'[{vw}px] the long list scrolls inside the window, the title stays put')
+            # 1.58.2: on the iPad the status bar (top) and home bar (bottom) areas are kept free
+            ins = await page.evaluate("""(() => { const r = document.documentElement.style; r.setProperty('--sat', '24px'); r.setProperty('--sab', '20px');
+              const b = document.querySelector('#logDlg .dlg').getBoundingClientRect(); const out = [b.top, b.bottom, innerHeight];
+              r.removeProperty('--sat'); r.removeProperty('--sab'); return out; })()""")
+            check(ins[0] >= 24 + 15.5 and ins[1] <= ins[2] - 20 - 15.5, f'[{vw}px] window stays clear of the status bar and home bar ({ins})')
+            await page.evaluate("document.getElementById('changelog').scrollTop = 600"); await page.wait_for_timeout(100)
+            ht = await page.evaluate("document.querySelector('#logDlg h3').getBoundingClientRect().top")
+            check(abs(ht - info['headTop']) < 0.5, f'[{vw}px] title stays at the top while the list scrolls')
             vers = await page.evaluate("__inkwell.CHANGELOG.map(e => e[0])")
             check(len(vers) == len(set(vers)), 'no version listed twice')
             await page.click('#logDlg [data-close]'); await page.wait_for_timeout(200)

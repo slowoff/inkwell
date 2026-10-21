@@ -6126,6 +6126,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.2', '2026-10-21', ['Cleaner What\'s new window that fits the iPad screen: the title stays at the top and the list scrolls below it', 'Fix: windows no longer run under the status bar or past the bottom of the screen']],
   ['1.58.1', '2026-10-21', ['Fix: the hand next to a text box moves it on the iPad, with a finger and with the Pencil']],
   ['1.58', '2026-10-21', ['Select a graph and tap Add formula to draw another function on it, in its own colour and line style, with the formula written next to the curve. Works on graphs made from now on']],
   ['1.57', '2026-10-21', ['Graphs get a solid background in the page colour, so their grid no longer mixes with the paper grid (white in light mode, dark in dark mode). Switch it off in the graph window under Look', 'Erasers no longer erase graphs, so you can rub out what you wrote on a graph. To remove a graph, select it with the Select tool and delete it']],
@@ -6197,14 +6198,14 @@ const CHANGELOG = [
 ];
 function renderChangelog(){
   const day = d => new Date(d + 'T12:00:00').toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'});
-  $('changelog').innerHTML = CHANGELOG.map(([v, d, items]) => `<h4>${esc(v)}<small>${esc(day(d))}</small></h4><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`).join('');
+  $('changelog').innerHTML = CHANGELOG.map(([v, d, items]) => `<section><h4>${esc(v)}<small>${esc(day(d))}</small></h4><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></section>`).join('');
 }
 // (1.47.1) the change log opens in its own window on top of Settings (it was cut off at the bottom of Settings)
 $('logBtn').addEventListener('click', () => {
   if(!$('changelog').innerHTML) renderChangelog();
   $('logVer').textContent = $('verInfo').textContent;
   $('logDlg').hidden = false; modalAt = Date.now();
-  $('logDlg').querySelector('.dlg').scrollTop = 0;
+  $('changelog').scrollTop = 0;
 });
 $('updBtn').addEventListener('click', async () => {
   const b = $('updBtn');

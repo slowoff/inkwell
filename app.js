@@ -1479,6 +1479,10 @@ function dropEl(id){ const el = elMap.get(id); if(el){ el.remove(); elMap.delete
    Stored on the image item as it.f = [{k, n, x, y, w, h, v, ...}]; x/y/w/h are fractions of the page.
    k: 'tx' text, 'cb' checkbox, 'rb' radio (ev = its value), 'ch' dropdown, 'ls' list (o = [[value, label]]).
    Fields can be clicked and typed into with a mouse (PC); on the iPad they only show their values. */
+// (1.56) optional look of a filled-in text field, whole field: b bold, it italic, u underline, c colour (older versions ignore them)
+function fieldCss(f){
+  return (f.b ? 'font-weight:700;' : '') + (f.it ? 'font-style:italic;' : '') + (f.u ? 'text-decoration:underline;' : '');
+}
 function fieldFont(f, it){
   if(f.s) return f.s * it.w;
   if(f.k === 'tx' && !f.ml || f.k === 'ch') return Math.min(f.h * it.h * 0.62, it.w * 0.0235);
@@ -1527,6 +1531,7 @@ function syncFields(el, it){
   for(let i = 0; i < ch.length; i++){
     const c = ch[i], f = it.f[i];
     c.style.fontSize = fieldFont(f, it) + 'px';
+    if(f.k === 'tx') Object.assign(c.style, {fontWeight: f.b ? '700' : '', fontStyle: f.it ? 'italic' : '', textDecoration: f.u ? 'underline' : '', color: f.c || ''});
     if(c !== document.activeElement) setFieldValue(c, f);
   }
 }
@@ -1548,6 +1553,7 @@ function fieldText(it){
   }
   return t;
 }
+let pfFocus = null;  // (1.56) {id, i, c}: the PDF text field being typed in; the formatting bar then styles that field
 let pfEdit = null;   // {id, before}: the item as it was when the field got focus (one undo step per field edit)
 function pfTarget(e){
   const c = e.target && e.target.closest && e.target.closest('.pf');
@@ -1580,6 +1586,9 @@ function pfCommit(){
 worldBack.addEventListener('focusin', e => {
   const t = pfTarget(e); if(!t) return;
   pfEdit = {id: t.it.id, before: t.it};
+  const f0 = t.it.f[t.i];
+  pfFocus = f0 && f0.k === 'tx' && !f0.ro ? {id: t.it.id, i: t.i, c: t.c} : null;
+  if(typeof renderFmt === 'function') renderFmt();
   // keep the field on screen (Tab can jump to a field outside the view)
   const r = t.c.getBoundingClientRect(), sr = stage.getBoundingClientRect();
   let dx = 0, dy = 0;
@@ -1595,6 +1604,10 @@ worldBack.addEventListener('focusout', e => {
   const t = pfTarget(e); if(!t) return;
   pfCommit(); pfEdit = null;
   const it = cur.items.get(t.it.id); if(it && it.f && it.f[t.i]) setFieldValue(t.c, it.f[t.i]);
+  setTimeout(() => {
+    const a = document.activeElement;
+    if(pfFocus && !(a && a.closest && a.closest('.pf'))){ pfFocus = null; renderFmt(); }
+  }, 120);
 });
 worldBack.addEventListener('keydown', e => {
   if(e.key === 'Enter' && e.target.matches && e.target.matches('input.pf')){ e.preventDefault(); e.target.blur(); }
@@ -3430,7 +3443,9 @@ function applySentinelColor(kind, color, root){
   });
 }
 fmtBar.addEventListener('click', e => {
-  const b = e.target.closest('button'); if(!b || !editing) return;
+  const b = e.target.closest('button'); if(!b) return;
+  if(!editing && pfFocus){ PFmt.click(b); return; }
+  if(!editing) return;
   const el = elMap.get(editing.id); if(!el) return;
   if(document.activeElement !== el) el.focus({preventScroll: true});
   if(b.dataset.cmd) document.execCommand(b.dataset.cmd);
@@ -3467,7 +3482,9 @@ const TEXT_COLORS = ['', '#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF', 
 $('tpalette').innerHTML = TEXT_COLORS.map(c => `<button data-tc="${c}" style="--c:${c || 'var(--fg)'}" aria-label="${c ? 'Colour ' + c : 'Default colour'}"></button>`).join('');
 $('tcolorPop').addEventListener('pointerdown', e => e.preventDefault());
 $('tcolorPop').addEventListener('click', e => {
-  const b = e.target.closest('[data-tc]'); if(!b || !editing) return;
+  const b = e.target.closest('[data-tc]'); if(!b) return;
+  if(!editing && pfFocus){ closePop('tcolorPop'); PFmt.set({c: b.dataset.tc || ''}); return; }
+  if(!editing) return;
   const el = elMap.get(editing.id);
   if(!getSelection().isCollapsed) applySentinelColor('color', b.dataset.tc, el);
   closePop('tcolorPop');
@@ -3499,13 +3516,14 @@ const TSize = {
     return Math.round(parseFloat(getComputedStyle(n).fontSize) || 17);
   },
   label(){
-    if(!editing) return;
+    if(!editing){ if(pfFocus) $('tsizeVal').textContent = PFmt.size(); return; }
     const el = elMap.get(editing.id); if(!el) return;
     $('tsizeVal').textContent = TSize.at(el);
   },
   open(b){
-    const el = elMap.get(editing.id); if(!el) return;
-    const now = TSize.at(el);
+    const el = !editing && pfFocus ? null : elMap.get(editing.id);
+    if(!el && !pfFocus) return;
+    const now = el ? TSize.at(el) : PFmt.size();
     $('tsizeList').innerHTML = TEXT_SIZES.map(px => `<button data-px="${px}" class="${px === now ? 'on' : ''}"><span>${px}${px === 17 ? '<small>normal</small>' : ''}</span><span class="aa" style="font-size:${Math.min(px, 30)}px">Aa</span></button>`).join('');
     openPop('tsizePop', b);
     const on = $('tsizeList').querySelector('.on');
@@ -3594,15 +3612,20 @@ $('tsizePop').addEventListener('mousedown', e => { if(e.target.closest('button')
 $('tsizePop').addEventListener('click', e => {
   const b = e.target.closest('[data-px]'); if(!b) return;
   closePop('tsizePop');
+  if(!editing && pfFocus){ PFmt.set({s: +b.dataset.px}); return; }
   TSize.apply(+b.dataset.px);
 });
 document.addEventListener('selectionchange', () => { if(editing && !$('fmtBar').hidden) TSize.label(); });
 // (1.55) the formatting bar sits in the tool bar: shown with the Text tool (greyed until a box is being typed in)
 function renderFmt(){
-  const show = prefs.tool === 'text' || !!editing;
+  const fld = !editing && !!pfFocus;
+  const show = prefs.tool === 'text' || !!editing || fld;
   fmtBar.hidden = !show;
-  fmtBar.classList.toggle('idle', !editing);
-  if(editing) TSize.label(); else $('tsizeVal').textContent = '17';
+  fmtBar.classList.toggle('idle', !editing && !fld);
+  fmtBar.classList.toggle('field', fld);
+  if(editing || fld) TSize.label(); else $('tsizeVal').textContent = '17';
+  const f = fld && PFmt.f();
+  fmtBar.querySelectorAll('[data-cmd]').forEach(b => b.classList.toggle('on', !!f && !!f[{bold: 'b', italic: 'it', underline: 'u'}[b.dataset.cmd]]));
   Spell.render();
   barFade();
 }
@@ -3618,6 +3641,7 @@ const Spell = {
   render(){ const b = fmtBar.querySelector('[data-act="spell"]'); if(b){ b.classList.toggle('on', Spell.on()); b.setAttribute('aria-pressed', Spell.on() ? 'true' : 'false'); } },
   toggle(el){
     prefs.spell = !Spell.on(); savePrefs();
+    document.querySelectorAll('input.pf-tx, textarea.pf-tx').forEach(c => { c.spellcheck = Spell.on(); });
     if(el){
       Spell.set(el);
       // re-check the text with the new setting: browsers only redraw the marks after the box is focused again
@@ -3627,6 +3651,36 @@ const Spell = {
     }
     Spell.render();
     toast(Spell.on() ? 'Spell check on: misspelled words are underlined while you type' : 'Spell check off');
+  }
+};
+// (1.56) the formatting bar on a PDF text field: bold, italic, underline, size and colour of the whole field
+const PFmt = {
+  item(){ return pfFocus && cur ? cur.items.get(pfFocus.id) : null; },
+  f(){ const it = PFmt.item(); return it && it.f ? it.f[pfFocus.i] : null; },
+  size(){ const it = PFmt.item(), f = PFmt.f(); return it && f ? Math.round(fieldFont(f, it)) : 17; },
+  set(p){
+    const it = PFmt.item(), f = PFmt.f(); if(!it || !f) return;
+    const nf = Object.assign({}, f);
+    if('s' in p) nf.s = Math.round(p.s / it.w * 1e7) / 1e7;
+    for(const k of ['b', 'it', 'u']) if(k in p){ if(p[k]) nf[k] = 1; else delete nf[k]; }
+    if('c' in p){ if(p.c) nf.c = p.c; else delete nf.c; }
+    const list = it.f.slice(); list[pfFocus.i] = nf;
+    const nit = Object.assign({}, it, {f: list});
+    if(!pfEdit || pfEdit.id !== nit.id) pfEdit = {id: nit.id, before: it};
+    setItems([[nit.id, nit]]);
+    pfCommit();   // one undo step per change
+    saveContentSoon();
+    if(document.activeElement !== pfFocus.c && pfFocus.c.isConnected) pfFocus.c.focus({preventScroll: true});
+    renderFmt();
+  },
+  click(b){
+    const f = PFmt.f(); if(!f) return;
+    if(b.dataset.cmd){ const k = {bold: 'b', italic: 'it', underline: 'u'}[b.dataset.cmd]; if(k) PFmt.set({[k]: !f[k]}); return; }
+    const a = b.dataset.act;
+    if(a === 'tsize') TSize.open(b);
+    else if(a === 'tcolor') openPop('tcolorPop', b);
+    else if(a === 'spell'){ Spell.toggle(null); const c = pfFocus.c; c.blur(); c.focus({preventScroll: true}); }
+    else if(a === 'done') pfFocus.c.blur();
   }
 };
 
@@ -5194,7 +5248,7 @@ function fieldParts(it, ox, oy){
       const fs = mark ? fh * 0.8 : fieldFont(f, it);
       const align = mark ? 'center' : f.al === 1 ? 'center' : f.al === 2 ? 'right' : 'left';
       const lay = mark || !(f.ml || f.k === 'ls') ? `display:flex;align-items:center;justify-content:${mark ? 'center' : align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start'};white-space:pre` : `white-space:pre-wrap;text-align:${align}`;
-      out.push({box: fbox, h: `<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:#111;${lay}">${esc(txt)}</div>`});
+      out.push({box: fbox, h: `<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:${!mark && f.c ? f.c : '#111'};${!mark ? fieldCss(f) : ''}${lay}">${esc(txt)}</div>`});
     }
   return out;
 }
@@ -6029,6 +6083,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.56', '2026-10-21', ['The text bar also works in the PDF\'s own fill-in fields: Bold, Italic, Underline, text size and colour for the whole field, plus spell check']],
   ['1.55', '2026-10-21', ['The text formatting buttons now sit in the top tool bar when the Text tool is on, instead of floating over the text box', 'Spell check button in the text bar: misspelled words are underlined while you type (on by default)']],
   ['1.54', '2026-10-21', ['Text size dropdown in the text formatting bar: select words to resize them, or pick a size with nothing selected to resize the whole text box']],
   ['1.53.1', '2026-10-20', ['Fix: after copying page text, Copy as picture, or text from a text box, Paste put back an older Inkwell copy instead', 'Fix: Cmd+V on an iPad keyboard pastes']],
@@ -9275,6 +9330,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {TSize, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

@@ -1104,7 +1104,17 @@ function strokeShape(it){
   return {xs, ys, rs, n: xs.length};
 }
 // Filled outline of a variable-width stroke, as a Path2D or an SVG path string.
+// (1.57) a filled stroke (fl:1, e.g. a graph's solid background): its points are the outline, filled as is
+function fillPath(it, svg){
+  const p = it.p, n = p.length / 3;
+  if(n < 3) return svg ? '' : new Path2D();
+  if(svg){ let d = `M${r1(p[0])} ${r1(p[1])}`; for(let i = 3; i < p.length; i += 3) d += `L${r1(p[i])} ${r1(p[i+1])}`; return d + 'Z'; }
+  const P = new Path2D(); P.moveTo(p[0], p[1]); for(let i = 3; i < p.length; i += 3) P.lineTo(p[i], p[i+1]); P.closePath(); return P;
+}
+// drawing order: fills first, then highlighter, then pen ink on top
+const inkPass = it => it.fl ? 2 : it.hl ? 1 : 0;
 function strokePath(it, svg){
+  if(it.fl) return fillPath(it, svg);
   const {xs, ys, rs, n} = strokeShape(it);
   if(!n) return svg ? '' : new Path2D();
   let single = n === 1;
@@ -1207,6 +1217,7 @@ function inkColor(c, print, onPaper){
   if(onPaper) print = true;
   const dark = !print && isDark();
   if(!c || c === 'auto') return print ? '#18212B' : tokens.fg;
+  if(c === 'paper') return print ? '#FFFFFF' : (tokens.paper || '#FFFFFF');   // (1.57) the page colour: white, or dark in dark mode
   const l = lum(c);
   if(dark && l < 0.07) return tokens.fg;
   if(!dark && l > 0.93) return '#18212B';
@@ -1306,13 +1317,13 @@ function drawInk(){
   if(!cur) return;
   inkCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
   const v = viewRect(), pages = paperRects();
-  for(const pass of [1, 0]){
+  for(const pass of [2, 1, 0]){
     for(const it of cur.items.values()){
-      if(it.t !== 's' || (it.hl ? 1 : 0) !== pass) continue;
+      if(it.t !== 's' || inkPass(it) !== pass) continue;
       const g = geoOf(it);
       if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
       const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
-      inkCtx.globalAlpha = (pass ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
+      inkCtx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
       inkCtx.fillStyle = inkColor(it.c, false, paper);
       inkCtx.fill(g.path);
     }
@@ -2155,7 +2166,7 @@ function eraseAt(sx, sy){
 function eraseFormulas(wx, wy, R){
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 'm') continue;
+    if(it.t !== 'm' || it.ne) continue;   // ne: part of a graph, only removed with the Select tool (1.57)
     const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
     if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
     act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); hit = true;
@@ -2167,7 +2178,7 @@ function eraseFormulas(wx, wy, R){
 function eraseTexts(wx, wy, R){
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 'x' || (editing && editing.id === it.id)) continue;
+    if(it.t !== 'x' || it.ne || (editing && editing.id === it.id)) continue;
     const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
     if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
     const el = elMap.get(it.id); if(!el) continue;
@@ -2236,7 +2247,7 @@ function eraseWorld(wx, wy, R){
   if(act.mode === 'area'){ eraseArea(wx, wy, R); return; }
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 's') continue;
+    if(it.t !== 's' || it.ne) continue;
     const g = geoOf(it), pad = R + it.w / 2;
     if(wx < g.b[0] - pad || wx > g.b[2] + pad || wy < g.b[1] - pad || wy > g.b[3] + pad) continue;
     const lim = pad * pad, p = it.p;
@@ -2253,7 +2264,7 @@ function eraseWorld(wx, wy, R){
 function eraseArea(wx, wy, R){
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 's') continue;
+    if(it.t !== 's' || it.fl || it.ne) continue;   // graphs (ne) and their backgrounds stay: Select + delete removes them
     const g = geoOf(it), pad = R + it.w / 2;
     if(wx < g.b[0] - pad || wx > g.b[2] + pad || wy < g.b[1] - pad || wy > g.b[3] + pad) continue;
     const cut = R + it.w * 0.35, lim = cut * cut, p = it.p;
@@ -2729,7 +2740,7 @@ function renderSelColors(){
 $('selColors').addEventListener('click', e => {
   const b = e.target.closest('[data-c]'); if(!b || !sel) return;
   const c = b.dataset.c;
-  const list = sel.ids.map(id => cur.items.get(id)).filter(it => it && (it.t === 's' || it.t === 'm')).map(it => Object.assign({}, it, {c}));
+  const list = sel.ids.map(id => cur.items.get(id)).filter(it => it && ((it.t === 's' && !it.fl) || it.t === 'm')).map(it => Object.assign({}, it, {c}));
   if(list.length) replaceItems(list);
 });
 $('selMath').addEventListener('click', () => strokesToFormula());
@@ -5286,10 +5297,10 @@ async function exportPdf(){
     for(const fp of fieldParts(it, it.x, it.y)) add(fp.box, fp.h);
   }
   const inks = [];   // highlighter first, so pen ink sits on top
-  for(const pass of [1, 0]) for(const it of cur.items.values()){
-    if(it.t !== 's' || it.mk || (it.hl ? 1 : 0) !== pass) continue;
+  for(const pass of [2, 1, 0]) for(const it of cur.items.values()){
+    if(it.t !== 's' || it.mk || inkPass(it) !== pass) continue;
     const q = itemBox(it);
-    const fo = (pass ? 0.4 : 1) * opOf(it);
+    const fo = (pass === 1 ? 0.4 : 1) * opOf(it);
     inks.push({a: q[1], b: q[3], h: `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
   }
   const tops = [];
@@ -5430,7 +5441,7 @@ async function exportPdfFile(){
       overlays.set(it.id, await doc.embedPng(await renderPng(d, it.w, it.h, sc)));
     }
     const pics = items.filter(it => it.t === 'i' && it.a), embedded = new Map();
-    const inks = [1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && (it.hl ? 1 : 0) === pass));
+    const inks = [2, 1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && inkPass(it) === pass));
     const inkBoxes = new Map(inks.map(it => [it.id, box(it)]));
     const X = wx => (margin + (wx - x0) * s) * k;
     for(let sh = 0; sh < n; sh++){
@@ -6083,6 +6094,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.57', '2026-10-21', ['Graphs get a solid background in the page colour, so their grid no longer mixes with the paper grid (white in light mode, dark in dark mode). Switch it off in the graph window under Look', 'Erasers no longer erase graphs, so you can rub out what you wrote on a graph. To remove a graph, select it with the Select tool and delete it']],
   ['1.56', '2026-10-21', ['The text bar also works in the PDF\'s own fill-in fields: Bold, Italic, Underline, text size and colour for the whole field, plus spell check']],
   ['1.55', '2026-10-21', ['The text formatting buttons now sit in the top tool bar when the Text tool is on, instead of floating over the text box', 'Spell check button in the text bar: misspelled words are underlined while you type (on by default)']],
   ['1.54', '2026-10-21', ['Text size dropdown in the text formatting bar: select words to resize them, or pick a size with nothing selected to resize the whole text box']],
@@ -6576,8 +6588,20 @@ function buildGraph(o, gx, gy){
   const hs = Math.max(10, w * 5);
   const arrow = (from, tip) => { if(L.arrows !== false) stroke(arrowHead(from, tip, hs)); };
   const finish = () => {
+    if(L.bg){
+      // (1.57) solid background in the page colour under the whole graph (grid, axes, numbers, labels)
+      let b = null;
+      for(const it of items){
+        const q = it.t === 's' ? strokeBox(it) : [it.x, it.y, it.x + Math.max(1, texPlain(it.tex).length) * it.fs * 0.62, it.y + it.fs * 1.45];
+        b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : q;
+      }
+      if(b){
+        const m = 10 * S, x0 = b[0] - m, y0 = b[1] - m, x1 = b[2] + m, y1 = b[3] + m;
+        items.unshift({t: 's', id: id('s'), c: 'paper', w: 1, hl: 0, fl: 1, p: polyPts([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], true, Math.max(8, (x1 - x0) / 16))});
+      }
+    }
     const all = clamp((+L.allO || 100) / 100, 0.1, 1);
-    items.forEach(it => { it.g = grp; if(all < 1){ const v = Math.round(opOf(it) * all * 100) / 100; it.o = Math.max(0.05, v); } });
+    items.forEach(it => { it.g = grp; it.ne = 1; if(all < 1){ const v = Math.round(opOf(it) * all * 100) / 100; it.o = Math.max(0.05, v); } });
     return items;
   };
   if(o.type === '3d'){
@@ -6649,7 +6673,7 @@ function buildGraph(o, gx, gy){
 const GRAPH_DEFAULTS = {q1: {x0: 0, x1: 10, xs: 1, y0: 0, y1: 10, ys: 1}, q4: {x0: -5, x1: 5, xs: 1, y0: -5, y1: 5, ys: 1}};
 let graphType = 'q1';
 // the dialog's look choices are remembered per device (prefs.graph); grid lines start half faded
-const gLook = () => { if(!prefs.graph || typeof prefs.graph !== 'object') prefs.graph = {}; return Object.assign({}, GRAPH_LOOK, {gridO: 50}, prefs.graph); };
+const gLook = () => { if(!prefs.graph || typeof prefs.graph !== 'object') prefs.graph = {}; return Object.assign({}, GRAPH_LOOK, {gridO: 50, bg: true}, prefs.graph); };
 function setGLook(k, v){ if(!prefs.graph || typeof prefs.graph !== 'object') prefs.graph = {}; prefs.graph[k] = v; savePrefs(); renderGLook(); }
 function renderGLook(){
   const L = gLook();
@@ -6662,6 +6686,7 @@ function renderGLook(){
   $('gGridO').value = L.gridO; $('gGridOv').textContent = L.gridO + ' %';
   $('gAllO').value = L.allO; $('gAllOv').textContent = L.allO + ' %';
   $('gArrows').checked = L.arrows !== false;
+  $('gBg').checked = L.bg !== false;
   drawGraphPreview();
 }
 function setGraphType(t){
@@ -6725,7 +6750,7 @@ $('gFn').addEventListener('input', () => {
   try { parseFn($('gFn').value); $('gFnMsg').textContent = ''; } catch(err){ $('gFnMsg').textContent = err.message; }
 });
 $('graphDlg').addEventListener('input', e => { if(e.target.id !== 'gGridO' && e.target.id !== 'gAllO') drawGraphPreview(); });
-$('graphDlg').addEventListener('change', e => { if(e.target.matches('input[type=checkbox]') && e.target.id !== 'gArrows') drawGraphPreview(); });
+$('graphDlg').addEventListener('change', e => { if(e.target.matches('input[type=checkbox]') && e.target.id !== 'gArrows' && e.target.id !== 'gBg') drawGraphPreview(); });
 for(const [box, key, num] of [['gSize', 'size', 1], ['gFnW', 'fnW', 1], ['gFnS', 'fnS', 0]])
   $(box).addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b) setGLook(key, num ? +b.dataset.v : b.dataset.v); });
 for(const [box, key] of [['gAxC', 'axC'], ['gFnC', 'fnC']])
@@ -6733,6 +6758,7 @@ for(const [box, key] of [['gAxC', 'axC'], ['gFnC', 'fnC']])
 for(const [inp, key] of [['gGridO', 'gridO'], ['gAllO', 'allO']])
   $(inp).addEventListener('input', () => setGLook(key, clamp(+$(inp).value || 100, 10, 100)));
 $('gArrows').addEventListener('change', () => setGLook('arrows', $('gArrows').checked));
+$('gBg').addEventListener('change', () => setGLook('bg', $('gBg').checked));
 $('gInsert').addEventListener('click', () => {
   if(!cur) return;
   const g = readGraph();

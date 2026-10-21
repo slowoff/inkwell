@@ -12,7 +12,11 @@ def check(ok, what):
 async def set_range(page, sel, v):
     await page.evaluate("([s, v]) => { const r = document.querySelector(s); r.value = v; r.dispatchEvent(new Event('input', {bubbles: true})); r.dispatchEvent(new Event('change', {bubbles: true})); }", [sel, v])
 
-PREVIEW_INK = """() => { const c = document.getElementById('gPrev'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for(let i = 3; i < d.length; i += 4) if(d[i] > 0) n++; return n; }"""
+# (1.57) graphs have a solid background: count drawn pixels that differ from the most common (background) colour
+PREVIEW_INK = """() => { const c = document.getElementById('gPrev'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  const cnt = new Map(); for(let i = 0; i < d.length; i += 4){ if(!d[i+3]) continue; const k = d[i] + ',' + d[i+1] + ',' + d[i+2]; cnt.set(k, (cnt.get(k) || 0) + 1); }
+  let bg = null, m = 0; for(const [k, v] of cnt) if(v > m){ m = v; bg = k; }
+  let n = 0; for(let i = 0; i < d.length; i += 4){ if(!d[i+3]) continue; if(d[i] + ',' + d[i+1] + ',' + d[i+2] !== bg) n++; } return n; }"""
 
 async def main():
     async with async_playwright() as p:

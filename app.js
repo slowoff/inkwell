@@ -3027,13 +3027,41 @@ async function detectLines(aId){
   const W0 = img.naturalWidth, H0 = img.naturalHeight; if(!W0 || !H0) return null;
   const sc = Math.min(1, 1400 / W0), w = Math.max(1, Math.round(W0 * sc)), h = Math.max(1, Math.round(H0 * sc));
   const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d', {willReadFrequently: true}); ctx.drawImage(img, 0, 0, w, h);
+  const ctx = c.getContext('2d', {willReadFrequently: true});
+  // (1.58.8) averaged scaling: the plain one can skip a thin line almost completely when the page is made smaller
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
   const px = ctx.getImageData(0, 0, w, h).data; c.width = c.height = 1;
   const lum = new Uint8Array(w * h), hist = new Uint32Array(256);
   for(let i = 0; i < w * h; i++){ const l = (px[4 * i] * 77 + px[4 * i + 1] * 150 + px[4 * i + 2] * 29) >> 8; lum[i] = l; hist[l]++; }
   let bg = 0; for(let acc = 0; bg < 255 && (acc += hist[bg]) < w * h / 2; bg++);   // median = paper colour (light or dark)
   const ink = new Uint8Array(w * h); for(let i = 0; i < w * h; i++) ink[i] = Math.abs(lum[i] - bg) > 60 ? 1 : 0;
   const gap = Math.max(2, Math.round(w * 0.004)), minLen = w * 0.1;
+  // (1.58.8) pale answer lines (light grey, 1-2 px): scaling the page down can nearly wipe them out, so the page is
+  // read again in strips at its full height (only made narrower) with a much lower contrast, keeping only long and
+  // almost unbroken rows, which text rows and letters never are; found rows are mapped onto the smaller page
+  const fsegs = [];
+  {
+    const SH = 160, sv = document.createElement('canvas'); sv.width = w; sv.height = SH;
+    const g = sv.getContext('2d', {willReadFrequently: true});
+    const need = Math.max(minLen, w * 0.2);
+    for(let y0 = 0; y0 < H0; y0 += SH){
+      const n = Math.min(SH, H0 - y0);
+      g.fillStyle = '#fff'; g.fillRect(0, 0, w, SH);
+      g.drawImage(img, 0, y0, W0, n, 0, 0, w, n);
+      const d = g.getImageData(0, 0, w, n).data;
+      for(let r = 0; r < n; r++){
+        let fs = -1, fl = -1, fn = 0;
+        const fflush = () => { if(fs >= 0 && fl - fs + 1 >= need && fn / (fl - fs + 1) >= 0.97) fsegs.push({y: Math.min(h - 1, Math.floor((y0 + r) * sc)), x1: fs, x2: fl, f: 1}); };
+        for(let x = 0; x < w; x++){
+          const i = 4 * (r * w + x), l = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+          if(Math.abs(l - bg) > 12){ if(fs < 0 || x - fl > 2){ fflush(); fs = x; fn = 0; } fl = x; fn++; }
+        }
+        fflush();
+      }
+    }
+    sv.width = sv.height = 1;
+  }
   // dotted and dashed lines: a row of short marks with regular gaps
   const maxMark = Math.max(4, w * 0.045), maxGapD = Math.max(6, w * 0.03);
   const segs = [];
@@ -3047,6 +3075,7 @@ async function detectLines(aId){
     }
     if(rs >= 0) runs.push(rs, w - 1);
     flush();
+
     // short marks with small gaps form a chain; letters on the same baseline (e.g. "the 1........") join it too,
     // so the chain is cut wherever the spacing or mark size jumps, and each evenly spaced part is judged alone (1.43)
     const parts = [];
@@ -3082,6 +3111,10 @@ async function detectLines(aId){
       }
     }
   }
+  // pale lines found on the full-height strips: skip rows already found, then keep everything in row order
+  const strong = segs.filter(g => !g.d);
+  for(const f of fsegs) if(!strong.some(g => Math.abs(g.y - f.y) <= 1 && g.x1 <= f.x1 + 2 && g.x2 >= f.x2 - 2)) segs.push(f);
+  segs.sort((a, b) => a.y - b.y);
   // join touching rows into lines; keep only thin ones with clear paper above and below (not text, not filled boxes)
   const bands = [];
   for(const g of segs){
@@ -3563,9 +3596,13 @@ $('tpalette').innerHTML = TEXT_COLORS.map(c => `<button data-tc="${c}" style="--
 $('tcolorPop').addEventListener('pointerdown', e => e.preventDefault());
 $('tcolorPop').addEventListener('click', e => {
   const b = e.target.closest('[data-tc]'); if(!b) return;
-  if(!editing && pfFocus){ closePop('tcolorPop'); PFmt.set({c: b.dataset.tc || ''}); return; }
+  pickTColor(b.dataset.tc || '');
+});
+function pickTColor(tc){
+  if(!editing && pfFocus){ closePop('tcolorPop'); PFmt.set({c: tc}); return; }
   if(!editing) return;
   const el = elMap.get(editing.id);
+  const b = {dataset: {tc}};
   // (1.58.7) the picked colour stays for all writing (also new boxes) until another one is picked (prefs textC)
   prefs.textC = b.dataset.tc || ''; savePrefs(); renderTColor();
   if(!getSelection().isCollapsed) applySentinelColor('color', b.dataset.tc, el);
@@ -3579,7 +3616,30 @@ $('tcolorPop').addEventListener('click', e => {
   }
   closePop('tcolorPop');
   syncEditingHTML(); saveContentSoon();
+}
+// (1.58.9) Custom colour for text: the system colour picker takes the focus, so the text box (or PDF field) and its
+// selection are kept and put back when a colour is chosen
+let tcKeep = null;
+$('tCustom').addEventListener('pointerdown', e => e.stopPropagation());
+$('tcolorPop').querySelector('.custom-color').addEventListener('click', () => {
+  const cur0 = prefs.textC || '';
+  $('tCustom').value = /^#[0-9a-f]{6}$/i.test(cur0) ? cur0 : '#1f4fcf';
+  if(editing){ const el = elMap.get(editing.id); tcKeep = {el, sel: TSize.offsets(el)}; keepEditing = true; }
+  else if(pfFocus) tcKeep = {pf: pfFocus};
 });
+function tcBack(){
+  const k = tcKeep; tcKeep = null; keepEditing = false;
+  if(!k) return false;
+  if(k.pf){ pfFocus = k.pf; if(k.pf.c.isConnected) k.pf.c.focus({preventScroll: true}); return true; }
+  if(editing && k.el && k.el.isConnected){ k.el.focus({preventScroll: true}); TSize.restore(k.el, k.sel); return true; }
+  return false;
+}
+$('tCustom').addEventListener('change', () => {
+  const c = $('tCustom').value.toUpperCase();
+  if(!tcBack()) return;
+  pickTColor(c);
+});
+$('tCustom').addEventListener('blur', () => setTimeout(() => { if(tcKeep && document.activeElement !== $('tCustom')){ tcBack(); } }, 300));
 
 /* (1.54) text size dropdown in the formatting bar. Sizes are world px (17 = the normal size of a text box).
    Selected text gets <span style="font-size:Npx">; with nothing selected the whole box changes size;
@@ -6194,6 +6254,8 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.9', '2026-10-21', ['Custom colour for text: pick any colour in the text colour menu, like for the pen']],
+  ['1.58.8', '2026-10-21', ['Snap text to lines also finds pale grey answer lines on worksheets, and thin lines that got lost when a big page was read']],
   ['1.58.7', '2026-10-21', ['The text colour you pick stays for all your writing, also in new text boxes, until you pick another one', 'The line under the A shows the colour you are writing in']],
   ['1.58.6', '2026-10-21', ['Fix: picking a text colour with nothing selected now colours what you type next']],
   ['1.58.5', '2026-10-21', ['Fix: the version number next to Inkwell at the bottom of Settings is shown again']],

@@ -98,6 +98,22 @@
         <button class="tb" id="pasteBtn" hidden title="Paste: what you copied here, or a picture or text from another app (Ctrl+V)">Paste</button>
         <label class="size" id="sizeWrap" title="Thickness"><span class="size-dot" id="sizeDot"></span><input type="range" id="size" min="1" max="100" aria-label="Thickness"></label>
       </div>
+      <div class="fmt" id="fmtBar" hidden role="toolbar" aria-label="Text formatting">
+        <button class="tb" data-cmd="bold" aria-label="Bold"><b>B</b></button>
+        <button class="tb" data-cmd="italic" aria-label="Italic"><i>I</i></button>
+        <button class="tb" data-cmd="underline" aria-label="Underline"><u>U</u></button>
+        <button class="tb" data-block="h1">H1</button>
+        <button class="tb" data-block="h2">H2</button>
+        <button class="tb" data-block="p">Text</button>
+        <button class="tb tsize-btn" data-act="tsize" aria-label="Text size" title="Text size"><span id="tsizeVal">17</span><svg viewBox="0 0 24 24" class="tsize-chev"><path d="m7 10 5 5 5-5"/></svg></button>
+        <button class="tb" data-act="bullet" aria-label="Bullet list"><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10"/><circle cx="5" cy="6" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="5" cy="18" r="1"/></svg></button>
+        <button class="tb" data-act="check" aria-label="Checklist"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="6" height="6" rx="1.5"/><path d="m4.8 16 1.6 1.6L9.5 14.5M13 7h8M13 16h8"/></svg></button>
+        <button class="tb" data-act="mark" aria-label="Highlight text"><svg viewBox="0 0 24 24"><path d="m9 15 7-7 3 3-7 7H9v-3z"/><path d="M4 21h9"/></svg></button>
+        <button class="tb" data-act="tcolor" aria-label="Text colour"><span class="tcolor-a">A</span></button>
+        <button class="tb" data-act="link" aria-label="Link to page"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Link</span></button>
+        <button class="tb spell-btn" data-act="spell" aria-label="Spelling" title="Spell check: underline misspelled words while typing"><svg viewBox="0 0 24 24"><path d="M3 15 6.5 5 10 15M4.3 11.5h4.4"/><path d="M13 15V5h3a2.5 2.5 0 0 1 0 5h-3 3.5a2.5 2.5 0 0 1 0 5H13z"/><path d="m4 19 2 2 4-4" class="spell-ok"/><path d="M13 20c1-1 2-1 3 0s2 1 3 0 2-1 3 0" class="spell-wave"/></svg></button>
+        <button class="tb" data-act="done">Done</button>
+      </div>
       <span class="spacer"></span>
       <button class="tb" id="rulerBtn" title="Ruler" aria-label="Ruler"><svg viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="8" rx="1.5" transform="rotate(-30 12 12)"/><path d="m7.6 13.6 1-1.7M10.6 11.9l1.5-2.6M13.6 10.1l1-1.7" /></svg></button>
       <button class="toggle" id="fingerBtn" title="When off, fingers scroll and zoom and only the Apple Pencil writes"><span class="sw"></span><span>Finger draws</span></button>
@@ -130,21 +146,6 @@
       <div class="ts" id="tsLayer" hidden>
         <div class="ts-box" id="tsBox"></div>
         <div class="sel-menu ts-menu" id="tsMenu"><span class="ts-n" id="tsN"></span><button class="tb" id="tsCopy">Copy</button><button class="tb" id="tsOpen" title="See the text, copy part of it or put it on the page">Text…</button><button class="tb" id="tsShot" hidden title="Copy the box as a picture, like a screenshot">Copy as picture</button></div>
-      </div>
-      <div class="fmt" id="fmtBar" hidden>
-        <button class="tb" data-cmd="bold" aria-label="Bold"><b>B</b></button>
-        <button class="tb" data-cmd="italic" aria-label="Italic"><i>I</i></button>
-        <button class="tb" data-cmd="underline" aria-label="Underline"><u>U</u></button>
-        <button class="tb" data-block="h1">H1</button>
-        <button class="tb" data-block="h2">H2</button>
-        <button class="tb" data-block="p">Text</button>
-        <button class="tb tsize-btn" data-act="tsize" aria-label="Text size" title="Text size"><span id="tsizeVal">17</span><svg viewBox="0 0 24 24" class="tsize-chev"><path d="m7 10 5 5 5-5"/></svg></button>
-        <button class="tb" data-act="bullet" aria-label="Bullet list"><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10"/><circle cx="5" cy="6" r="1"/><circle cx="5" cy="12" r="1"/><circle cx="5" cy="18" r="1"/></svg></button>
-        <button class="tb" data-act="check" aria-label="Checklist"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="6" height="6" rx="1.5"/><path d="m4.8 16 1.6 1.6L9.5 14.5M13 7h8M13 16h8"/></svg></button>
-        <button class="tb" data-act="mark" aria-label="Highlight text"><svg viewBox="0 0 24 24"><path d="m9 15 7-7 3 3-7 7H9v-3z"/><path d="M4 21h9"/></svg></button>
-        <button class="tb" data-act="tcolor" aria-label="Text colour"><span class="tcolor-a">A</span></button>
-        <button class="tb" data-act="link" aria-label="Link to page"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Link</span></button>
-        <button class="tb" data-act="done">Done</button>
       </div>
       <div class="pg-slider" id="pgSlider" hidden aria-label="Jump to page"><div class="pg-track" id="pgTrack"><div class="pg-ticks" id="pgTicks"></div><div class="pg-thumb" id="pgThumb"></div><div class="pg-label" id="pgLabel"></div></div></div>
       <div class="stage-empty" id="stageEmpty" hidden><div><h3>No page open</h3><p>Pick a page on the left or create a new one.</p></div></div>

@@ -1491,7 +1491,7 @@ function makeField(f, i){
     if(!f.ml) c.type = 'text';
     if(f.mx) c.maxLength = f.mx;
     if(f.al) c.style.textAlign = f.al === 1 ? 'center' : 'right';
-    c.spellcheck = false; c.autocomplete = 'off';
+    c.spellcheck = prefs.spell !== false; c.autocomplete = 'off';
   } else if(f.k === 'cb' || f.k === 'rb'){
     c = document.createElement('input'); c.type = 'checkbox';
   } else {
@@ -3261,8 +3261,8 @@ function startEditing(id, cx, cy, isNew){
   }
   if(!r){ r = document.createRange(); r.selectNodeContents(el); r.collapse(false); }
   s.removeAllRanges(); s.addRange(r);
-  $('fmtBar').hidden = false;
-  TSize.label();
+  Spell.set(el);
+  renderFmt();
   invalidate(0, 0, 1);
 }
 function syncEditingHTML(){
@@ -3275,7 +3275,7 @@ function syncEditingHTML(){
 function finishEditing(){
   if(!editing || !cur) { editing = null; return; }
   const ed = editing; editing = null;
-  $('fmtBar').hidden = true; tHandle.hidden = true; tMove.hidden = true; closePop('tcolorPop'); closePop('tsizePop');
+  renderFmt(); tHandle.hidden = true; tMove.hidden = true; closePop('tcolorPop'); closePop('tsizePop');
   const el = elMap.get(ed.id);
   if(!el) return;
   el.removeAttribute('contenteditable');
@@ -3456,6 +3456,8 @@ fmtBar.addEventListener('click', e => {
     TSize.open(b); return;
   } else if(b.dataset.act === 'link'){
     openLinkPicker(); return;
+  } else if(b.dataset.act === 'spell'){
+    Spell.toggle(el); return;
   } else if(b.dataset.act === 'done'){
     finishEditing(); return;
   }
@@ -3595,6 +3597,38 @@ $('tsizePop').addEventListener('click', e => {
   TSize.apply(+b.dataset.px);
 });
 document.addEventListener('selectionchange', () => { if(editing && !$('fmtBar').hidden) TSize.label(); });
+// (1.55) the formatting bar sits in the tool bar: shown with the Text tool (greyed until a box is being typed in)
+function renderFmt(){
+  const show = prefs.tool === 'text' || !!editing;
+  fmtBar.hidden = !show;
+  fmtBar.classList.toggle('idle', !editing);
+  if(editing) TSize.label(); else $('tsizeVal').textContent = '17';
+  Spell.render();
+  barFade();
+}
+// (1.55) spell check while typing (prefs `spell`, missing = on, per device). Underlines come from the system:
+// on the iPad its keyboard language(s) and Settings → General → Keyboard → Check Spelling decide what is marked
+const Spell = {
+  on(){ return prefs.spell !== false; },
+  set(el){
+    const on = Spell.on();
+    el.spellcheck = on;
+    el.setAttribute('autocorrect', on ? 'on' : 'off');
+  },
+  render(){ const b = fmtBar.querySelector('[data-act="spell"]'); if(b){ b.classList.toggle('on', Spell.on()); b.setAttribute('aria-pressed', Spell.on() ? 'true' : 'false'); } },
+  toggle(el){
+    prefs.spell = !Spell.on(); savePrefs();
+    if(el){
+      Spell.set(el);
+      // re-check the text with the new setting: browsers only redraw the marks after the box is focused again
+      const keep = TSize.offsets(el);
+      el.blur(); el.focus({preventScroll: true});
+      TSize.restore(el, keep);
+    }
+    Spell.render();
+    toast(Spell.on() ? 'Spell check on: misspelled words are underlined while you type' : 'Spell check off');
+  }
+};
 
 /* ---------- formulas ---------- */
 const MATH_KEYS = [
@@ -3673,11 +3707,6 @@ function positionOverlays(){
     const el = elMap.get(editing.id);
     if(el){
       const r = el.getBoundingClientRect(), x = r.left - SR.left, y = r.top - SR.top;
-      const fw = fmtBar.offsetWidth || 420, fh = fmtBar.offsetHeight || 44;
-      let fy = y - fh - 10;
-      if(fy < 6) fy = Math.min(y + r.height + 10, H - fh - 6);
-      fmtBar.style.left = clamp(x, 8, Math.max(8, W - fw - 8)) + 'px';
-      fmtBar.style.top = fy + 'px';
       tHandle.hidden = false;
       tHandle.style.left = (x + r.width - 5) + 'px';
       tHandle.style.top = (y + Math.min(r.height / 2, 40) - 16) + 'px';
@@ -4271,7 +4300,7 @@ function renderOpts(){
     $('colorBtn').classList.toggle('cur', other);
     $('colorBtn').style.setProperty('--c', other ? (c === 'auto' ? 'var(--fg)' : c) : '');
   }
-  barFade();
+  renderFmt();
   if(t === 'pen' || t === 'hl' || t === 'eraser' || t === 'mark'){
     $('size').value = prefs[t].s;
     const d = t === 'pen' ? clamp(2 + penWidth() * 1.4, 2, 22) : t === 'hl' ? clamp(hlWidth() * 0.45, 4, 22) : t === 'mark' ? clamp(markWidth() * 0.45, 4, 22) : clamp(eraserRadius() * 0.8, 4, 24);
@@ -6000,6 +6029,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.55', '2026-10-21', ['The text formatting buttons now sit in the top tool bar when the Text tool is on, instead of floating over the text box', 'Spell check button in the text bar: misspelled words are underlined while you type (on by default)']],
   ['1.54', '2026-10-21', ['Text size dropdown in the text formatting bar: select words to resize them, or pick a size with nothing selected to resize the whole text box']],
   ['1.53.1', '2026-10-20', ['Fix: after copying page text, Copy as picture, or text from a text box, Paste put back an older Inkwell copy instead', 'Fix: Cmd+V on an iPad keyboard pastes']],
   ['1.53', '2026-10-20', ['Select tool: choose Free or Box. Box selects everything in a rectangle and can Copy as picture, like a screenshot of that part', 'Paste from other apps with Ctrl+V or the Paste button: pictures and screenshots become a picture, text a text box']],

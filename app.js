@@ -3391,33 +3391,63 @@ tHandle.addEventListener('pointermove', e => {
 tHandle.addEventListener('pointerup', () => { thDrag = null; saveContentSoon(); });
 
 /* text move grip (1.45): the box keeps being edited while it moves; finishEditing makes it one undo step */
-let tmDrag = null;
-tMove.addEventListener('pointerdown', e => {
-  if(!editing) return;
-  e.preventDefault(); e.stopPropagation();
-  const it = cur.items.get(editing.id);
-  tmDrag = {id: e.pointerId, x: e.clientX, y: e.clientY, x0: it.x, y0: it.y};
+// (1.58.1) Moving a text box by its hand. On the iPad, touch events drive the drag (finger and Pencil both send them):
+// cancelling touchmove stops Scribble (iPadOS handwriting) from taking the Pencil near the focused box, and the
+// move is tracked on the whole document, so it keeps going when the hand moves away from under the finger.
+// Pointer events drive it for the mouse (and as a fallback when no touch events come).
+let tmDrag = null;   // {src: 'touch'|'ptr', id, x, y, x0, y0}
+function tmStart(src, id, cx, cy){
+  if(!editing || !cur) return false;
+  const it = cur.items.get(editing.id); if(!it) return false;
+  tmDrag = {src, id, x: cx, y: cy, x0: it.x, y0: it.y};
   tMove.classList.add('on');
-  try { tMove.setPointerCapture(e.pointerId); } catch {}
-});
-tMove.addEventListener('pointermove', e => {
-  if(!tmDrag || e.pointerId !== tmDrag.id || !editing) return;
-  e.preventDefault();
+  return true;
+}
+function tmTo(cx, cy){
+  if(!tmDrag || !editing || !cur) return;
   const it = cur.items.get(editing.id), el = elMap.get(editing.id);
   if(!it || !el) return;
-  const nit = Object.assign({}, it, {x: tmDrag.x0 + (e.clientX - tmDrag.x) / cam.z, y: tmDrag.y0 + (e.clientY - tmDrag.y) / cam.z});
+  const nit = Object.assign({}, it, {x: tmDrag.x0 + (cx - tmDrag.x) / cam.z, y: tmDrag.y0 + (cy - tmDrag.y) / cam.z});
   cur.items.set(it.id, nit);
   el.style.left = nit.x + 'px'; el.style.top = nit.y + 'px'; frontXf(el);
   invalidate(0, 0, 1);
-});
-const tmEnd = e => {
-  if(!tmDrag || e.pointerId !== tmDrag.id) return;
+}
+function tmStop(){
+  if(!tmDrag) return;
   tmDrag = null; tMove.classList.remove('on'); saveContentSoon();
   if(editing){ const el = elMap.get(editing.id); if(el) el.focus({preventScroll: true}); }
-};
-tMove.addEventListener('pointerup', tmEnd);
-tMove.addEventListener('touchstart', e => e.preventDefault(), {passive: false});   // iPad: keep the keyboard and the box open
-tMove.addEventListener('pointercancel', tmEnd);
+}
+const tmTouch = (e, id) => [...e.changedTouches].find(t => t.identifier === id);
+tMove.addEventListener('touchstart', e => {
+  e.preventDefault(); e.stopPropagation();   // keeps the keyboard and the box open, no mouse/click events afterwards
+  const t = e.changedTouches[0]; if(!t) return;
+  if(tmDrag && tmDrag.src === 'touch') return;
+  if(tmDrag) tmDrag = null;   // the pointer path started first: touch takes over
+  tmStart('touch', t.identifier, t.clientX, t.clientY);
+}, {passive: false});
+document.addEventListener('touchmove', e => {
+  if(!tmDrag || tmDrag.src !== 'touch') return;
+  const t = tmTouch(e, tmDrag.id); if(!t) return;
+  e.preventDefault();   // no Scribble, no scrolling
+  tmTo(t.clientX, t.clientY);
+}, {passive: false, capture: true});
+const tmTouchEnd = e => { if(tmDrag && tmDrag.src === 'touch' && tmTouch(e, tmDrag.id)) tmStop(); };
+document.addEventListener('touchend', tmTouchEnd, true);
+document.addEventListener('touchcancel', tmTouchEnd, true);
+tMove.addEventListener('pointerdown', e => {
+  if(!editing) return;
+  e.preventDefault(); e.stopPropagation();
+  if(tmDrag) return;   // a touch drag is already running
+  if(tmStart('ptr', e.pointerId, e.clientX, e.clientY)){ try { tMove.setPointerCapture(e.pointerId); } catch {} }
+});
+document.addEventListener('pointermove', e => {
+  if(!tmDrag || tmDrag.src !== 'ptr' || e.pointerId !== tmDrag.id) return;
+  e.preventDefault();
+  tmTo(e.clientX, e.clientY);
+}, true);
+const tmEnd = e => { if(tmDrag && tmDrag.src === 'ptr' && e.pointerId === tmDrag.id) tmStop(); };
+document.addEventListener('pointerup', tmEnd, true);
+document.addEventListener('pointercancel', tmEnd, true);
 
 /* formatting bar */
 const fmtBar = $('fmtBar');
@@ -6096,6 +6126,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.1', '2026-10-21', ['Fix: the hand next to a text box moves it on the iPad, with a finger and with the Pencil']],
   ['1.58', '2026-10-21', ['Select a graph and tap Add formula to draw another function on it, in its own colour and line style, with the formula written next to the curve. Works on graphs made from now on']],
   ['1.57', '2026-10-21', ['Graphs get a solid background in the page colour, so their grid no longer mixes with the paper grid (white in light mode, dark in dark mode). Switch it off in the graph window under Look', 'Erasers no longer erase graphs, so you can rub out what you wrote on a graph. To remove a graph, select it with the Select tool and delete it']],
   ['1.56', '2026-10-21', ['The text bar also works in the PDF\'s own fill-in fields: Bold, Italic, Underline, text size and colour for the whole field, plus spell check']],

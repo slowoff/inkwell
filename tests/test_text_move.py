@@ -50,6 +50,31 @@ async def main():
         it2 = await page.evaluate("(() => { const i = [...__inkwell.cur.items.values()].find(i => i.t === 'x'); return [i.x, i.y]; })()")
         cam = await page.evaluate("[__inkwell.cam.ox, __inkwell.cam.oy]")
         check(abs(it2[1] - it1[1] - 100 / z) < 1.5 and abs(it2[0] - it1[0]) < 1, f'finger drag on the hand moves the box, not the page ({it1} -> {it2}, cam {cam})')
+        # 1.58.1: the drag cancels touchmove (stops iPad Scribble from taking the Pencil) and keeps going when the
+        # finger jumps far away from the hand in one step; the box stays open
+        await page.evaluate("() => { window.__tmPrev = []; window.addEventListener('touchmove', e => window.__tmPrev.push(e.defaultPrevented)); }")
+        g3 = await page.evaluate("(() => { const r = document.getElementById('tMove').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()")
+        await cdp.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': g3[0], 'y': g3[1]}]})
+        await cdp.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': g3[0] + 200, 'y': g3[1] - 60}]})
+        await cdp.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': g3[0] + 240, 'y': g3[1] - 70}]})
+        await cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []}); await page.wait_for_timeout(300)
+        it2b = await page.evaluate("(() => { const i = [...__inkwell.cur.items.values()].find(i => i.t === 'x'); return [i.x, i.y]; })()")
+        prev = await page.evaluate("window.__tmPrev")
+        ed2 = await page.evaluate("!!document.querySelector('.it-text[contenteditable=true]') && document.activeElement.classList.contains('it-text')")
+        check(abs(it2b[0] - it2[0] - 240 / z) < 1.5 and abs(it2b[1] - it2[1] + 70 / z) < 1.5, f'a fast drag that leaves the hand still moves the box ({it2} -> {it2b})')
+        check(prev and all(prev), f'touch moves on the hand are cancelled, so Scribble cannot take the Pencil ({prev})')
+        check(ed2, 'box still open with the cursor in it after the touch drag')
+        it2 = it2b
+        # Pencil (pen pointer events, as Chromium sends them for a stylus without touch events)
+        g4 = await page.evaluate("(() => { const r = document.getElementById('tMove').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()")
+        for typ, dx in (('mousePressed', 0), ('mouseMoved', -60), ('mouseMoved', -240), ('mouseReleased', -240)):
+            await cdp.send('Input.dispatchMouseEvent', {'type': typ, 'x': g4[0] + dx, 'y': g4[1], 'button': 'left', 'buttons': 0 if typ == 'mouseReleased' else 1, 'clickCount': 1, 'pointerType': 'pen'})
+        await page.wait_for_timeout(300)
+        it2c = await page.evaluate("(() => { const i = [...__inkwell.cur.items.values()].find(i => i.t === 'x'); return [i.x, i.y]; })()")
+        check(abs(it2c[0] - it2[0] + 240 / z) < 1.5, f'Pencil drag on the hand moves the box ({it2} -> {it2c})')
+        nstroke = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 's').length")
+        check(nstroke == 0, 'the Pencil drag drew nothing')
+        it2 = it2c
         await page.keyboard.press('Escape'); await page.wait_for_timeout(400)
         html = await page.evaluate("[...__inkwell.cur.items.values()].find(i => i.t === 'x').html")
         check('Move me!' in html, f'text kept ({html})')

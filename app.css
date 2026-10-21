@@ -282,6 +282,8 @@ select.pf-ls option:checked{background:#9fbbe8}
 .fmt{display:flex;align-items:center;gap:1px;flex:none}
 .fmt .tb{min-width:36px;height:36px;padding:0 7px}
 .fmt.idle .tb{opacity:.4;pointer-events:none}
+.fmt.field .tb.nofield{opacity:.4;pointer-events:none}
+.fmt.field .tb[data-cmd].on{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}
 .fmt .spell-btn svg{width:22px;height:22px}
 .fmt .spell-btn .spell-ok{display:none}
 .fmt .spell-btn.on{color:var(--accent)}

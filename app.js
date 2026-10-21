@@ -3344,8 +3344,23 @@ function finishEditing(){
   else if(ed.before.html !== html || ed.before.w !== nit.w || ed.before.x !== nit.x || ed.before.y !== nit.y) commit([[ed.id, ed.before]], [[ed.id, nit]]);
   changed();
 }
+let typeColor = null;   // (1.58.6) colour picked with nothing selected, for the text typed next
+function fixTypeColor(el){
+  if(!typeColor || !el) return;
+  let hit = false;
+  el.querySelectorAll('[style],font[color]').forEach(n => {
+    const v = (n.style.color || (n.tagName === 'FONT' ? n.getAttribute('color') : '') || '').replace(/\s/g, '').toLowerCase();
+    if(v !== 'rgb(254,1,253)' && v !== '#fe01fd') return;
+    if(n.tagName === 'FONT') n.removeAttribute('color');
+    n.style.color = typeColor.c || '';
+    if(!n.getAttribute('style')) n.removeAttribute('style');
+    hit = true;
+  });
+  if(hit) typeColor = null;
+}
 worldFront.addEventListener('input', e => {
   if(!editing) return;
+  fixTypeColor(elMap.get(editing.id));
   syncEditingHTML();
   fitCell(editing.id);
   lastLocalEdit = Date.now();
@@ -3551,6 +3566,14 @@ $('tcolorPop').addEventListener('click', e => {
   if(!editing) return;
   const el = elMap.get(editing.id);
   if(!getSelection().isCollapsed) applySentinelColor('color', b.dataset.tc, el);
+  else {
+    // (1.58.6) nothing selected: what is typed next gets the colour (typing style marked with the sentinel colour,
+    // turned into the real colour on the next input)
+    document.execCommand('styleWithCSS', false, true);
+    document.execCommand('foreColor', false, 'rgb(254, 1, 253)');
+    document.execCommand('styleWithCSS', false, false);
+    typeColor = {c: b.dataset.tc};
+  }
   closePop('tcolorPop');
   syncEditingHTML(); saveContentSoon();
 });
@@ -6149,6 +6172,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.6', '2026-10-21', ['Fix: picking a text colour with nothing selected now colours what you type next']],
   ['1.58.5', '2026-10-21', ['Fix: the version number next to Inkwell at the bottom of Settings is shown again']],
   ['1.58.4', '2026-10-21', ['Graph numbers sit centred under their mark on the horizontal axis and level with their mark beside the vertical axis, so it is clear which line each belongs to (graphs inserted from now on)']],
   ['1.58.3', '2026-10-21', ['Fix: imported pages no longer turn blocky when zoomed in past about 300 %. They are redrawn at the new size a moment after you stop zooming']],

@@ -1263,6 +1263,22 @@ new ResizeObserver(resize).observe(stage);
 addEventListener('scroll', () => { SR = stage.getBoundingClientRect(); }, true);
 
 let rafId = 0, need = {bg: 0, ink: 0, over: 0}, frontZ = 1;
+let backZ = 1, backTimer = 0;
+// place an element of the back layer (imported page, picture) at the settled zoom backZ
+function backXf(el, it){
+  const z = backZ;
+  el.style.left = it.x * z + 'px'; el.style.top = it.y * z + 'px';
+  el.style.width = it.w * z + 'px'; el.style.height = it.h * z + 'px';
+  // fill-in fields keep world units inside: their layer is the page's world size, scaled to fit
+  if(el._pf){ el._pf.style.width = it.w + 'px'; el._pf.style.height = it.h + 'px'; el._pf.style.transform = z === 1 ? '' : `scale(${z})`; }
+}
+function settleBack(){
+  backTimer = 0;
+  if(backZ === cam.z) return;
+  backZ = cam.z;
+  if(cur) for(const el of worldBack.children){ const it = el.dataset.id && cur.items.get(el.dataset.id); if(it && it.t === 'i') backXf(el, it); }
+  worldBack.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
+}
 function invalidate(bg = 1, ink = 1, over = 1){
   need.bg |= bg; need.ink |= ink; need.over |= over;
   if(!rafId) rafId = requestAnimationFrame(frame);
@@ -1270,8 +1286,12 @@ function invalidate(bg = 1, ink = 1, over = 1){
 function frame(){
   rafId = 0;
   if(prefs.leftEdge && cur) clampLeft();
-  const t = `translate(${cam.ox}px,${cam.oy}px) scale(${cam.z})`;
-  worldBack.style.transform = t;
+  // (1.58.3) Imported pages and pictures are laid out at the zoom they were last settled at (backZ) and only
+  // stretched by the small difference while a zoom is going on; ~0.15 s after the zoom stops they are laid out at the
+  // new size. Before, the whole layer of pages was stretched by the zoom: iPad Safari keeps such a layer sharp only
+  // up to a memory limit, so around 300 % on a long script it suddenly dropped to a coarse copy.
+  worldBack.style.transform = `translate(${cam.ox}px,${cam.oy}px) scale(${cam.z / backZ})`;
+  if(cam.z !== backZ){ clearTimeout(backTimer); backTimer = setTimeout(settleBack, 150); }
   // Typed text, formulas and tape are scaled one by one instead of as one big layer: iPad Safari
   // rasterises a big scaled layer at 1x and then stretches it, so text went blurry when zoomed in.
   worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
@@ -1446,7 +1466,7 @@ function itemEl(it){
   if(it.t === 'i'){
     el.classList.add('it-img');
     el.classList.toggle('doc', !!it.doc);
-    el.style.width = it.w + 'px'; el.style.height = it.h + 'px';
+    backXf(el, it);
     if(el._a !== it.a){
       // the picture itself is only loaded while it is near the screen (see updateImages)
       if(el._img){ el._img.remove(); el._img = null; }
@@ -1537,6 +1557,7 @@ function syncFields(el, it){
     L.className = 'pf-layer'; L._n = it.f.length;
     it.f.forEach((f, i) => L.appendChild(makeField(f, i)));
     el.appendChild(L);
+    backXf(el, it);
   }
   const ch = L.children;
   for(let i = 0; i < ch.length; i++){
@@ -6126,6 +6147,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.3', '2026-10-21', ['Fix: imported pages no longer turn blocky when zoomed in past about 300 %. They are redrawn at the new size a moment after you stop zooming']],
   ['1.58.2', '2026-10-21', ['Cleaner What\'s new window that fits the iPad screen: the title stays at the top and the list scrolls below it', 'Fix: windows no longer run under the status bar or past the bottom of the screen']],
   ['1.58.1', '2026-10-21', ['Fix: the hand next to a text box moves it on the iPad, with a finger and with the Pencil']],
   ['1.58', '2026-10-21', ['Select a graph and tap Add formula to draw another function on it, in its own colour and line style, with the formula written next to the curve. Works on graphs made from now on']],

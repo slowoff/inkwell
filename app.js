@@ -6142,11 +6142,14 @@ async function appVersion(){
   });
 }
 async function renderVersion(){
-  const v = await appVersion();
+  let v = await appVersion();
+  // (1.58.5) the offline cache may not answer (just updated, or not running yet): use the newest change log entry
+  if(!v){ try { v = CHANGELOG[0][0]; } catch {} }
   $('verInfo').textContent = 'Inkwell' + (v ? ' ' + v.replace(/^inkwell-/, '') : '');
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.5', '2026-10-21', ['Fix: the version number next to Inkwell at the bottom of Settings is shown again']],
   ['1.58.4', '2026-10-21', ['Graph numbers sit centred under their mark on the horizontal axis and level with their mark beside the vertical axis, so it is clear which line each belongs to (graphs inserted from now on)']],
   ['1.58.3', '2026-10-21', ['Fix: imported pages no longer turn blocky when zoomed in past about 300 %. They are redrawn at the new size a moment after you stop zooming']],
   ['1.58.2', '2026-10-21', ['Cleaner What\'s new window that fits the iPad screen: the title stays at the top and the list scrolls below it', 'Fix: windows no longer run under the status bar or past the bottom of the screen']],

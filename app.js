@@ -3636,7 +3636,7 @@ function tcBack(){
 }
 $('tCustom').addEventListener('change', () => {
   const c = $('tCustom').value.toUpperCase();
-  if(!tcBack()) return;
+  if(!tcBack()){ prefs.textC = c; savePrefs(); renderTColor(); return; }   // the box closed meanwhile: keep the colour for the next writing
   pickTColor(c);
 });
 $('tCustom').addEventListener('blur', () => setTimeout(() => { if(tcKeep && document.activeElement !== $('tCustom')){ tcBack(); } }, 300));
@@ -6254,6 +6254,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.10', '2026-10-21', ['Fix: a custom text colour is kept even if the text box closed while the colour picker was open']],
   ['1.58.9', '2026-10-21', ['Custom colour for text: pick any colour in the text colour menu, like for the pen']],
   ['1.58.8', '2026-10-21', ['Snap text to lines also finds pale grey answer lines on worksheets, and thin lines that got lost when a big page was read']],
   ['1.58.7', '2026-10-21', ['The text colour you pick stays for all your writing, also in new text boxes, until you pick another one', 'The line under the A shows the colour you are writing in']],

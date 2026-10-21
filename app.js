@@ -3310,6 +3310,7 @@ function startEditing(id, cx, cy, isNew){
   s.removeAllRanges(); s.addRange(r);
   Spell.set(el);
   renderFmt();
+  stickColor();
   invalidate(0, 0, 1);
 }
 function syncEditingHTML(){
@@ -3565,6 +3566,8 @@ $('tcolorPop').addEventListener('click', e => {
   if(!editing && pfFocus){ closePop('tcolorPop'); PFmt.set({c: b.dataset.tc || ''}); return; }
   if(!editing) return;
   const el = elMap.get(editing.id);
+  // (1.58.7) the picked colour stays for all writing (also new boxes) until another one is picked (prefs textC)
+  prefs.textC = b.dataset.tc || ''; savePrefs(); renderTColor();
   if(!getSelection().isCollapsed) applySentinelColor('color', b.dataset.tc, el);
   else {
     // (1.58.6) nothing selected: what is typed next gets the colour (typing style marked with the sentinel colour,
@@ -3702,9 +3705,28 @@ $('tsizePop').addEventListener('click', e => {
   if(!editing && pfFocus){ PFmt.set({s: +b.dataset.px}); return; }
   TSize.apply(+b.dataset.px);
 });
-document.addEventListener('selectionchange', () => { if(editing && !$('fmtBar').hidden) TSize.label(); });
+document.addEventListener('selectionchange', () => { if(editing && !$('fmtBar').hidden){ TSize.label(); stickColor(); } });
 // (1.55) the formatting bar sits in the tool bar: shown with the Text tool (greyed until a box is being typed in)
+// (1.58.7) the line under A shows the colour that will be written
+function renderTColor(){
+  const a = fmtBar.querySelector('.tcolor-a'); if(a) a.style.setProperty('--tc', prefs.textC || 'var(--fg)');
+}
+const hexRgbStr = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); if(!m) return ''; const n = parseInt(m[1], 16); return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`; };
+// keep writing in the chosen colour: when the cursor sits in text of another colour, the next typed text gets it
+function stickColor(){
+  if(!editing || !prefs.textC) return;
+  const el = elMap.get(editing.id), s = getSelection();
+  if(!el || !s.rangeCount || !s.isCollapsed || !el.contains(s.anchorNode) || document.activeElement !== el) return;
+  let n = s.anchorNode; if(n.nodeType !== 1) n = n.parentNode;
+  const want = hexRgbStr(prefs.textC), now = getComputedStyle(n).color;
+  if(!want || now === want || now === 'rgb(254, 1, 253)') return;
+  document.execCommand('styleWithCSS', false, true);
+  document.execCommand('foreColor', false, 'rgb(254, 1, 253)');
+  document.execCommand('styleWithCSS', false, false);
+  typeColor = {c: prefs.textC};
+}
 function renderFmt(){
+  renderTColor();
   const fld = !editing && !!pfFocus;
   const show = prefs.tool === 'text' || !!editing || fld;
   fmtBar.hidden = !show;
@@ -6172,6 +6194,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.7', '2026-10-21', ['The text colour you pick stays for all your writing, also in new text boxes, until you pick another one', 'The line under the A shows the colour you are writing in']],
   ['1.58.6', '2026-10-21', ['Fix: picking a text colour with nothing selected now colours what you type next']],
   ['1.58.5', '2026-10-21', ['Fix: the version number next to Inkwell at the bottom of Settings is shown again']],
   ['1.58.4', '2026-10-21', ['Graph numbers sit centred under their mark on the horizontal axis and level with their mark beside the vertical axis, so it is clear which line each belongs to (graphs inserted from now on)']],

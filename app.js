@@ -6147,6 +6147,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.4', '2026-10-21', ['Graph numbers sit centred under their mark on the horizontal axis and level with their mark beside the vertical axis, so it is clear which line each belongs to (graphs inserted from now on)']],
   ['1.58.3', '2026-10-21', ['Fix: imported pages no longer turn blocky when zoomed in past about 300 %. They are redrawn at the new size a moment after you stop zooming']],
   ['1.58.2', '2026-10-21', ['Cleaner What\'s new window that fits the iPad screen: the title stays at the top and the list scrolls below it', 'Fix: windows no longer run under the status bar or past the bottom of the screen']],
   ['1.58.1', '2026-10-21', ['Fix: the hand next to a text box moves it on the iPad, with a finger and with the Pencil']],
@@ -6636,6 +6637,24 @@ function dashPolys(V, dash, gap){
   if(on && cur.length > 1) out.push(cur);
   return out;
 }
+// size of a formula item as it is drawn (box incl. its padding), measured once per text and size
+const texBoxes = new Map();
+function texBox(tex, fs){
+  const k = fs + '|' + tex;
+  if(texBoxes.has(k)) return texBoxes.get(k);
+  let r = [String(tex).replace(/\\/g, '').length * fs * 0.55 + 12, fs * 1.25 + 8];
+  try {
+    const el = document.createElement('div');
+    el.className = 'it it-math';
+    el.style.cssText = `position:absolute;left:-9999px;top:0;visibility:hidden;font-size:${fs}px`;
+    katex.render(tex, el, {throwOnError: true, displayMode: true});
+    worldFront.appendChild(el);
+    if(el.offsetWidth) r = [el.offsetWidth, el.offsetHeight];
+    el.remove();
+  } catch(e){}
+  texBoxes.set(k, r);
+  return r;
+}
 function buildGraph(o, gx, gy){
   const L = Object.assign({}, GRAPH_LOOK, o.look || {}), S = L.size > 0 ? L.size : 1;
   const items = [], w = penWidth(), axisC = L.axC || 'auto', id = p => p + newId() + Math.random().toString(36).slice(2, 5);
@@ -6698,17 +6717,25 @@ function buildGraph(o, gx, gy){
   arrow([ax, Y(y0)], ye);
   const every = arr => Math.max(1, Math.ceil(arr.length / Math.max(4, Math.round(12 * S))));
   const ex = every(tx), ey = every(ty);
+  // (1.58.4) numbers measured and centred: under their tick on the x axis, level with it left of the y axis;
+  // a number that would touch one already placed is left out (0 first, then the x axis, then the y axis)
+  const placed = [];
+  const num = (t, x, y) => {
+    const [bw, bh] = texBox(t, 12), g = [x + 6 - 2, y + 4 - 1, x + bw - 6 + 2, y + bh - 4 + 1];   // glyphs (box minus padding) + a little air
+    if(placed.some(q => g[0] < q[2] && g[2] > q[0] && g[1] < q[3] && g[3] > q[1])) return;
+    placed.push(g); formula(t, x, y, 12);
+  };
+  if(o.nums && x0 <= 0 && x1 >= 0 && y0 <= 0 && y1 >= 0){ const [bw] = texBox('0', 12); num('0', ax - 4 - bw, ay + 3); }
   tx.forEach((v, i) => {
     if(Math.abs(X(v) - ax) < 0.5) return;
     stroke([[X(v), ay - 4], [X(v), ay + 4]]);
-    if(o.nums && i % ex === 0){ const t = fmtNum(v); formula(t, X(v) - t.length * 4.3, ay + 7, 12); }
+    if(o.nums && i % ex === 0){ const t = fmtNum(v), [bw] = texBox(t, 12); num(t, X(v) - bw / 2, ay + 3); }
   });
   ty.forEach((v, i) => {
     if(Math.abs(Y(v) - ay) < 0.5) return;
     stroke([[ax - 4, Y(v)], [ax + 4, Y(v)]]);
-    if(o.nums && i % ey === 0){ const t = fmtNum(v); formula(t, ax - 14 - t.length * 8.5, Y(v) - 9, 12); }
+    if(o.nums && i % ey === 0){ const t = fmtNum(v), [bw, bh] = texBox(t, 12); num(t, ax - 4 - bw, Y(v) - bh / 2); }
   });
-  if(o.nums && x0 <= 0 && x1 >= 0 && y0 <= 0 && y1 >= 0) formula('0', ax - 14, ay + 5, 12);
   formula(labelTex(o.lx), xe[0] - 4, ay + 10, 18);
   formula(labelTex(o.ly), ax + 10, ye[1] - 8, 18);
   if(o.fn){

@@ -2726,6 +2726,8 @@ function renderGroupBtns(){
   $('selGroup').hidden = its.length < 2 || oneGroup;
   $('selUngroup').hidden = !its.some(it => it.g);
   $('selMath').hidden = !its.some(it => it.t === 's' && !it.hl) || its.some(it => it.t !== 's');
+  $('selGraph').hidden = !GAdd.find(its);
+  if(!$('selGraph').hidden) $('selMath').hidden = true;
   const noRot = its.length === 1 && its[0].t !== 's';
   $('selRot90').hidden = noRot; $('selRot').hidden = noRot;
 }
@@ -6094,6 +6096,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58', '2026-10-21', ['Select a graph and tap Add formula to draw another function on it, in its own colour and line style, with the formula written next to the curve. Works on graphs made from now on']],
   ['1.57', '2026-10-21', ['Graphs get a solid background in the page colour, so their grid no longer mixes with the paper grid (white in light mode, dark in dark mode). Switch it off in the graph window under Look', 'Erasers no longer erase graphs, so you can rub out what you wrote on a graph. To remove a graph, select it with the Select tool and delete it']],
   ['1.56', '2026-10-21', ['The text bar also works in the PDF\'s own fill-in fields: Bold, Italic, Underline, text size and colour for the whole field, plus spell check']],
   ['1.55', '2026-10-21', ['The text formatting buttons now sit in the top tool bar when the Text tool is on, instead of floating over the text box', 'Spell check button in the text bar: misspelled words are underlined while you type (on by default)']],
@@ -6632,8 +6635,13 @@ function buildGraph(o, gx, gy){
     for(const v of ty) if(Math.abs(Y(v) - ay) > 0.5) stroke([[X(x0), Y(v)], [X(x1), Y(v)]], '#8A97A4', w * 0.45, go);
   }
   const xe = [X(x1) + 22, ay], ye = [ax, Y(y1) - 22];
-  stroke([[X(x0), ay], xe]); arrow([X(x0), ay], xe);
-  stroke([[ax, Y(y0)], ye]); arrow([ax, Y(y0)], ye);
+  // (1.58) the two axis lines remember the graph's ranges (ga), so formulas can be added later (Add formula);
+  // the mapping is read from their current points, so it still fits after the graph is moved, resized or turned
+  const gid = 'gr' + newId(), fw0 = w * (L.fnW > 0 ? L.fnW : 1.15);
+  stroke([[X(x0), ay], xe]); items[items.length - 1].ga = {id: gid, k: 'x', v0: x0, v1: x1, f: GW / (GW + 22), c: clamp(0, y0, y1), w: fw0, len: GW + 22, s: L.fnS || 'solid'};
+  arrow([X(x0), ay], xe);
+  stroke([[ax, Y(y0)], ye]); items[items.length - 1].ga = {id: gid, k: 'y', v0: y0, v1: y1, f: GH / (GH + 22), c: clamp(0, x0, x1)};
+  arrow([ax, Y(y0)], ye);
   const every = arr => Math.max(1, Math.ceil(arr.length / Math.max(4, Math.round(12 * S))));
   const ex = every(tx), ey = every(ty);
   tx.forEach((v, i) => {
@@ -6770,6 +6778,93 @@ $('gInsert').addEventListener('click', () => {
   addItems(items);
   setTool('lasso'); setTimeout(() => selectIds(items.map(it => it.id)), 60);
 });
+
+/* (1.58) Add formula: draw another function on a graph that is selected */
+const GAdd = {
+  g: null,   // {x: x-axis item, y: y-axis item}
+  // a graph in the selection: both axis lines of the same graph
+  find(its){
+    const xs = its.filter(it => it.t === 's' && it.ga && it.ga.k === 'x');
+    for(const xa of xs){ const ya = its.find(it => it.t === 's' && it.ga && it.ga.k === 'y' && it.ga.id === xa.ga.id); if(ya) return {x: xa, y: ya}; }
+    return null;
+  },
+  // world point of data value (xv, yv) on graph g, from the axes' current points
+  map(g){
+    const A = g.x.ga, B = g.y.ga, p = g.x.p, q = g.y.p;
+    const P0 = [p[0], p[1]], ux = [(p[p.length - 3] - p[0]) * A.f, (p[p.length - 2] - p[1]) * A.f];
+    const uy = [(q[q.length - 3] - q[0]) * B.f, (q[q.length - 2] - q[1]) * B.f];
+    return (xv, yv) => { const a = (xv - A.v0) / (A.v1 - A.v0), b = (yv - A.c) / (B.v1 - B.v0); return [P0[0] + ux[0] * a + uy[0] * b, P0[1] + ux[1] * a + uy[1] * b]; };
+  },
+  open(){
+    const its = sel ? sel.ids.map(id => cur.items.get(id)).filter(Boolean) : [];
+    GAdd.g = GAdd.find(its); if(!GAdd.g) return;
+    const L = gLook(), used = new Set([...cur.items.values()].filter(it => it.t === 's' && it.g && it.g === GAdd.g.x.g && it.c !== 'paper').map(it => it.c));
+    const cols = [...new Set(['#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF', ...prefs.penFavs.filter(c => c !== 'auto')])];
+    GAdd.c = cols.find(c => !used.has(c)) || L.fnC || '#1F4FCF';
+    GAdd.s = 'solid';
+    $('gaC').innerHTML = cols.map(c => `<button class="swatch" data-c="${c}" aria-label="Colour ${c}"><span style="--c:${c}"></span></button>`).join('');
+    GAdd.render();
+    $('gaFn').value = ''; $('gaMsg').textContent = '';
+    if(prefs.gaLbl === undefined) prefs.gaLbl = true;
+    $('gaLbl').checked = !!prefs.gaLbl;
+    showModal('gAddDlg');
+    setTimeout(() => $('gaFn').focus(), 60);
+  },
+  render(){
+    $('gaC').querySelectorAll('[data-c]').forEach(b => b.classList.toggle('on', b.dataset.c === GAdd.c));
+    $('gaS').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === GAdd.s));
+  },
+  // the typed function as a formula for the label
+  tex(src){
+    let t = String(src).trim().replace(/^\s*[yf]\s*(\(\s*x\s*\))?\s*=\s*/i, '');
+    t = t.replace(/\*/g, '\\cdot ').replace(/\bsqrt\b/g, '\\sqrt').replace(/\bpi\b/g, '\\pi ').replace(/\b(sin|cos|tan|ln|log|exp)\b/g, '\\$1');
+    t = t.replace(/\\sqrt\s*\(([^()]*)\)/g, '\\sqrt{$1}').replace(/\^\(([^()]*)\)/g, '^{$1}').replace(/\^(-?[\d.]+)/g, '^{$1}');
+    return 'y = ' + t;
+  },
+  add(){
+    const g = GAdd.g; if(!g || !cur) return;
+    // the graph may have changed since the window opened (undo, another device): use the current axes
+    const gx = cur.items.get(g.x.id), gy = cur.items.get(g.y.id);
+    if(!gx || !gy){ hideModal('gAddDlg'); toast('That graph is no longer on the page'); return; }
+    g.x = gx; g.y = gy;
+    let fn;
+    try { fn = parseFn($('gaFn').value); } catch(err){ $('gaMsg').textContent = err.message; return; }
+    if(!fn){ $('gaMsg').textContent = 'Type a function, for example 2x+1'; return; }
+    const A = gx.ga, B = gy.ga, P = GAdd.map(g);
+    const p = gx.p, len = Math.hypot(p[p.length - 3] - p[0], p[p.length - 2] - p[1]), k = A.len > 0 ? len / A.len : 1;
+    const fw = (A.w || penWidth() * 1.15) * k, o = opOf(gx);
+    const N = 600, segs = []; let seg = [], last = null;
+    for(let i = 0; i <= N; i++){
+      const xv = A.v0 + (A.v1 - A.v0) * i / N, yv = fn(xv);
+      if(isFinite(yv) && yv >= B.v0 - (B.v1 - B.v0) * 1e-3 && yv <= B.v1 + (B.v1 - B.v0) * 1e-3){ seg.push(P(xv, clamp(yv, B.v0, B.v1))); last = [xv, clamp(yv, B.v0, B.v1)]; }
+      else { if(seg.length > 1) segs.push(seg); seg = []; }
+    }
+    if(seg.length > 1) segs.push(seg);
+    if(!segs.length){ $('gaMsg').textContent = 'This function never shows inside the graph\'s range (' + fmtNum(A.v0) + ' to ' + fmtNum(A.v1) + ' across, ' + fmtNum(B.v0) + ' to ' + fmtNum(B.v1) + ' up).'; return; }
+    const id = pre => pre + newId() + Math.random().toString(36).slice(2, 5);
+    const items = [];
+    for(const sg of segs){
+      const pieces = GAdd.s === 'dash' ? dashPolys(sg, Math.max(8, fw * 4), Math.max(6, fw * 3)) : GAdd.s === 'dot' ? dashPolys(sg, Math.max(0.6, fw * 0.3), Math.max(5, fw * 2.6)) : [sg];
+      for(const pc of pieces){ const V = pc.length > 2 ? rdp(pc, 0.25) : pc; items.push({t: 's', id: id('s'), c: GAdd.c, w: fw, hl: 0, p: polyPts(V, false)}); }
+    }
+    if($('gaLbl').checked && last){
+      const fs = Math.max(10, 16 * k), at = P(last[0], last[1]);
+      items.push({t: 'm', id: id('m'), x: at[0] + 6 * k, y: at[1] - fs * 1.6, tex: GAdd.tex($('gaFn').value), fs, c: GAdd.c});
+    }
+    for(const it of items){ it.ne = 1; if(gx.g) it.g = gx.g; if(o < 1) it.o = o; }
+    const keep = sel ? sel.ids.slice() : [];
+    hideModal('gAddDlg');
+    addItems(items);
+    setTool('lasso'); setTimeout(() => selectIds(keep.filter(i => cur.items.has(i)).concat(items.map(it => it.id))), 60);
+  }
+};
+$('selGraph').addEventListener('click', () => GAdd.open());
+$('gaC').addEventListener('click', e => { const b = e.target.closest('[data-c]'); if(!b) return; GAdd.c = b.dataset.c; GAdd.render(); });
+$('gaS').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(!b) return; GAdd.s = b.dataset.v; GAdd.render(); });
+$('gaLbl').addEventListener('change', () => { prefs.gaLbl = $('gaLbl').checked; savePrefs(); });
+$('gaAdd').addEventListener('click', () => GAdd.add());
+$('gaFn').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); GAdd.add(); } });
+$('gaFn').addEventListener('input', () => { $('gaMsg').textContent = ''; });
 
 /* =====================================================================
    Word documents: rendered to page images, like a PDF
@@ -9356,6 +9451,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

@@ -131,6 +131,7 @@
         <div class="sel-rect" id="selRect"><span class="sel-handle" id="selHandle"></span><span class="sel-rot" id="selRot" title="Drag to rotate"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></span><span class="sel-ang" id="selAng" hidden></span></div>
         <div class="sel-menu" id="selMenu">
           <div class="sel-colors" id="selColors"></div>
+          <button class="tb" id="selGraph" hidden title="Draw another function on this graph">Add formula</button>
           <button class="tb" id="selMath" hidden title="Claude turns your handwritten formula into a typed one">To formula</button>
           <button class="tb" id="selGroup" hidden>Group</button>
           <button class="tb" id="selUngroup" hidden>Ungroup</button>
@@ -450,6 +451,20 @@
     </div>
     <p class="hint">Inserted as ink and formulas: move or resize it with the lasso, tap a label to edit it. Select it later and tap Fade to make it lighter.</p>
     <div class="dlg-actions"><span></span><button class="btn primary" id="gInsert">Insert</button></div>
+  </div>
+</div>
+
+<div class="modal" id="gAddDlg" hidden>
+  <div class="dlg">
+    <div class="dlg-head"><h3>Add formula to the graph</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <label class="field"><span>Function <em>e.g. 2x+1, 0.5*9.81*x^2, sin(x)</em></span><input type="text" class="text-in" id="gaFn" placeholder="y = …" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"></label>
+    <p class="hint" id="gaMsg"></p>
+    <div class="g-look">
+      <span>Colour</span><div class="g-sw" id="gaC"></div>
+      <span>Line</span><div class="seg" id="gaS"><button data-v="solid">Solid</button><button data-v="dash">Dashed</button><button data-v="dot">Dotted</button></div>
+    </div>
+    <label class="check-row"><input type="checkbox" id="gaLbl"> Write the formula next to the curve</label>
+    <div class="dlg-actions"><span></span><button class="btn primary" id="gaAdd">Add</button></div>
   </div>
 </div>
 

@@ -2040,6 +2040,97 @@ function toolMove(e){
   }
   drawLiveSoon();
 }
+/* (1.60) Highlighter "Stick to text" (prefs.hlSnap, switch #hlSnap next to the highlighter's colours).
+   When on, a finished highlighter stroke is replaced by straight bands that sit exactly on the lines of text it was
+   drawn over, as tall as the text: lines of imported pages (their page text, ptxt: PDFs from 1.52 on know where each
+   line starts and ends; older imports and scans count as full-width rows) and lines of typed text boxes (measured on
+   screen). Left and right the band follows where the highlighter went, cut to the line. A stroke drawn down across
+   several lines marks each of them. With no text under it, a mostly level stroke becomes one straight band at its
+   height; anything else (a circle, a tick) stays as drawn. The result is ordinary highlighter strokes (no new data). */
+const HLS = {
+  lines(b){
+    const out = [];
+    for(const it of cur.items.values()){
+      if(it.t === 'i' && it.a){
+        if(it.x > b[2] || it.x + it.w < b[0] || it.y > b[3] || it.y + it.h < b[1]) continue;
+        const d = ptxtOf(it.a); if(!d || !Array.isArray(d.l)) continue;
+        const L = d.l.filter(l => l && l[0] >= 0 && typeof l[1] === 'string').slice().sort((p, q) => p[0] - q[0]);
+        const gaps = []; for(let i = 1; i < L.length; i++){ const g = L[i][0] - L[i-1][0]; if(g > 0.004) gaps.push(g); }
+        gaps.sort((p, q) => p - q);
+        const gap0 = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0.02;
+        for(let i = 0; i < L.length; i++){
+          const l = L[i], hasX = l.length >= 4 && l[3] > l[2];
+          const hf = l[4] > 0 ? l[4] : Math.min(gap0, i + 1 < L.length && L[i+1][0] > l[0] ? L[i+1][0] - l[0] : gap0) * 0.8;
+          out.push([it.x + (hasX ? l[2] : 0) * it.w, it.y + l[0] * it.h, it.x + (hasX ? l[3] : 1) * it.w, it.y + (l[0] + hf) * it.h]);
+        }
+      } else if(it.t === 'x'){
+        const el = elMap.get(it.id); if(!el) continue;
+        const q = itemBox(it); if(q[0] > b[2] || q[2] < b[0] || q[1] > b[3] || q[3] < b[1]) continue;
+        out.push(...this.boxLines(el));
+      }
+    }
+    return out;
+  },
+  // rows of a typed text box in world units, from the on-screen rectangles of its text
+  boxLines(el){
+    const sr = stage.getBoundingClientRect(), rows = [];
+    const toW = (x, y) => [(x - sr.left - cam.ox) / cam.z, (y - sr.top - cam.oy) / cam.z];
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const rg = document.createRange();
+    for(let n = walk.nextNode(); n; n = walk.nextNode()){
+      if(!n.nodeValue.trim()) continue;
+      rg.selectNodeContents(n);
+      for(const r of rg.getClientRects()){
+        if(r.width < 1 || r.height < 1) continue;
+        const [x0, y0] = toW(r.left, r.top), [x1, y1] = toW(r.right, r.bottom);
+        const row = rows.find(w => Math.min(w[3], y1) - Math.max(w[1], y0) > 0.5 * Math.min(w[3] - w[1], y1 - y0));
+        if(row){ row[0] = Math.min(row[0], x0); row[1] = Math.min(row[1], y0); row[2] = Math.max(row[2], x1); row[3] = Math.max(row[3], y1); }
+        else rows.push([x0, y0, x1, y1]);
+      }
+    }
+    return rows;
+  },
+  band(x0, x1, y0, y1){
+    const h = y1 - y0, r = h / 2, cy = (y0 + y1) / 2;
+    let a = x0 + r * 0.5, e = x1 - r * 0.5;
+    if(e < a){ a = e = (x0 + x1) / 2; }
+    const p = [];
+    for(let k = 0; k < 4; k++) p.push(a + (e - a) * k / 3, cy, 0.5);
+    return {w: h, p};
+  },
+  snap(pts, w){
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    const ys = [];
+    for(let i = 0; i < pts.length; i += 3){ bx0 = Math.min(bx0, pts[i]); bx1 = Math.max(bx1, pts[i]); by0 = Math.min(by0, pts[i+1]); by1 = Math.max(by1, pts[i+1]); ys.push(pts[i+1]); }
+    ys.sort((p, q) => p - q);
+    const ym = ys[Math.floor(ys.length / 2)];
+    const r = w / 2;
+    const all = this.lines([bx0 - r, by0 - r, bx1 + r, by1 + r]).filter(l => Math.min(l[2], bx1) - Math.max(l[0], bx0) > 1);
+    let pick = [];
+    if(all.length){
+      const hs = all.map(l => l[3] - l[1]).sort((p, q) => p - q), h = hs[Math.floor(hs.length / 2)];
+      if(by1 - by0 < h * 0.9){
+        // one swipe along a line: the line whose band holds the stroke's middle height (or is nearest to it)
+        let best = null, bd = Infinity;
+        for(const l of all){
+          const lh = l[3] - l[1], d = ym < l[1] ? l[1] - ym : ym > l[3] ? ym - l[3] : 0;
+          const dc = Math.abs((l[1] + l[3]) / 2 - ym);
+          if(d > Math.max(lh * 0.6, r)) continue;
+          if(d * 1000 + dc < bd){ bd = d * 1000 + dc; best = l; }
+        }
+        if(best) pick = [best];
+      } else {
+        pick = all.filter(l => { const c = (l[1] + l[3]) / 2; return c >= by0 - (l[3] - l[1]) * 0.25 && c <= by1 + (l[3] - l[1]) * 0.25; });
+      }
+    }
+    if(pick.length){
+      return pick.sort((p, q) => p[1] - q[1]).map(l => this.band(Math.max(l[0], bx0), Math.min(l[2], bx1), l[1], l[3]));
+    }
+    // no text under it: a mostly level stroke becomes one straight band at its height
+    if(bx1 - bx0 > 2 * (by1 - by0) && bx1 - bx0 > w){ const b = this.band(bx0 - r, bx1 + r, ym - r, ym + r); return [b]; }
+    return [];
+  }
+};
 function endTool(e){
   const a = act; act = null;
   clearTimeout(a.hold); clearTimeout(a.wheelT);
@@ -2050,6 +2141,11 @@ function endTool(e){
     const it = {t: 's', id: 's' + newId(), c: a.c, w: a.w, hl: a.hl, p: a.pts};
     if(a.mk){ it.mk = 1; it.at = Date.now(); }
     const handwriting = a.tool === 'pen' && !a.snapped && !a.hl && !a.mk && !a.edge;
+    // (1.60) highlighter "Stick to text": the stroke becomes straight bands on the text lines under it
+    if(a.tool === 'hl' && prefs.hlSnap && !a.snapped && !a.edge){
+      const list = HLS.snap(a.pts, a.w).map(b => Object.assign({}, it, {id: 's' + newId(), w: b.w, p: b.p}));
+      if(list.length){ addItems(list); return; }
+    }
     addItems([it]);
     if(handwriting) WA.stroke(it);   // reference line: notes which line is being written (never moves ink)
     if(handwriting) Scribe.add(it);
@@ -4588,6 +4684,7 @@ function renderOpts(){
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   $('assistBtn').hidden = t !== 'pen';
+  $('hlSnap').hidden = t !== 'hl'; $('hlSnap').classList.toggle('on', !!prefs.hlSnap);
   $('assistBtn').classList.toggle('on', !!(prefs.refLine || prefs.autoText));
   if(t === 'eraser') $('eraseMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.eraser.mode === 'area' ? 'area' : 'stroke')));
   if(ink){
@@ -4616,6 +4713,10 @@ if(window.ResizeObserver) new ResizeObserver(barFade).observe($('toolbar'));
 // iOS only shows :active (pressed) styles when the page listens for touches
 document.addEventListener('touchstart', () => {}, {passive: true});
 $('lassoMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.lassoMode = b.dataset.m; savePrefs(); renderOpts(); });
+$('hlSnap').addEventListener('click', () => {
+  prefs.hlSnap = !prefs.hlSnap; savePrefs(); renderOpts();
+  toast(prefs.hlSnap ? 'Stick to text is on: highlights snap onto the line of text under them' : 'Stick to text is off: the highlighter draws freely');
+});
 $('eraseMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.eraser.mode = b.dataset.m; savePrefs(); renderOpts(); });
 document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if(b) setTool(b.dataset.tool); });
 $('size').addEventListener('input', () => { const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
@@ -6370,6 +6471,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.60', '2026-10-22', ['Highlighter: new "Stick to text" switch. Highlights snap onto the line of text under them (imported pages and typed text), straight and as tall as the text; drawn down across lines, each line gets marked', 'Without text under it, a level highlight becomes one straight band']],
   ['1.59.3', '2026-10-22', ['Fix: typed text and formulas no longer shift and fall apart when zooming (1.59.2 change undone)']],
   ['1.59.2', '2026-10-22', ['Fix: typed text, formulas and Claude answers stay sharp when zoomed in with the pen tool (they went blurry on the iPad)']],
   ['1.59.1', '2026-10-22', ['Fix: strokes no longer disappear a moment after writing when the same page is open on another device (the two devices kept sending the page back and forth, and an older copy could overwrite the newest strokes)']],
@@ -9783,6 +9885,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {HLS, invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

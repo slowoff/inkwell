@@ -2048,11 +2048,16 @@ function toolMove(e){
    several lines marks each of them. With no text under it, a mostly level stroke becomes one straight band at its
    height; anything else (a circle, a tick) stays as drawn. The result is ordinary highlighter strokes (no new data). */
 const HLS = {
-  lines(b){
+  // lines of text near the stroke: {b: [x0, y0, x1, y1] world, segs: [[x0, x1], ...] words (pictures only) or null}
+  lines(b, ym){
     const out = [];
     for(const it of cur.items.values()){
       if(it.t === 'i' && it.a){
         if(it.x > b[2] || it.x + it.w < b[0] || it.y > b[3] || it.y + it.h < b[1]) continue;
+        // (1.60.1) measure the letters in the page picture itself; the read-out page text only knows roughly where
+        // a line is (Claude-read pages and older imports have no line ends and only a guessed height)
+        const px = this.picLines(it, b);
+        if(px){ out.push(...px); continue; }
         const d = ptxtOf(it.a); if(!d || !Array.isArray(d.l)) continue;
         const L = d.l.filter(l => l && l[0] >= 0 && typeof l[1] === 'string').slice().sort((p, q) => p[0] - q[0]);
         const gaps = []; for(let i = 1; i < L.length; i++){ const g = L[i][0] - L[i-1][0]; if(g > 0.004) gaps.push(g); }
@@ -2061,13 +2066,89 @@ const HLS = {
         for(let i = 0; i < L.length; i++){
           const l = L[i], hasX = l.length >= 4 && l[3] > l[2];
           const hf = l[4] > 0 ? l[4] : Math.min(gap0, i + 1 < L.length && L[i+1][0] > l[0] ? L[i+1][0] - l[0] : gap0) * 0.8;
-          out.push([it.x + (hasX ? l[2] : 0) * it.w, it.y + l[0] * it.h, it.x + (hasX ? l[3] : 1) * it.w, it.y + (l[0] + hf) * it.h]);
+          out.push({b: [it.x + (hasX ? l[2] : 0) * it.w, it.y + l[0] * it.h, it.x + (hasX ? l[3] : 1) * it.w, it.y + (l[0] + hf) * it.h], segs: null});
         }
       } else if(it.t === 'x'){
         const el = elMap.get(it.id); if(!el) continue;
         const q = itemBox(it); if(q[0] > b[2] || q[2] < b[0] || q[1] > b[3] || q[3] < b[1]) continue;
-        out.push(...this.boxLines(el));
+        for(const r of this.boxLines(el)) out.push({b: r, segs: null});
       }
+    }
+    return out;
+  },
+  // (1.60.1) text rows and words of a page picture inside box b (world), found from its dark pixels.
+  // null when the picture is not loaded (then the page text is used).
+  picLines(it, b){
+    const el = elMap.get(it.id), img = el && el._img;
+    if(!img || !img.complete || !img.naturalWidth) return null;
+    const X0 = clamp(b[0], it.x, it.x + it.w), X1 = clamp(b[2], it.x, it.x + it.w);
+    const Y0 = clamp(b[1], it.y, it.y + it.h), Y1 = clamp(b[3], it.y, it.y + it.h);
+    if(X1 - X0 < 2 || Y1 - Y0 < 2) return [];
+    const k = img.naturalWidth / it.w, kh = img.naturalHeight / it.h;
+    const s = Math.min(3, k, 1400 / (X1 - X0), 1400 / (Y1 - Y0));   // canvas pixels per world unit
+    const cw = Math.max(1, Math.round((X1 - X0) * s)), ch = Math.max(1, Math.round((Y1 - Y0) * s));
+    const cv = this.cv || (this.cv = document.createElement('canvas'));
+    cv.width = cw; cv.height = ch;
+    const ctx = cv.getContext('2d', {willReadFrequently: true});
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cw, ch);
+    let data;
+    try {
+      ctx.drawImage(img, (X0 - it.x) * k, (Y0 - it.y) * kh, (X1 - X0) * k, (Y1 - Y0) * kh, 0, 0, cw, ch);
+      data = ctx.getImageData(0, 0, cw, ch).data;
+    } catch(e){ return null; }
+    finally { cv.width = cv.height = 1; }
+    // ink = clearly darker than the paper (paper = a bright percentile, so grey scans work too)
+    const lum = new Uint8Array(cw * ch);
+    for(let i = 0, j = 0; j < lum.length; i += 4, j++) lum[j] = (data[i] * 299 + data[i+1] * 587 + data[i+2] * 114) / 1000;
+    const hist = new Uint32Array(256); for(let j = 0; j < lum.length; j += 7) hist[lum[j]]++;
+    let tot = 0, cnt = 0; for(const v of hist) tot += v;
+    let bg = 255; for(let v = 255; v >= 0; v--){ cnt += hist[v]; if(cnt >= tot * 0.3){ bg = v; break; } }
+    const thr = bg - Math.max(45, bg * 0.25);
+    const rows = new Uint32Array(ch);
+    for(let y = 0; y < ch; y++){ let n = 0; const o = y * cw; for(let x = 0; x < cw; x++) if(lum[o + x] < thr) n++; rows[y] = n; }
+    const minRow = Math.max(1, cw * 0.002);
+    let groups = [];
+    for(let y = 0; y < ch; y++){
+      if(rows[y] < minRow) continue;
+      const g = groups[groups.length - 1];
+      if(g && y - g[1] <= 1) g[1] = y; else groups.push([y, y]);
+    }
+    if(!groups.length) return [];
+    // dots, accents and umlaut points join the row of letters next to them
+    const hs = groups.map(g => g[1] - g[0] + 1).sort((p, q) => p - q), hMed = hs[Math.floor(hs.length * 0.75)] || 1;
+    let changed = true;
+    while(changed){
+      changed = false;
+      for(let i = 0; i < groups.length; i++){
+        const g = groups[i], gh = g[1] - g[0] + 1;
+        if(gh >= hMed * 0.45) continue;
+        const up = groups[i-1], dn = groups[i+1];
+        const du = up ? g[0] - up[1] : Infinity, dd = dn ? dn[0] - g[1] : Infinity;
+        const tgt = du <= dd ? up : dn, gap = Math.min(du, dd);
+        if(!tgt || gap > Math.max(2, (tgt[1] - tgt[0] + 1) * 0.5)) continue;
+        tgt[0] = Math.min(tgt[0], g[0]); tgt[1] = Math.max(tgt[1], g[1]);
+        groups.splice(i, 1); changed = true; break;
+      }
+    }
+    const out = [];
+    for(const g of groups){
+      const gh = g[1] - g[0] + 1;
+      if(gh < 3) continue;
+      // words: runs of ink columns, split where the gap is wider than a letter gap
+      const col = new Uint8Array(cw);
+      for(let y = g[0]; y <= g[1]; y++){ const o = y * cw; for(let x = 0; x < cw; x++) if(lum[o + x] < thr) col[x] = 1; }
+      const wgap = Math.max(2, gh * 0.2), segs = [];
+      let st = -1, last = -1;
+      for(let x = 0; x < cw; x++){
+        if(!col[x]) continue;
+        if(st < 0){ st = x; } else if(x - last > wgap){ segs.push([st, last]); st = x; }
+        last = x;
+      }
+      if(st >= 0) segs.push([st, last]);
+      if(!segs.length) continue;
+      const wx = c => X0 + c / s, wy = r => Y0 + r / s;
+      out.push({b: [wx(segs[0][0]), wy(g[0]), wx(segs[segs.length - 1][1] + 1), wy(g[1] + 1)], segs: segs.map(q => [wx(q[0]), wx(q[1] + 1)]),
+        cut: g[0] === 0 || g[1] === ch - 1});
     }
     return out;
   },
@@ -2090,13 +2171,22 @@ const HLS = {
     }
     return rows;
   },
+  // a straight band from x0 to x1 covering y0..y1 (round ends kept inside)
   band(x0, x1, y0, y1){
     const h = y1 - y0, r = h / 2, cy = (y0 + y1) / 2;
-    let a = x0 + r * 0.5, e = x1 - r * 0.5;
+    let a = x0 + r * 0.6, e = x1 - r * 0.6;
     if(e < a){ a = e = (x0 + x1) / 2; }
     const p = [];
     for(let k = 0; k < 4; k++) p.push(a + (e - a) * k / 3, cy, 0.5);
     return {w: h, p};
+  },
+  // where the band goes left to right on one line: whole words the stroke touched, or the stroke cut to the line
+  span(l, bx0, bx1){
+    if(!l.segs) return [Math.max(l.b[0], bx0), Math.min(l.b[2], bx1)];
+    const h = l.b[3] - l.b[1], tol = Math.min(h * 0.15, 4);
+    const hit = l.segs.filter(q => Math.min(q[1], bx1) - Math.max(q[0], bx0) > tol);
+    if(!hit.length) return null;
+    return [hit[0][0], hit[hit.length - 1][1]];
   },
   snap(pts, w){
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
@@ -2105,29 +2195,41 @@ const HLS = {
     ys.sort((p, q) => p - q);
     const ym = ys[Math.floor(ys.length / 2)];
     const r = w / 2;
-    const all = this.lines([bx0 - r, by0 - r, bx1 + r, by1 + r]).filter(l => Math.min(l[2], bx1) - Math.max(l[0], bx0) > 1);
+    // look around the stroke; a bigger area if a line of text runs past its edge (big headings)
+    let all = [];
+    for(let R = Math.max(3 * w, 50), k = 0; k < 4; k++, R *= 2){
+      all = this.lines([bx0 - R, Math.min(by0, ym) - R, bx1 + R, Math.max(by1, ym) + R], ym)
+        .filter(l => Math.min(l.b[2], bx1) - Math.max(l.b[0], bx0) > 1);
+      if(!all.some(l => l.cut && l.b[1] - 2 <= ym && l.b[3] + 2 >= ym)) break;
+    }
+    all = all.filter(l => !l.cut || (l.b[1] <= ym && l.b[3] >= ym));
     let pick = [];
     if(all.length){
-      const hs = all.map(l => l[3] - l[1]).sort((p, q) => p - q), h = hs[Math.floor(hs.length / 2)];
+      const near = all.filter(l => l.b[1] - Math.max(r, 2) <= by1 && l.b[3] + Math.max(r, 2) >= by0);
+      const hs = (near.length ? near : all).map(l => l.b[3] - l.b[1]).sort((p, q) => p - q), h = hs[Math.floor(hs.length / 2)];
       if(by1 - by0 < h * 0.9){
-        // one swipe along a line: the line whose band holds the stroke's middle height (or is nearest to it)
+        // one swipe along a line: the line holding the stroke's middle height (or the nearest one)
         let best = null, bd = Infinity;
         for(const l of all){
-          const lh = l[3] - l[1], d = ym < l[1] ? l[1] - ym : ym > l[3] ? ym - l[3] : 0;
-          const dc = Math.abs((l[1] + l[3]) / 2 - ym);
+          const lh = l.b[3] - l.b[1], d = ym < l.b[1] ? l.b[1] - ym : ym > l.b[3] ? ym - l.b[3] : 0;
+          const dc = Math.abs((l.b[1] + l.b[3]) / 2 - ym);
           if(d > Math.max(lh * 0.6, r)) continue;
           if(d * 1000 + dc < bd){ bd = d * 1000 + dc; best = l; }
         }
         if(best) pick = [best];
       } else {
-        pick = all.filter(l => { const c = (l[1] + l[3]) / 2; return c >= by0 - (l[3] - l[1]) * 0.25 && c <= by1 + (l[3] - l[1]) * 0.25; });
+        pick = all.filter(l => { const c = (l.b[1] + l.b[3]) / 2; return c >= by0 - (l.b[3] - l.b[1]) * 0.25 && c <= by1 + (l.b[3] - l.b[1]) * 0.25; });
       }
     }
-    if(pick.length){
-      return pick.sort((p, q) => p[1] - q[1]).map(l => this.band(Math.max(l[0], bx0), Math.min(l[2], bx1), l[1], l[3]));
+    const res = [];
+    for(const l of pick.sort((p, q) => p.b[1] - q.b[1])){
+      const sp = this.span(l, bx0, bx1); if(!sp || sp[1] - sp[0] < 1) continue;
+      const h = l.b[3] - l.b[1], pad = l.segs ? h * 0.08 : 0;
+      res.push(this.band(sp[0] - pad, sp[1] + pad, l.b[1] - pad, l.b[3] + pad));
     }
+    if(res.length) return res;
     // no text under it: a mostly level stroke becomes one straight band at its height
-    if(bx1 - bx0 > 2 * (by1 - by0) && bx1 - bx0 > w){ const b = this.band(bx0 - r, bx1 + r, ym - r, ym + r); return [b]; }
+    if(bx1 - bx0 > 2 * (by1 - by0) && bx1 - bx0 > w) return [this.band(bx0 - r, bx1 + r, ym - r, ym + r)];
     return [];
   }
 };
@@ -6471,6 +6573,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.60.1', '2026-10-22', ['Stick to text: highlights now fit the letters on imported pages (measured on the page itself), sit centred on the line and cover whole words, also on big headings']],
   ['1.60', '2026-10-22', ['Highlighter: new "Stick to text" switch. Highlights snap onto the line of text under them (imported pages and typed text), straight and as tall as the text; drawn down across lines, each line gets marked', 'Without text under it, a level highlight becomes one straight band']],
   ['1.59.3', '2026-10-22', ['Fix: typed text and formulas no longer shift and fall apart when zooming (1.59.2 change undone)']],
   ['1.59.2', '2026-10-22', ['Fix: typed text, formulas and Claude answers stay sharp when zoomed in with the pen tool (they went blurry on the iPad)']],

@@ -3310,6 +3310,26 @@ function baselineOf(F, lh){
 
 /* ---------- text boxes ---------- */
 let editing = null, keepEditing = false;
+// A text box that sits in the table cell or on the answer line at world point (wx, wy), or null (Snap text to lines)
+function snapBoxAt(wx, wy, pf, id){
+  if(!prefs.snapLines) return null;
+  const cell = snapCellAt(wx, wy);
+  const sn = !cell ? snapLineAt(wx, wy) : null;
+  if(cell){
+    // inside a table cell: one line filling the cell, text shrinks to fit as it is typed (fitCell)
+    const ch = Math.round((cell.y2 - cell.y1 - 2) * 100) / 100, F = clamp(pf ? Math.min(pf, ch * 0.62) : ch * 0.62, 6, 28);
+    return {t: 'x', id, x: cell.x1 - 3, y: cell.y1 - 1, w: Math.max(30, cell.x2 - cell.x1 + 6), fs: F / 17, fs0: F / 17, lh: ch, ch, html: ''};
+  }
+  if(sn){
+    // sit on the answer line; every further line of text lands on the next ruled line
+    const F = sn.f ? clamp(sn.f, 6, 60) : clamp(sn.d * 0.55, 8, 40);
+    const lh = Math.round((sn.rep ? sn.d : Math.max(sn.d, F * 1.35)) * 100) / 100;
+    // on a ruled line the letters sit just above it; on a dotted line they stand on the dots, like the printed words
+    const base = sn.yb ? sn.yb : sn.y - 2 - F * 0.2;
+    return {t: 'x', id, x: sn.x1 - 6 + (sn.yb ? F * 0.3 : 0), y: base - baselineOf(F, lh), w: Math.max(60, sn.x2 - sn.x1 + 12), fs: F / 17, lh, html: ''};
+  }
+  return null;
+}
 function placeAt(a){
   const id = hitItem(a.sx, a.sy, a.target), it = id && cur.items.get(id);
   if(a.tool === 'text'){
@@ -3319,20 +3339,8 @@ function placeAt(a){
     const pf = prefs.snapLines ? pageTextAt(a.w0[0], a.w0[1]) : 0;
     const fs = pf ? clamp(pf / 17, 0.25, 6) : clamp(1 / cam.z, 0.25, 6);
     let nt = {t: 'x', id: 'x' + newId(), x: a.w0[0] - 4 * fs, y: a.w0[1] - 16 * fs, w: clamp((W - a.sx - 16) / cam.z, 160 * fs, 460 * fs), fs, html: ''};
-    const cell = prefs.snapLines ? snapCellAt(a.w0[0], a.w0[1]) : null;
-    const sn = !cell && prefs.snapLines ? snapLineAt(a.w0[0], a.w0[1]) : null;
-    if(cell){
-      // inside a table cell: one line filling the cell, text shrinks to fit as it is typed (fitCell)
-      const ch = Math.round((cell.y2 - cell.y1 - 2) * 100) / 100, F = clamp(pf ? Math.min(pf, ch * 0.62) : ch * 0.62, 6, 28);
-      nt = {t: 'x', id: nt.id, x: cell.x1 - 3, y: cell.y1 - 1, w: Math.max(30, cell.x2 - cell.x1 + 6), fs: F / 17, fs0: F / 17, lh: ch, ch, html: ''};
-    } else if(sn){
-      // sit on the answer line; every further line of text lands on the next ruled line
-      const F = sn.f ? clamp(sn.f, 6, 60) : clamp(sn.d * 0.55, 8, 40);
-      const lh = Math.round((sn.rep ? sn.d : Math.max(sn.d, F * 1.35)) * 100) / 100;
-      // on a ruled line the letters sit just above it; on a dotted line they stand on the dots, like the printed words
-      const base = sn.yb ? sn.yb : sn.y - 2 - F * 0.2;
-      nt = {t: 'x', id: nt.id, x: sn.x1 - 6 + (sn.yb ? F * 0.3 : 0), y: base - baselineOf(F, lh), w: Math.max(60, sn.x2 - sn.x1 + 12), fs: F / 17, lh, html: ''};
-    }
+    const snapped = snapBoxAt(a.w0[0], a.w0[1], pf, nt.id);
+    if(snapped) nt = snapped;
     cur.items.set(nt.id, nt); cur.lastId = nt.id;
     itemEl(nt); refreshPaper();
     startEditing(nt.id, null, null, true);
@@ -6272,6 +6280,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.58.12', '2026-10-22', ['Write to text makes the same text box as typing there: with Snap text to lines on, the words sit on the answer line or in the table cell at the printed text size']],
   ['1.58.11', '2026-10-21', ['Fix: the empty strip at the bottom of the screen is gone, the page now reaches the bottom edge (iPad Home Screen app)']],
   ['1.58.10', '2026-10-21', ['Fix: a custom text colour is kept even if the text box closed while the colour picker was open']],
   ['1.58.9', '2026-10-21', ['Custom colour for text: pick any colour in the text colour menu, like for the pen']],
@@ -8361,7 +8370,23 @@ const Scribe = {
     } else {
       const w = Math.max(40, this.measure(lines, px) + 16);
       const hh = n * px * 1.55 + 4;
-      out = {t: 'x', id: 'x' + newId(), x: b[0] - 6, y: (b[1] + b[3]) / 2 - hh / 2, w, fs: Math.round(px / 17 * 1000) / 1000, html: cleanHTML(lines.map(l => '<p>' + wrap(l) + '</p>').join(''))};
+      const html = cleanHTML(lines.map(l => '<p>' + wrap(l) + '</p>').join(''));
+      out = {t: 'x', id: 'x' + newId(), x: b[0] - 6, y: (b[1] + b[3]) / 2 - hh / 2, w, fs: Math.round(px / 17 * 1000) / 1000, html};
+      // (1.58.12) with Snap text to lines on, the text becomes the same box as one typed there: in the table cell or on
+      // the answer line the ink was written on (handwriting sits just above the line, so its lower part is used)
+      const pf = prefs.snapLines ? pageTextAt(b[0] + 2, (b[1] + b[3]) / 2) : 0;
+      const at = [[b[0] + 4, b[1] + (b[3] - b[1]) * 0.75], [b[0] + 4, (b[1] + b[3]) / 2], [b[0] + 4, b[3]]];
+      let sb = null;
+      for(const [x, y] of at){ sb = snapBoxAt(x, y, pf, out.id); if(sb) break; }
+      if(sb){
+        // a box that starts left of the ink keeps its line start; the text keeps the ink colour
+        out = Object.assign(sb, {html});
+        if(!sb.ch) out.w = Math.max(sb.w, this.measure(lines, 17 * sb.fs) + 16);
+      } else if(pf){
+        // on an imported page without a line: the page's printed text size, like a typed box
+        const fs = clamp(pf / 17, 0.25, 6), w2 = Math.max(40, this.measure(lines, pf) + 16), h2 = n * pf * 1.55 + 4;
+        out = Object.assign(out, {fs: Math.round(fs * 1000) / 1000, w: w2, y: (b[1] + b[3]) / 2 - h2 / 2});
+      }
       if(g) out.g = g;
       apply(gone.concat([[out.id, out]]), back.concat([[out.id, null]]));
     }

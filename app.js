@@ -407,6 +407,9 @@ const Sync = {
         if(now && now.updated === d.updated){
           now.dirty = 0; await IDB.put('docs', now);
           const m = docs.get(d.id); if(m && m.updated === d.updated) m.dirty = 0;
+          // (1.59.1) the open page's copy in memory too: it stayed "dirty" for good after the first edit, so every
+          // change from another device counted as a clash and was merged and uploaded straight back
+          if(cur && cur.crec && cur.crec.id === d.id && cur.crec.updated === d.updated) cur.crec.dirty = 0;
         }
       }
       batch = []; size = 0;
@@ -864,7 +867,12 @@ function mergeKeys(b, l, r, lNew){
   return out;
 }
 // b, l, r: content data with serialised items. lNew: the local side was edited more recently.
-function mergeContent(b, l, r, lNew){
+// (1.59.1) strokes and other items added on this device in the last few minutes (page id + time). A merge never
+// drops one of these just because the other side lacks it: two devices uploading at almost the same moment could
+// let the older copy overwrite the server, which then looked like the new strokes had been erased elsewhere.
+const freshItems = new Map(), FRESH_MS = 5 * 60000;
+const isFresh = id => { const t = freshItems.get(id); return !!t && Date.now() - t < FRESH_MS; };
+function mergeContent(b, l, r, lNew, keep){
   const map = d => new Map(((d && d.items) || []).filter(it => it && it.id).map(it => [it.id, it]));
   const bi = map(b), li = map(l), ri = map(r);
   const pick = new Map(), extra = [];
@@ -874,7 +882,7 @@ function mergeContent(b, l, r, lNew){
     const kb = B ? stable(B) : null, kl = L ? stable(L) : null, kr = R ? stable(R) : null;
     let v;
     if(kl === kr) v = L;
-    else if(kl === kb) v = R;          // changed (or deleted) only on the other device
+    else if(kl === kb) v = !R && keep && keep(id) ? L : R;   // changed (or deleted) only on the other device
     else if(kr === kb) v = L;          // changed (or deleted) only here
     else if(!L) v = R;                 // deleted here, changed there: keep the change
     else if(!R) v = L;
@@ -925,13 +933,16 @@ async function mergeCurrent(row, base){
   // between, so a stroke finished while the backup was being written is part of the merge (it used to be lost)
   if(isBusy()) await saveVersion(c.id, snap(), 'merge').catch(e => console.warn('version', e));
   if(cur !== c) return false;
-  const busy = isBusy();
+  // (1.59.1) an incoming copy that lacks strokes written here a moment ago is an older copy that won a crossing
+  // upload: merge (which keeps them) and upload again, instead of taking it as it is
+  const rIds = new Set(((row.data && row.data.items) || []).map(it => it && it.id));
+  const busy = isBusy() || [...c.items.keys()].some(id => isFresh(id) && !rIds.has(id));
   let data, copies = 0;
   if(!busy){
     if(!base && lrec && lrec.updated >= row.updated_at) return false;
     data = row.data;
   } else {
-    const m = mergeContent(base && base.d, snap(), row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing || !!act);
+    const m = mergeContent(base && base.d, snap(), row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing || !!act, isFresh);
     data = m.data; copies = m.copies;
   }
   const next = new Map();
@@ -953,6 +964,12 @@ async function mergeCurrent(row, base){
     const rec = {id: row.id, kind: row.kind, data: row.data, deleted: false, updated: row.updated_at, dirty: 0};
     await IDB.put('docs', rec);
     c.crec = rec;
+  } else if(!saveContentSoon.pending() && !editing && stable({bg: data.bg, items: data.items}) === stable({bg: row.data.bg, items: row.data.items})){
+    // (1.59.1) the merge came out the same as the server copy: store it as synced instead of uploading it again
+    // (an idle device used to send every page it merged straight back, so two open devices kept bouncing it)
+    const rec = {id: row.id, kind: row.kind, data: row.data, deleted: false, updated: Math.max(row.updated_at, lrec ? lrec.updated : 0), dirty: 0};
+    await IDB.put('docs', rec);
+    if(cur === c) c.crec = rec;
   } else {
     await saveContent();
   }
@@ -1683,8 +1700,8 @@ function contentBox(){
    ===================================================================== */
 function setItems(pairs){
   for(const [id, it] of pairs){
-    if(it){ cur.items.set(id, it); if(it.t !== 's') itemEl(it); cur.lastId = id; }
-    else { cur.items.delete(id); geo.delete(id); dropEl(id); }
+    if(it){ if(!cur.items.has(id)) freshItems.set(id, Date.now()); cur.items.set(id, it); if(it.t !== 's') itemEl(it); cur.lastId = id; }
+    else { cur.items.delete(id); geo.delete(id); dropEl(id); freshItems.delete(id); }
   }
   changed();
 }
@@ -6350,6 +6367,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.59.1', '2026-10-22', ['Fix: strokes no longer disappear a moment after writing when the same page is open on another device (the two devices kept sending the page back and forth, and an older copy could overwrite the newest strokes)']],
   ['1.59', '2026-10-22', ['Turn imported pages and pictures: select them and tap the turn button (90° each tap)', 'Import: turn all pages before placing them, for PDFs that were scanned sideways']],
   ['1.58.12', '2026-10-22', ['Write to text makes the same text box as typing there: with Snap text to lines on, the words sit on the answer line or in the table cell at the printed text size']],
   ['1.58.11', '2026-10-21', ['Fix: the empty strip at the bottom of the screen is gone, the page now reaches the bottom edge (iPad Home Screen app)']],
@@ -9760,6 +9778,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

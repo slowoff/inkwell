@@ -2767,8 +2767,11 @@ function renderGroupBtns(){
   $('selMath').hidden = !its.some(it => it.t === 's' && !it.hl) || its.some(it => it.t !== 's');
   $('selGraph').hidden = !GAdd.find(its);
   if(!$('selGraph').hidden) $('selMath').hidden = true;
-  const noRot = its.length === 1 && its[0].t !== 's';
-  $('selRot90').hidden = noRot; $('selRot').hidden = noRot;
+  // (1.59) imported pages and pictures turn in 90° steps with the button (their picture is turned); no free turning
+  const pics = its.some(it => it.t === 'i');
+  const noRot = its.length === 1 && its[0].t !== 's' && !pics;
+  $('selRot90').hidden = noRot; $('selRot').hidden = noRot || pics;
+  $('selRot90').title = pics ? 'Turn 90° clockwise (also the pages)' : 'Rotate 90° clockwise';
 }
 function renderSelColors(){
   renderGroupBtns();
@@ -2817,11 +2820,36 @@ $('fadeRange').addEventListener('input', () => {
   fadeLabel(v);
 });
 $('fadeRange').addEventListener('change', fadeCommit);
-$('selRot90').addEventListener('click', () => {
-  if(!sel) return;
-  const b = sel.b, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
-  replaceItems(sel.ids.map(id => cur.items.get(id)).filter(Boolean).map(it => rotateItem(it, Math.PI / 2, cx, cy)));
-  computeSel(); positionOverlays();
+let picTurning = false;
+$('selRot90').addEventListener('click', async () => {
+  if(!sel || picTurning) return;
+  const b = sel.b, cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2, page = cur;
+  const its = sel.ids.map(id => cur.items.get(id)).filter(Boolean);
+  if(!its.some(it => it.t === 'i')){
+    replaceItems(its.map(it => rotateItem(it, Math.PI / 2, cx, cy)));
+    computeSel(); positionOverlays(); return;
+  }
+  // (1.59) pages and pictures: the picture itself is turned (a new picture), the box keeps its centre's turned place
+  picTurning = true; $('selRot90').classList.add('busy');
+  try {
+    const out = [];
+    for(const it of its){
+      if(it.t !== 'i'){ out.push(rotateItem(it, Math.PI / 2, cx, cy)); continue; }
+      const u = await assetURL(it.a);
+      if(!u) throw new Error('This page picture is not on this device yet');
+      const img = new Image(); img.src = u; await img.decode();
+      const c = rotCanvas(img, 90), a = await saveAsset(await canvasBlob(c)); c.width = c.height = 1;
+      const icx = it.x + it.w / 2, icy = it.y + it.h / 2;
+      const nx = cx - (icy - cy), ny = cy + (icx - cx);   // centre turned 90° clockwise around the selection's centre
+      const o = Object.assign({}, it, {a, w: it.h, h: it.w, x: nx - it.h / 2, y: ny - it.w / 2});
+      if(it.f) o.f = rotFields(it.f, 90);
+      out.push(o);
+    }
+    if(cur !== page) return;
+    replaceItems(out); selectIds(out.map(it => it.id));
+    PT.soon();
+  } catch(e){ console.warn(e); toast('Could not turn: ' + (e.message || e)); }
+  finally { picTurning = false; $('selRot90').classList.remove('busy'); }
 });
 $('selDel').addEventListener('click', () => { if(!sel) return; const ids = sel.ids.slice(); clearSel(); removeItems(ids); });
 $('selGroup').addEventListener('click', () => {
@@ -5162,8 +5190,20 @@ $('insertBtn').addEventListener('click', () => {
   resetImport(); showModal('importDlg');
 });
 function dropImport(){ if(imp && imp.close) imp.close(); imp = null; }
+let impRot = 0;   // (1.59) turn all pages before importing (scans made sideways)
+function renderImpRot(){
+  $('impRotVal').textContent = impRot === 0 ? 'upright' : impRot === 180 ? 'upside down' : impRot === 90 ? '90° right' : '90° left';
+  const prev = $('importPreview');
+  for(const el of prev.querySelectorAll('canvas,img')){
+    if(!el._src){ el._src = el.tagName === 'IMG' ? el : rotCanvas(el, 0); }
+    const t = rotCanvas(el._src, impRot); t._src = el._src;
+    t.className = el.className; el.replaceWith(t);
+  }
+}
+function turnImport(d){ impRot = (impRot + d + 360) % 360; renderImpRot(); }
 function resetImport(){
   dropImport();
+  impRot = 0; $('impRotVal').textContent = 'upright';
   $('importPick').hidden = false; $('importSetup').hidden = true;
   $('importFile').value = ''; $('importPreview').innerHTML = ''; $('impStatus').textContent = '';
   $('impGo').disabled = false;
@@ -5172,7 +5212,7 @@ $('impOther').addEventListener('click', resetImport);
 $('importFile').addEventListener('change', async () => {
   const f = $('importFile').files[0]; if(!f) return;
   $('importPick').hidden = true; $('importSetup').hidden = false; $('impStatus').textContent = 'Reading file';
-  try { const hint = await loadImport(f); $('impStatus').textContent = hint || ''; if($('importDlg').hidden) dropImport(); }
+  try { const hint = await loadImport(f); $('impStatus').textContent = hint || ''; if($('importDlg').hidden) dropImport(); else if(impRot) renderImpRot(); }
   catch(e){ console.warn(e); $('impStatus').textContent = e && e.name === 'OldWord' ? 'This is an old Word file (.doc). Open it in Word and save it as .docx or PDF, then import that.' : 'This file could not be opened. ' + (e && e.name === 'PasswordException' ? 'It is password protected.' : /\.docx$/i.test(f.name) ? (e && /load/i.test(e.message) ? e.message : 'Try saving it again in Word, or as PDF.') : 'Try saving it as PDF again.'); $('impGo').disabled = true; }
 });
 // Reads a PDF page's fillable fields. Returns {f: fields for the item, blank: [[annotationId, emptyValue]]}.
@@ -5289,6 +5329,8 @@ async function loadImport(f){
   }
   $('impGo').disabled = false;
 }
+$('impRotL').addEventListener('click', () => turnImport(-90));
+$('impRotR').addEventListener('click', () => turnImport(90));
 $('impSize').addEventListener('input', () => { $('impSizeVal').textContent = $('impSize').value + '%'; });
 function parsePages(str, n){
   str = (str || '').trim().toLowerCase();
@@ -5300,6 +5342,29 @@ function parsePages(str, n){
     for(let i = Math.min(a, b); i <= Math.max(a, b); i++) if(i >= 1 && i <= n) out.add(i);
   }
   return [...out].sort((x, y) => x - y);
+}
+// (1.59) a canvas (or picture) turned by deg (90 = clockwise, 180, 270); returns a new canvas
+function rotCanvas(src, deg){
+  deg = ((deg % 360) + 360) % 360;
+  const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+  const c = document.createElement('canvas');
+  c.width = deg % 180 ? h : w; c.height = deg % 180 ? w : h;
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.translate(c.width / 2, c.height / 2); x.rotate(deg * Math.PI / 180); x.drawImage(src, -w / 2, -h / 2);
+  return c;
+}
+// fillable field boxes (fractions of the page) after turning the page by deg
+function rotFields(f, deg){
+  deg = ((deg % 360) + 360) % 360;
+  if(!deg || !f) return f;
+  return f.map(o => {
+    const r = Object.assign({}, o), {x, y, w, h} = o;
+    if(deg === 90){ r.x = 1 - y - h; r.y = x; r.w = h; r.h = w; }
+    else if(deg === 180){ r.x = 1 - x - w; r.y = 1 - y - h; }
+    else { r.x = y; r.y = 1 - x - w; r.w = h; r.h = w; }
+    return r;
+  });
 }
 function canvasBlob(c){ return new Promise(res => c.toBlob(b => res(b), 'image/jpeg', 0.86)); }
 /* (1.46) "Print onto page" closes the dialog at once; pages are made one at a time and appear on the page as they
@@ -5331,7 +5396,7 @@ async function impPlace(job, item){
 }
 $('impGo').addEventListener('click', async () => {
   if(!imp || !cur) return;
-  const size = +$('impSize').value / 100, src = imp;
+  const size = +$('impSize').value / 100, src = imp, rot = impRot, side = rot % 180 !== 0;
   let pages = null, want = null;
   if(src.kind === 'pdf'){
     pages = parsePages($('impPages').value, src.n);
@@ -5351,12 +5416,13 @@ $('impGo').addEventListener('click', async () => {
   hideModal('importDlg');
   setTool('pen');
   if(src.kind === 'img'){
-    const wWorld = A4W * size, hWorld = wWorld * src.h / src.w;
+    const wWorld = A4W * size, hWorld = wWorld * (side ? src.w / src.h : src.h / src.w);
     const scale = Math.min(1, 2400 / Math.max(src.w, src.h));
-    const c = document.createElement('canvas');
+    let c = document.createElement('canvas');
     c.width = Math.round(src.w * scale); c.height = Math.round(src.h * scale);
     const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(src.img, 0, 0, c.width, c.height);
+    if(rot) c = rotCanvas(c, rot);
     const a = await saveAsset(await canvasBlob(c));
     if(!cur) return;
     addItems([{t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wWorld, h: hWorld, a}]);
@@ -5379,15 +5445,18 @@ $('impGo').addEventListener('click', async () => {
         say();
         const page = await src.pdf.getPage(pages[k]); const v1 = page.getViewport({scale: 1});
         const pf = await pdfFields(page), lines = await pdfLines(page); page.cleanup();
-        const wWorld = v1.width / 595.28 * A4W * size, hWorld = wWorld * v1.height / v1.width;
-        const px = Math.round(clamp(wWorld * 2.4, 900, 2000));
+        const pw = side ? v1.height : v1.width, ph = side ? v1.width : v1.height;
+        const wWorld = pw / 595.28 * A4W * size, hWorld = wWorld * ph / pw;
+        const px = Math.round(clamp((v1.width / 595.28 * A4W * size) * 2.4, 900, 2000));
         const r = await renderPdfPage(src.pdf, pages[k], px, pf.f.length ? pf.blank : null);
-        const a = await saveAsset(await canvasBlob(r.canvas));
-        r.canvas.width = r.canvas.height = 1;
+        const pc = rot ? rotCanvas(r.canvas, rot) : r.canvas;
+        const a = await saveAsset(await canvasBlob(pc));
+        r.canvas.width = r.canvas.height = 1; pc.width = pc.height = 1;
         if(job.stopped) break;
         const item = {t: 'i', id: 'i' + newId(), x: x0, y: job.y + 24, w: wWorld, h: hWorld, a, doc: 1};
-        if(hasRealText(lines)) await savePtxt(a, 'pdf', lines);   // searchable right away; scans are read by Claude later
-        if(pf.f.length) item.f = pf.f;
+        // turned pages: the PDF's line positions no longer fit, so their text is read later like a scan
+        if(!rot && hasRealText(lines)) await savePtxt(a, 'pdf', lines);   // searchable right away; scans are read by Claude later
+        if(pf.f.length) item.f = rotFields(pf.f, rot);
         if(!await impPlace(job, item)) break;
         job.n++; job.fields += pf.f.length; job.y += 24 + hWorld;
       }
@@ -5399,9 +5468,10 @@ $('impGo').addEventListener('click', async () => {
         else { await impIdle(); if(job.stopped) break; if(!want || want.has(i)) say(); pg = await src.d.next(); }
         if(!pg) break;
         if(want && !want.has(i)){ pg.canvas.width = pg.canvas.height = 1; continue; }
-        const wWorld = A4W * size, hWorld = wWorld * pg.h / pg.w;
-        const a = await saveAsset(await canvasBlob(pg.canvas));
-        pg.canvas.width = pg.canvas.height = 1;
+        const wWorld = A4W * size, hWorld = wWorld * (side ? pg.w / pg.h : pg.h / pg.w);
+        const pc = rot ? rotCanvas(pg.canvas, rot) : pg.canvas;
+        const a = await saveAsset(await canvasBlob(pc));
+        pg.canvas.width = pg.canvas.height = 1; pc.width = pc.height = 1;
         if(job.stopped) break;
         if(!await impPlace(job, {t: 'i', id: 'i' + newId(), x: x0, y: job.y + 24, w: wWorld, h: hWorld, a, doc: 1})) break;
         job.n++; job.y += 24 + hWorld;
@@ -6280,6 +6350,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.59', '2026-10-22', ['Turn imported pages and pictures: select them and tap the turn button (90° each tap)', 'Import: turn all pages before placing them, for PDFs that were scanned sideways']],
   ['1.58.12', '2026-10-22', ['Write to text makes the same text box as typing there: with Snap text to lines on, the words sit on the answer line or in the table cell at the printed text size']],
   ['1.58.11', '2026-10-21', ['Fix: the empty strip at the bottom of the screen is gone, the page now reaches the bottom edge (iPad Home Screen app)']],
   ['1.58.10', '2026-10-21', ['Fix: a custom text colour is kept even if the text box closed while the colour picker was open']],

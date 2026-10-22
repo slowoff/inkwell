@@ -358,6 +358,9 @@ select.pf-ls option:checked{background:#9fbbe8}
 .import-preview{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 8px;min-height:120px;align-items:flex-start}
 .import-preview canvas,.import-preview img{height:150px;width:auto;border-radius:3px;box-shadow:0 0 0 1px var(--line);background:#fff;flex:none}
 .import-preview .more{align-self:center;color:var(--muted);font-size:13px;flex:none}
+.imp-rot{display:flex;align-items:center;gap:8px}
+.imp-rot>span{flex:1;font-size:14px}
+.imp-rot .btn{min-width:44px;padding:0 10px}
 #mathIn{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel2);font-family:var(--f-mono);font-size:16px;resize:vertical;color:var(--fg)}
 .math-preview{min-height:70px;display:grid;place-items:center;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px;overflow-x:auto}
 .math-preview.err{color:var(--danger);font-size:13px}

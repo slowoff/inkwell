@@ -73,7 +73,8 @@ async def main():
         check(r2['n'] == 8, f'Ctrl+V pasted on the same page ({r2["n"]})')
         dx = max(r2['xs']) - min(r2['xs'])
         check(0 < dx < 60, f'same page: copy sits just beside the original ({dx:.1f})')
-        # Ctrl+X cuts the selection
+        # Ctrl+X cuts the selection (wait until the pasted items are selected; paste finishes a moment after the key)
+        await page.wait_for_function('__inkwell.sel && __inkwell.sel.ids.length === 4', timeout=3000)
         await page.keyboard.press('Control+x')
         n3 = await page.evaluate("__inkwell.cur.items.size")
         check(n3 == 4, f'Ctrl+X removes the selection ({n3})')

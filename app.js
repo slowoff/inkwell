@@ -1480,15 +1480,11 @@ function prepTextEl(el){
   el.querySelectorAll('a.pl').forEach(a => { a.setAttribute('contenteditable', 'false'); a.classList.toggle('broken', !getDoc(a.dataset.page)); });
 }
 // place an element of the front layer: its left/top are world units, the camera zoom is applied here
-// (1.59.2) CSS zoom instead of transform: scale(z). The text is laid out at its real on-screen size, so it stays sharp
-// even when iPad Safari puts it on its own layer (it does while the pen is drawing on the ink canvas underneath);
-// a scaled layer is painted at 1x and stretched, which made typed text and formulas blurry with the pen tool.
-// zoom also scales left/top, and offsetWidth/offsetTop still read in world units.
-const ZOOM_OK = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('zoom', '2');
+// (1.59.3) back to transform: scale(z). 1.59.2 used CSS zoom, but iPad Safari applied it to positions and spacing
+// and not to the letters, so text and formulas fell apart and moved when zooming.
 function frontXf(el){
-  const z = cam.z;
-  if(ZOOM_OK){ el.style.transform = ''; el.style.zoom = z === 1 ? '' : String(z); return; }
-  const x = parseFloat(el.style.left) || 0, y = parseFloat(el.style.top) || 0;
+  const z = cam.z, x = parseFloat(el.style.left) || 0, y = parseFloat(el.style.top) || 0;
+  el.style.zoom = '';
   el.style.transform = z === 1 ? '' : `translate(${(z - 1) * x}px,${(z - 1) * y}px) scale(${z})`;
 }
 function itemEl(it){
@@ -6374,6 +6370,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.59.3', '2026-10-22', ['Fix: typed text and formulas no longer shift and fall apart when zooming (1.59.2 change undone)']],
   ['1.59.2', '2026-10-22', ['Fix: typed text, formulas and Claude answers stay sharp when zoomed in with the pen tool (they went blurry on the iPad)']],
   ['1.59.1', '2026-10-22', ['Fix: strokes no longer disappear a moment after writing when the same page is open on another device (the two devices kept sending the page back and forth, and an older copy could overwrite the newest strokes)']],
   ['1.59', '2026-10-22', ['Turn imported pages and pictures: select them and tap the turn button (90° each tap)', 'Import: turn all pages before placing them, for PDFs that were scanned sideways']],

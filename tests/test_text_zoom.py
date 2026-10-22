@@ -1,5 +1,4 @@
-# 1.59.2: typed text and formulas are zoomed with CSS zoom (laid out at their on-screen size) instead of a
-# transform scale, so iPad Safari cannot paint them at 1x and stretch them (blurry text with the pen tool).
+# 1.59.3: typed text and formulas follow the zoom with transform: scale (1.59.2's CSS zoom broke them on the iPad).
 # Checks that every item still sits exactly where the world camera puts it, and measurements stay in world units.
 import asyncio, os
 from playwright.async_api import async_playwright
@@ -44,7 +43,7 @@ async def main():
         for o in r:
             check(abs(o['dx']) < 1.5 and abs(o['dy']) < 1.5, f"{o['id']} at zoom {o['z']} in place (off by {o['dx']:.2f}, {o['dy']:.2f})")
             check(abs(o['rw'] - o['z']) < 0.02, f"{o['id']} at zoom {o['z']} drawn {o['rw']:.3f}x its world width")
-            check(o['tf'] in ('none', ''), f"{o['id']} at zoom {o['z']} has no transform ({o['tf']})")
+            check(o['zoom'] == '', f"{o['id']} at zoom {o['z']} not laid out with CSS zoom")
         w1 = [o['ow'] for o in r if o['id'] == 'xa']
         check(max(w1) - min(w1) < 1, f'text box width stays in world units at every zoom ({w1})')
         # editing at 311 %: the box handles sit beside the box

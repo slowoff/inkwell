@@ -1480,8 +1480,15 @@ function prepTextEl(el){
   el.querySelectorAll('a.pl').forEach(a => { a.setAttribute('contenteditable', 'false'); a.classList.toggle('broken', !getDoc(a.dataset.page)); });
 }
 // place an element of the front layer: its left/top are world units, the camera zoom is applied here
+// (1.59.2) CSS zoom instead of transform: scale(z). The text is laid out at its real on-screen size, so it stays sharp
+// even when iPad Safari puts it on its own layer (it does while the pen is drawing on the ink canvas underneath);
+// a scaled layer is painted at 1x and stretched, which made typed text and formulas blurry with the pen tool.
+// zoom also scales left/top, and offsetWidth/offsetTop still read in world units.
+const ZOOM_OK = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('zoom', '2');
 function frontXf(el){
-  const z = cam.z, x = parseFloat(el.style.left) || 0, y = parseFloat(el.style.top) || 0;
+  const z = cam.z;
+  if(ZOOM_OK){ el.style.transform = ''; el.style.zoom = z === 1 ? '' : String(z); return; }
+  const x = parseFloat(el.style.left) || 0, y = parseFloat(el.style.top) || 0;
   el.style.transform = z === 1 ? '' : `translate(${(z - 1) * x}px,${(z - 1) * y}px) scale(${z})`;
 }
 function itemEl(it){
@@ -5578,7 +5585,7 @@ async function exportPdf(){
   for(const it of cur.items.values()){
     if(it.t !== 'x' && it.t !== 'm') continue;
     const el = elMap.get(it.id); if(!el) continue;
-    const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.transform = '';
+    const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.transform = ''; c.style.zoom = '';
     if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
     const q = itemBox(it);
     tops.push({a: q[1], b: q[3], h: c.outerHTML});
@@ -5655,7 +5662,7 @@ async function renderPng(el, w, h, scale){
   const box = document.createElement('div');
   box.className = 'pdf-render';
   box.style.cssText = `position:fixed;left:-30000px;top:0;width:${Math.ceil(w) + 2}px;height:${Math.ceil(h) + 2}px;overflow:hidden`;
-  el.style.left = '0px'; el.style.top = '0px'; el.style.transform = '';
+  el.style.left = '0px'; el.style.top = '0px'; el.style.transform = ''; el.style.zoom = '';
   box.appendChild(el); document.body.appendChild(box);
   try {
     const c = await html2canvas(box, {scale, backgroundColor: null, logging: false, useCORS: true});
@@ -5696,7 +5703,7 @@ async function exportPdfFile(){
       if(i % 4 === 0){ say(`Preparing text ${i + 1} of ${texts.length}…`); await tick(); }
       const it = texts[i], el = elMap.get(it.id), w = el.offsetWidth, h = el.offsetHeight;
       if(!w || !h) continue;
-      const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.opacity = '';
+      const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.opacity = ''; c.style.transform = ''; c.style.zoom = '';
       if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
       const sc = Math.max(1, Math.min(s * 2.5, Math.sqrt(12e6 / (w * h))));
       const png = await doc.embedPng(await renderPng(c, w, h, sc));
@@ -6367,6 +6374,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.59.2', '2026-10-22', ['Fix: typed text, formulas and Claude answers stay sharp when zoomed in with the pen tool (they went blurry on the iPad)']],
   ['1.59.1', '2026-10-22', ['Fix: strokes no longer disappear a moment after writing when the same page is open on another device (the two devices kept sending the page back and forth, and an older copy could overwrite the newest strokes)']],
   ['1.59', '2026-10-22', ['Turn imported pages and pictures: select them and tap the turn button (90° each tap)', 'Import: turn all pages before placing them, for PDFs that were scanned sideways']],
   ['1.58.12', '2026-10-22', ['Write to text makes the same text box as typing there: with Snap text to lines on, the words sit on the answer line or in the table cell at the printed text size']],
@@ -9778,6 +9786,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

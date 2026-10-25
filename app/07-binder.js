@@ -572,7 +572,7 @@ function renderOpts(){
   $('opts').hidden = !(ink || t === 'eraser' || t === 'mark' || paste);
   $('pasteBtn').hidden = !paste; $('sizeWrap').hidden = t === 'lasso';
   $('lassoMode').hidden = t !== 'lasso';
-  if(t === 'lasso') $('lassoMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.lassoMode === 'box' ? 'box' : 'free')));
+  if(t === 'lasso') $('lassoMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.lassoMode === 'box' || prefs.lassoMode === 'tap' ? prefs.lassoMode : 'free')));
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   $('assistBtn').hidden = t !== 'pen';

@@ -182,6 +182,8 @@ html,body{background:var(--paper)}
 /* ---------- stage ---------- */
 .stage{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none;background:var(--paper);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .stage canvas{position:absolute;left:0;top:0;pointer-events:none}
+/* (1.62) highlights blend into the page like real highlighter ink: black text under them stays black */
+#hlm,#live.hl-mul{mix-blend-mode:multiply}
 .world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
 #worldFront > *{transform-origin:0 0}
 .it{position:absolute}

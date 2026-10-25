@@ -1179,6 +1179,12 @@ function inkColor(c, print, onPaper){
 const stage = $('stage'), bgCv = $('bg'), inkCv = $('ink'), liveCv = $('live');
 const worldBack = $('worldBack'), worldFront = $('worldFront');
 const bgCtx = bgCv.getContext('2d'), inkCtx = inkCv.getContext('2d'), liveCtx = liveCv.getContext('2d');
+// (1.62) highlighter layer under the ink: blended with "multiply" (CSS), so dark text and lines of imported pages
+// stay as dark as they are and only the light paper takes the colour, like a real highlighter. On white the colour is
+// exactly as before (40 % on white). Highlights over a filled shape (graph background) or, in dark mode, on the dark
+// page background stay on the ink layer as before (multiply would hide them there).
+const hlmCv = $('hlm'), hlmCtx = hlmCv.getContext('2d');
+let hlmUsed = false;
 let W = 0, H = 0, dpr = 1, SR = {left: 0, top: 0};
 const cam = {ox: 40, oy: 24, z: 1};
 let cur = null;           // open page: {id, crec, bg, items: Map, undo, redo}
@@ -1217,7 +1223,7 @@ function resize(){
   const r = stage.getBoundingClientRect();
   SR = r; W = r.width; H = r.height;
   dpr = Math.min(window.devicePixelRatio || 1, 2);
-  for(const c of [bgCv, inkCv, liveCv]){
+  for(const c of [bgCv, hlmCv, inkCv, liveCv]){
     c.width = Math.max(1, Math.round(W * dpr)); c.height = Math.max(1, Math.round(H * dpr));
     c.style.width = W + 'px'; c.style.height = H + 'px';
   }
@@ -1298,24 +1304,31 @@ function drawBg(){
   if(bg.type === 'grid') for(let x = x0; x <= v[2]; x += stepX){ const X = Math.round(x * cam.z + cam.ox) + 0.5; bgCtx.moveTo(X, 0); bgCtx.lineTo(X, H); }
   bgCtx.stroke();
 }
+// (1.62) does this highlight blend into the page (multiply)? fills = boxes of filled shapes on the page
+const hlMultiply = (paper, b, fills) => (paper || !isDark()) && !fills.some(f => f[0] < b[2] && f[2] > b[0] && f[1] < b[3] && f[3] > b[1]);
 function drawInk(){
   inkCtx.setTransform(1, 0, 0, 1, 0, 0);
   inkCtx.clearRect(0, 0, inkCv.width, inkCv.height);
+  if(hlmUsed){ hlmCtx.setTransform(1, 0, 0, 1, 0, 0); hlmCtx.clearRect(0, 0, hlmCv.width, hlmCv.height); hlmUsed = false; }
   if(!cur) return;
   inkCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
-  const v = viewRect(), pages = paperRects();
+  hlmCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
+  const v = viewRect(), pages = paperRects(), fills = [];
   for(const pass of [2, 1, 0]){
     for(const it of cur.items.values()){
       if(it.t !== 's' || inkPass(it) !== pass) continue;
       const g = geoOf(it);
+      if(pass === 2) fills.push(g.b);
       if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
       const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
-      inkCtx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
-      inkCtx.fillStyle = inkColor(it.c, false, paper);
-      inkCtx.fill(g.path);
+      const ctx = pass === 1 && hlMultiply(paper, g.b, fills) ? hlmCtx : inkCtx;
+      if(ctx === hlmCtx) hlmUsed = true;
+      ctx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
+      ctx.fillStyle = inkColor(it.c, false, paper);
+      ctx.fill(g.path);
     }
   }
-  inkCtx.globalAlpha = 1;
+  inkCtx.globalAlpha = 1; hlmCtx.globalAlpha = 1;
   // one small bookmark at the top right of every marked spot
   inkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   inkCtx.fillStyle = MARK_C;
@@ -2214,7 +2227,7 @@ function endTool(e){
 /* live preview layer */
 let liveRaf = 0;
 function drawLiveSoon(){ if(!liveRaf) liveRaf = requestAnimationFrame(() => { liveRaf = 0; drawLive(); }); }
-function clearLive(){ liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(0, 0, liveCv.width, liveCv.height); if(!act && liveCv.style.opacity) liveCv.style.opacity = ''; }
+function clearLive(){ liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(0, 0, liveCv.width, liveCv.height); if(!act && liveCv.style.opacity){ liveCv.style.opacity = ''; liveCv.classList.remove('hl-mul'); } }
 /* (1.61) The stroke being written. Preview only: what is saved and drawn after lifting the pen is unchanged.
    - A long stroke (from LIVE_MIN points) is no longer rebuilt from its first point every frame: the part that can no
      longer change is drawn once into Live.bake and only the end is rebuilt. The shape comes from the same
@@ -2319,6 +2332,8 @@ function drawLive(){
   clearLive();
   const hlA = act && act.kind === 'stroke' && act.hl ? String(isDark() && !onPaperAt(paperRects(), act.pts[0], act.pts[1]) ? 0.34 : 0.4) : '';
   if(liveCv.style.opacity !== hlA) liveCv.style.opacity = hlA;
+  // (1.62) the highlight being drawn blends into the page like the finished one
+  liveCv.classList.toggle('hl-mul', !!hlA && hlMultiply(onPaperAt(paperRects(), act.pts[0], act.pts[1]), [act.pts[0], act.pts[1], act.pts[0], act.pts[1]], []));
   if(!act){ WA.drawAfter(); return; }
   if(act.kind === 'stroke'){
     const paper = onPaperAt(paperRects(), act.pts[0], act.pts[1]);
@@ -5812,7 +5827,8 @@ async function exportPdf(){
     if(it.t !== 's' || it.mk || inkPass(it) !== pass) continue;
     const q = itemBox(it);
     const fo = (pass === 1 ? 0.4 : 1) * opOf(it);
-    inks.push({a: q[1], b: q[3], h: `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
+    // (1.62) highlights blend into the page (multiply), like on screen
+    inks.push({a: q[1], b: q[3], hl: pass === 1, h: `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
   }
   const tops = [];
   for(const it of cur.items.values()){
@@ -5865,7 +5881,9 @@ async function printSheets(gi){
       const it = p.img, u = await assetURL(it.a);
       if(u) body += `<img src="${u}" style="position:absolute;left:${it.x}px;top:${it.y}px;width:${it.w}px;height:${it.h}px${opOf(it) < 1 ? ';opacity:' + opOf(it) : ''}">`;
     }
-    body += `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1">${J.hit(J.inks, k).map(p => p.h).join('')}</svg>` + J.hit(J.tops, k).map(p => p.h).join('');
+    const ik = J.hit(J.inks, k), hls = ik.filter(p => p.hl), rest = ik.filter(p => !p.hl);
+    if(hls.length) body += `<svg style="position:absolute;left:0;top:0;overflow:visible;mix-blend-mode:multiply" width="1" height="1">${hls.map(p => p.h).join('')}</svg>`;
+    body += `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1">${rest.map(p => p.h).join('')}</svg>` + J.hit(J.tops, k).map(p => p.h).join('');
     html += `<div class="print-sheet"><div style="position:absolute;left:${J.margin}px;top:${J.margin}px;width:${J.pw}px;height:${J.ph}px;overflow:hidden"><div class="print-inner" style="transform:scale(${J.s}) translate(${-J.x0}px,${-ya}px)">${body}</div></div></div>`;
   }
   const root = $('printRoot');
@@ -5987,7 +6005,7 @@ async function exportPdfFile(){
       }
       for(const it of inks){
         const q = inkBoxes.get(it.id); if(!reach(q[1], q[3])) continue;
-        page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true)), opacity: (it.hl ? 0.4 : 1) * opOf(it)});
+        page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true)), opacity: (it.hl ? 0.4 : 1) * opOf(it), ...(it.hl && PDFLib.BlendMode ? {blendMode: PDFLib.BlendMode.Multiply} : {})});
       }
       for(const t of tops){
         if(!reach(t.b[1], t.b[3])) continue;
@@ -6609,6 +6627,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.62', '2026-10-25', ['Highlighter works like a real one: black text and lines under a highlight stay black, only the paper takes the colour (on screen, when printing and in exported PDFs)']],
   ['1.61.3', '2026-10-25', ['Behind the scenes: part of the app moved into separate files with fast automatic checks, so future changes are safer. Nothing changes in how the app works']],
   ['1.61.2', '2026-10-25', ['Pencil: on curves the line drawn ahead of the tip now bends with the curve (in 1.61 it went straight on for a moment and then snapped back)']],
   ['1.61.1', '2026-10-25', ['Fix: scribbling with the highlighter (or the pen) back and forth no longer leaves white gaps and slits in the colour, on screen and in exported PDFs']],

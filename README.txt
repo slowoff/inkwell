@@ -9,8 +9,9 @@ Live app: https://slowoff.github.io/inkwell/
 Current version: see VERSION in sw.js.
 
 How it is built:
-- One plain HTML/CSS/JS app, no build step: index.html, app.css, app.js,
-  config.js, sw.js (offline cache). Libraries are bundled in lib/.
+- One plain HTML/CSS/JS app, no build step: index.html, app.css, app/
+  and core/ (plain scripts), config.js, sw.js (offline cache). Libraries
+  are bundled in lib/.
 - Notes are stored on the device first (IndexedDB) and synced through
   Supabase (table "docs", each account only sees its own rows).
 - Sign in is with Google only. Pictures and a copy of all notes
@@ -81,7 +82,7 @@ b) Edge Functions -> Secrets:
 4. HOSTING (GitHub Pages, free)
 ----------------------------------------------------------------
 a) github.com -> New repository "inkwell", Public. Upload ALL files and
-   folders from this folder (index.html, app.js, lib, icons, .github ...).
+   folders from this folder (index.html, app, core, lib, icons, .github ...).
 b) Settings -> Pages -> Source: "Deploy from a branch", branch main,
    folder / (root). Save. After 1-2 minutes the app is at
    https://YOUR-GITHUB-NAME.github.io/inkwell/
@@ -131,9 +132,11 @@ Old notes must keep working: if the data format changes, old data is
 converted when it loads.
 
 Files:
-  index.html, app.css, app.js   the app
-  core/                         pure code app.js uses (ink shapes, merging,
-                                maths, helpers); loaded before app.js
+  index.html, app.css           the page and its styles
+  app/                          the app, 13 files by area (01-base … 13-start),
+                                loaded in order; they share one global scope
+  core/                         pure code the app uses (ink shapes, merging,
+                                maths, helpers); loaded before app/
   config.js                     Supabase URL + key, Google and OneNote client IDs
   sw.js                         offline cache (VERSION)
   manifest.webmanifest, icons/  home-screen app

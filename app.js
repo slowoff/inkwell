@@ -1228,12 +1228,12 @@ function strokeShape(it){
     const pr = mid ? (p[i*3-1] + 2*p[i*3+2] + p[i*3+5]) / 4 : p[i*3+2];
     Rr[i] = it.hl ? base : Math.max(0.3, base * (0.3 + pr));
   }
-  if(m < 3) return {xs: X, ys: Y, rs: Rr, n: m};
+  if(m < 3) return {xs: X, ys: Y, rs: Rr, n: m, at: X.map((_, i) => i)};
   // (1.47) smooth curves: between recorded points the line follows a centripetal Catmull-Rom curve instead of a
   // straight piece, so fast writing (points far apart) gives round letters instead of corners. Rendering only;
   // the stored points are unchanged, so older strokes get it too and the data format stays the same.
   const step = Math.max(0.6, base * 0.5);
-  const xs = [X[0]], ys = [Y[0]], rs = [Rr[0]];
+  const xs = [X[0]], ys = [Y[0]], rs = [Rr[0]], at = [0];   // at[i] = index in xs of recorded point i
   for(let i = 0; i < m - 1; i++){
     const len = Math.hypot(X[i+1] - X[i], Y[i+1] - Y[i]);
     const k = Math.min(16, Math.floor(len / step));
@@ -1258,9 +1258,9 @@ function strokeShape(it){
         xs.push(out[0]); ys.push(out[1]); rs.push(Rr[i] + (Rr[i+1] - Rr[i]) * j / k);
       }
     }
-    xs.push(X[i+1]); ys.push(Y[i+1]); rs.push(Rr[i+1]);
+    xs.push(X[i+1]); ys.push(Y[i+1]); rs.push(Rr[i+1]); at.push(xs.length - 1);
   }
-  return {xs, ys, rs, n: xs.length};
+  return {xs, ys, rs, n: xs.length, at};
 }
 // Filled outline of a variable-width stroke, as a Path2D or an SVG path string.
 // (1.57) a filled stroke (fl:1, e.g. a graph's solid background): its points are the outline, filled as is
@@ -2174,12 +2174,15 @@ function toolMove(e){
       if(Math.hypot(X - act.last[0], Y - act.last[1]) < 0.8) continue;
       act.last = [X, Y];
       act.pts.push(...toWorld(X, Y), pr);
+      act.lastEv = [ev, sx, sy];
       if(Math.hypot(sx - act.anchor[0], sy - act.anchor[1]) > 3){ act.anchor = [sx, sy]; armHold(); }
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
     else if(act.kind === 'space'){ moveSpace(toWorld(sx, sy)[1] - act.y0); }
     else if(act.kind === 'lasso'){ if(act.box){ act.poly = boxPoly(act.sx, act.sy, sx, sy); act.b1 = [sx, sy]; } else act.poly.push(sx, sy); }
     else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){ act.w1 = toWorld(sx, sy); if(act.kind === 'pick') compassTrack(act); }
   }
+  // (1.61) draw a little ahead of the Pencil (preview only)
+  if(act && act.kind === 'stroke' && act.lastEv){ const [ev, sx, sy] = act.lastEv; act.lastEv = null; Live.predict(act, ev === list[list.length - 1] ? e : ev, sx, sy); }
   drawLiveSoon();
 }
 /* (1.60) Highlighter "Stick to text" (prefs.hlSnap, switch #hlSnap next to the highlighter's colours).
@@ -2421,17 +2424,125 @@ function endTool(e){
 /* live preview layer */
 let liveRaf = 0;
 function drawLiveSoon(){ if(!liveRaf) liveRaf = requestAnimationFrame(() => { liveRaf = 0; drawLive(); }); }
-function clearLive(){ liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(0, 0, liveCv.width, liveCv.height); }
+function clearLive(){ liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(0, 0, liveCv.width, liveCv.height); if(!act && liveCv.style.opacity) liveCv.style.opacity = ''; }
+/* (1.61) The stroke being written. Preview only: what is saved and drawn after lifting the pen is unchanged.
+   - A long stroke (from LIVE_MIN points) is no longer rebuilt from its first point every frame: the part that can no
+     longer change is drawn once into Live.bake and only the end is rebuilt. The shape comes from the same
+     strokeShape (it only looks a few points to each side), so it is the same outline, drawn in pieces that overlap
+     by two recorded points (no seams, also in tight bends).
+   - Drawing slightly ahead of the Pencil: the preview runs a few milliseconds ahead along the Pencil's current
+     direction (the system's predicted points where the browser gives them), so the line keeps up with the tip.
+     Never stored; dropped when the Pencil slows, turns sharply, stops or lifts. */
+const LIVE_MIN = 120, LIVE_CHUNK = 60, LIVE_CTX = 6, LIVE_END = 6;
+const PRED_MS = 12, PRED_MAX = 14, PRED_LIFE = 45;
+const Live = {
+  bake: null, bctx: null, upto: 0, key: '',
+  // outline of samples s0..s1 of a strokeShape result, with round ends only where asked
+  part(sh, s0, s1, capA, capB){
+    const {xs, ys, rs, n} = sh, L = [], R = [], A = [];
+    let lnx = 0, lny = -1;
+    for(let i = s0; i <= s1; i++){
+      const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
+      let dx = xs[i1] - xs[i0], dy = ys[i1] - ys[i0];
+      const len = Math.hypot(dx, dy);
+      let nx, ny;
+      if(len < 1e-6){ nx = lnx; ny = lny; } else { dx /= len; dy /= len; nx = -dy; ny = dx; }
+      lnx = nx; lny = ny;
+      A.push(Math.atan2(ny, nx));
+      L.push([xs[i] + nx * rs[i], ys[i] + ny * rs[i]]);
+      R.push([xs[i] - nx * rs[i], ys[i] - ny * rs[i]]);
+    }
+    const k = L.length, P = new Path2D();
+    P.moveTo(L[0][0], L[0][1]);
+    for(let i = 1; i < k; i++) P.lineTo(L[i][0], L[i][1]);
+    if(capB) P.arc(xs[s1], ys[s1], rs[s1], A[k-1], A[k-1] - Math.PI, true); else P.lineTo(R[k-1][0], R[k-1][1]);
+    for(let i = k - 2; i >= 0; i--) P.lineTo(R[i][0], R[i][1]);
+    if(capA) P.arc(xs[s0], ys[s0], rs[s0], A[0] + Math.PI, A[0], true);
+    P.closePath();
+    return P;
+  },
+  reset(){ this.upto = 0; this.key = ''; if(this.bctx){ this.bctx.setTransform(1, 0, 0, 1, 0, 0); this.bctx.clearRect(0, 0, this.bake.width, this.bake.height); } },
+  // shape of recorded points from..to (inclusive), with enough neighbours that the middle comes out exactly as in the whole stroke
+  win(a, from, to, extra){
+    const w0 = Math.max(0, from - LIVE_CTX), m = a.pts.length / 3;
+    const end = Math.min(m - 1, to + LIVE_END);
+    let p = a.pts.slice(w0 * 3, (end + 1) * 3);
+    if(extra) p = p.concat(extra);
+    return {sh: strokeShape({w: a.w, hl: a.hl, p}), w0};
+  },
+  // fill style for the whole stroke; the highlighter's see-through look comes from the canvas opacity
+  draw(a, fill){
+    const m = a.pts.length / 3;
+    const tr = [dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy];
+    const pred = a.pred && performance.now() - a.predAt < PRED_LIFE ? a.pred : null;
+    if(m < LIVE_MIN || a.snapped || a.edge){
+      if(this.upto) this.reset();
+      liveCtx.setTransform(...tr); liveCtx.fillStyle = fill;
+      const p = pred && !a.snapped && !a.edge ? a.pts.concat(pred) : a.pts;
+      liveCtx.fill(strokePath({t: 's', c: a.c, w: a.w, hl: a.hl, p}, false));
+      return;
+    }
+    if(!this.bake){ this.bake = document.createElement('canvas'); this.bctx = this.bake.getContext('2d'); }
+    if(this.bake.width !== liveCv.width || this.bake.height !== liveCv.height){ this.bake.width = liveCv.width; this.bake.height = liveCv.height; this.reset(); }
+    const key = [a.id, tr.join(','), fill, a.w, a.hl ? 1 : 0].join('|');
+    if(key !== this.key || this.upto > m - 1){ this.reset(); this.key = key; }
+    // draw into the bake whatever can no longer change (everything but the last few points)
+    const ctx = this.bctx;
+    while(m - 1 - this.upto > LIVE_CHUNK + LIVE_END + 2){
+      const A = this.upto, B = m - 1 - LIVE_END - 2;
+      const {sh, w0} = this.win(a, A, B);
+      const s0 = A ? Math.max(0, sh.at[A - 2 - w0]) : 0, s1 = sh.at[B - w0];
+      ctx.setTransform(...tr); ctx.fillStyle = fill;
+      ctx.fill(this.part(sh, s0, s1, A === 0, false));
+      this.upto = B;
+    }
+    liveCtx.setTransform(1, 0, 0, 1, 0, 0);
+    if(this.upto) liveCtx.drawImage(this.bake, 0, 0);
+    const A = this.upto, {sh, w0} = this.win(a, A, m - 1, pred);
+    const s0 = A ? Math.max(0, sh.at[A - 2 - w0]) : 0;
+    liveCtx.setTransform(...tr); liveCtx.fillStyle = fill;
+    if(sh.n - 1 > s0) liveCtx.fill(this.part(sh, s0, sh.n - 1, A === 0, true));
+  },
+  // where the Pencil will be a moment from now (screen px), or null
+  predict(a, e, sx, sy){
+    a.pred = null;
+    if(e.pointerType !== 'pen' || a.snapped || a.edge) return;
+    const t = e.timeStamp || performance.now();
+    const h = a.ph || (a.ph = []);
+    h.push([sx, sy, t]); while(h.length > 8 || (h.length > 3 && t - h[0][2] > 60)) h.shift();
+    let px = null, py = null;
+    const pe = e.getPredictedEvents ? e.getPredictedEvents() : null;
+    if(pe && pe.length){ const q = pt(pe[pe.length - 1]); px = q[0] - sx; py = q[1] - sy; }
+    else {
+      if(h.length < 3) return;
+      const o = h[0], mid = h[Math.floor(h.length / 2)], dt = t - o[2], dt2 = t - mid[2];
+      if(dt < 6 || dt > 60 || dt2 < 2) return;
+      const vx = (sx - o[0]) / dt, vy = (sy - o[1]) / dt;
+      const ux = (sx - mid[0]) / dt2, uy = (sy - mid[1]) / dt2;
+      const sp = Math.hypot(vx, vy), su = Math.hypot(ux, uy);
+      if(sp < 0.08 || su < 0.08) return;                          // slow or stopping: no lead
+      if((vx * ux + vy * uy) / (sp * su) < Math.cos(35 * Math.PI / 180)) return;   // turning: no lead
+      if(su < 0.6 * sp) return;                                   // slowing down hard
+      px = ux * PRED_MS; py = uy * PRED_MS;
+    }
+    const d = Math.hypot(px, py);
+    if(!(d > 0.5)) return;
+    if(d > PRED_MAX){ px *= PRED_MAX / d; py *= PRED_MAX / d; }
+    const pr = a.pts[a.pts.length - 1];
+    a.pred = [...toWorld(sx + px, sy + py), pr];
+    a.predAt = performance.now();
+    clearTimeout(a.predT); a.predT = setTimeout(drawLiveSoon, PRED_LIFE + 5);   // take the lead away if the Pencil stops
+  }
+};
 function drawLive(){
   clearLive();
+  const hlA = act && act.kind === 'stroke' && act.hl ? String(isDark() && !onPaperAt(paperRects(), act.pts[0], act.pts[1]) ? 0.34 : 0.4) : '';
+  if(liveCv.style.opacity !== hlA) liveCv.style.opacity = hlA;
   if(!act){ WA.drawAfter(); return; }
   if(act.kind === 'stroke'){
-    liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
     const paper = onPaperAt(paperRects(), act.pts[0], act.pts[1]);
-    liveCtx.globalAlpha = act.hl ? (isDark() && !paper ? 0.34 : 0.4) : 1;
-    liveCtx.fillStyle = inkColor(act.c, false, paper);
-    liveCtx.fill(strokePath({t: 's', c: act.c, w: act.w, hl: act.hl, p: act.pts}, false));
-    liveCtx.globalAlpha = 1;
+    Live.draw(act, inkColor(act.c, false, paper));
+    liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
     if(act.tool === 'pen' && !act.hl && !act.mk) WA.guide(act);
   } else if(act.kind === 'lasso'){
     const p = act.poly;
@@ -6717,6 +6828,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.61', '2026-10-25', ['Pencil: the line keeps up with the tip better (drawn slightly ahead while you write fast in one direction; what is saved is exactly what you wrote)', 'Long strokes and drawings stay smooth while drawing (only the newest part is redrawn)', 'Word import, backups and formulas now also work offline the first time (before they needed to be used once online)']],
   ['1.60.2', '2026-10-25', ['Fix: a keyboard shortcut pressed right after Ctrl+V (cut, undo, delete) is no longer ignored', 'Fix: sync can no longer lose strokes when two devices upload the same page at the same moment (the server now refuses to overwrite a newer copy; the device merges and tries again)', 'Fix: a change that reached the server a moment late could be skipped by your other devices for good; it is now picked up', 'Fix: a stroke erased on another device no longer comes back', 'Faster, lighter sync: it no longer reads all your notes every 20 seconds, only what changed']],
   ['1.60.1', '2026-10-22', ['Stick to text: highlights now fit the letters on imported pages (measured on the page itself), sit centred on the line and cover whole words, also on big headings']],
   ['1.60', '2026-10-22', ['Highlighter: new "Stick to text" switch. Highlights snap onto the line of text under them (imported pages and typed text), straight and as tall as the text; drawn down across lines, each line gets marked', 'Without text under it, a level highlight becomes one straight band']],
@@ -10136,6 +10248,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {HLS, invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {Live, HLS, invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

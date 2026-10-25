@@ -22,5 +22,10 @@ jobs:
         run: |
           pip install playwright==1.56.0 pillow python-docx reportlab
           python -m playwright install --with-deps chromium
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install ESLint (checks the code for mistakes; the app itself has no build step)
+        run: npm install --no-save --no-package-lock eslint@9.13.0 globals@15.11.0
       - name: Run tests
         run: tests/run.sh

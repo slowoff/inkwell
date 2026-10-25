@@ -1,47 +1,22 @@
 /* Inkwell — notes with typed text and Apple Pencil ink on an infinite page. */
 (() => {
 'use strict';
+// (1.61.3) pure code with no dependencies on the page lives in core/*.js (loaded before app.js; also run by the
+// fast tests in tests/unit with Node). Same names as before, so the rest of app.js is unchanged.
+const {newId, esc, clamp, MM, A4W, A4H, pad2, tsMs, tsKey, tsEq, hhmm, fmtDate, debounce} = InkUtil;
+const {ser, opOf, deser, r1, strokeShape, inkPass, strokePath, inkOutline, strokeBox} = InkGeo;
+const {stable, mergeKeys, mergeContent} = InkMerge;
+const {calcEval, parseFn, texPlain} = InkText;
 
 /* =====================================================================
    Basics
    ===================================================================== */
 const $ = id => document.getElementById(id);
 const CFG = window.INKWELL_CONFIG || {};
-const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const MM = 96 / 25.4;            // CSS px per millimetre
-const A4W = 794, A4H = 1123;     // A4 at 96 dpi
 const TABS = 6;
 const LSget = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const LSset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
-const pad2 = x => String(x).padStart(2, '0');
-// (1.60.2) server times ("2026-10-25T15:15:45.181416+00:00") compared safely: Safari's Date.parse may not take
-// six decimals, and two copies of one time may be written differently
-const tsMs = s => Date.parse(String(s).replace(/(\.\d{3})\d+/, '$1'));
-function tsKey(s){
-  if(!s) return '';
-  const ms = tsMs(s);
-  if(isNaN(ms)) return String(s);
-  const m = /\.(\d+)/.exec(s);
-  return String(Math.floor(ms / 1000)).padStart(12, '0') + ((m ? m[1] : '') + '000000').slice(0, 6);
-}
-const tsEq = (a, b) => !!a && !!b && (a === b || tsKey(a) === tsKey(b));
 const PULL_OVERLAP = 60000, PULL_LIST = 1000;
-const hhmm = ts => { const d = new Date(ts); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
-function fmtDate(ts){
-  if(!ts || ts < 1e11) return '';
-  const d = new Date(ts), n = new Date();
-  if(d.toDateString() === n.toDateString()) return hhmm(ts);
-  return `${pad2(d.getDate())}.${pad2(d.getMonth()+1)}.${d.getFullYear()}`;
-}
-function debounce(fn, ms){
-  let t = null;
-  const d = (...a) => { clearTimeout(t); t = setTimeout(() => { t = null; fn(...a); }, ms); };
-  d.flush = () => { if(t){ clearTimeout(t); t = null; return fn(); } };
-  d.pending = () => !!t;
-  return d;
-}
 
 let toastTimer;
 function toast(msg, btnLabel, onBtn){
@@ -987,69 +962,15 @@ let pendingCurrentReload = false, lastLocalEdit = 0;
    Pages (content docs) merge item by item; page/section/notebook docs merge field by field.
    Both sides changed the same item: the newer side wins, except text boxes, where the other version is kept as a copy. */
 const MERGE_KINDS = new Set(['content', 'page', 'sec', 'nb']);
-function stable(v){
-  if(Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
-  if(v && typeof v === 'object') return '{' + Object.keys(v).filter(k => v[k] !== undefined).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
-  return v === undefined ? 'null' : JSON.stringify(v);
-}
 const baseGet = id => IDB.get('meta', 'base:' + id);
 const baseSet = (id, d, ts) => IDB.put('meta', {d, ts: ts || null}, 'base:' + id);
 const baseDel = id => IDB.del('meta', 'base:' + id);
-function mergeKeys(b, l, r, lNew){
-  b = b || {}; l = l || {}; r = r || {};
-  const out = {};
-  for(const k of new Set([...Object.keys(l), ...Object.keys(r)])){
-    const sb = stable(b[k]), sl = stable(l[k]), sr = stable(r[k]);
-    const v = sl === sr ? l[k] : sl === sb ? r[k] : sr === sb ? l[k] : lNew ? l[k] : r[k];
-    if(v !== undefined) out[k] = v;
-  }
-  return out;
-}
 // b, l, r: content data with serialised items. lNew: the local side was edited more recently.
 // (1.59.1) strokes and other items added on this device in the last few minutes (page id + time). A merge never
 // drops one of these just because the other side lacks it: two devices uploading at almost the same moment could
 // let the older copy overwrite the server, which then looked like the new strokes had been erased elsewhere.
 const freshItems = new Map(), FRESH_MS = 5 * 60000;
 const isFresh = id => { const t = freshItems.get(id); return !!t && Date.now() - t < FRESH_MS; };
-function mergeContent(b, l, r, lNew, keep){
-  const map = d => new Map(((d && d.items) || []).filter(it => it && it.id).map(it => [it.id, it]));
-  const bi = map(b), li = map(l), ri = map(r);
-  const pick = new Map(), extra = [];
-  let copies = 0;
-  for(const id of new Set([...li.keys(), ...ri.keys()])){
-    const B = bi.get(id), L = li.get(id), R = ri.get(id);
-    const kb = B ? stable(B) : null, kl = L ? stable(L) : null, kr = R ? stable(R) : null;
-    let v;
-    if(kl === kr) v = L;
-    else if(kl === kb) v = !R && keep && keep(id) ? L : R;   // changed (or deleted) only on the other device
-    else if(kr === kb) v = L;          // changed (or deleted) only here
-    else if(!L) v = R;                 // deleted here, changed there: keep the change
-    else if(!R) v = L;
-    else {
-      v = lNew ? L : R;
-      const o = lNew ? R : L;
-      if(o.t === 'x'){                 // two different edits of one text box: keep both
-        const cp = Object.assign({}, o, {id: (o.id[0] || 'x') + newId(), x: (o.x || 0) + 24, y: (o.y || 0) + 24});
-        delete cp.g;
-        extra.push(cp); copies++;
-      }
-    }
-    if(v) pick.set(id, v);
-  }
-  // drawing order: this device's order, with the other device's new items slotted in after their neighbour there
-  const order = [...li.keys()].filter(id => pick.has(id));
-  const pos = new Set(order);
-  let prev = null;
-  for(const id of ri.keys()){
-    if(!pick.has(id)) continue;
-    if(!pos.has(id)){ order.splice(prev === null ? 0 : order.indexOf(prev) + 1, 0, id); pos.add(id); }
-    prev = id;
-  }
-  const strip = d => { const o = Object.assign({}, d || {}); delete o.items; return o; };
-  const data = mergeKeys(strip(b), strip(l), strip(r), lNew);
-  data.items = order.map(id => pick.get(id)).concat(extra);
-  return {data, copies};
-}
 let mergeToastT = 0;
 function mergeNote(copies){
   if(!copies) return;
@@ -1188,183 +1109,7 @@ function setStatus(){
 /* =====================================================================
    Ink geometry
    ===================================================================== */
-function encPts(p){
-  const out = []; let px = 0, py = 0;
-  for(let i = 0; i < p.length; i += 3){
-    const X = Math.round(p[i] * 4), Y = Math.round(p[i+1] * 4), P = Math.round(clamp(p[i+2], 0, 1) * 31);
-    out.push((X - px).toString(36), (Y - py).toString(36), P.toString(36));
-    px = X; py = Y;
-  }
-  return out.join(',');
-}
-function decPts(str){
-  if(Array.isArray(str)) return str.slice();
-  if(!str) return [];
-  const a = String(str).split(','), p = []; let X = 0, Y = 0;
-  for(let i = 0; i + 2 < a.length; i += 3){
-    X += parseInt(a[i], 36); Y += parseInt(a[i+1], 36);
-    p.push(X / 4, Y / 4, parseInt(a[i+2], 36) / 31);
-  }
-  return p;
-}
-const ser = it => it.t === 's' ? Object.assign({}, it, {p: encPts(it.p)}) : it;
-// optional fade on any item (1.40): o between 0.1 and 1, missing = fully visible (older versions just ignore it)
-const opOf = it => it && it.o > 0 && it.o < 1 ? it.o : 1;
-const deser = it => it && it.t === 's' ? Object.assign({}, it, {p: decPts(it.p)}) : it;
-const r1 = v => Math.round(v * 10) / 10;
 
-function strokeShape(it){
-  const p = it.p, m = p.length / 3, base = it.w / 2;
-  // light smoothing of the recorded points (1-2-1) against jitter, ends kept where the pen touched down and lifted.
-  // (1.47) only where points are close together: far apart (fast writing) it would shrink loops, and the curve below
-  // already rounds those.
-  const X = new Array(m), Y = new Array(m), Rr = new Array(m);
-  for(let i = 0; i < m; i++){
-    const mid = i > 0 && i < m - 1;
-    let f = 0;
-    if(mid){ const d = (Math.hypot(p[i*3] - p[i*3-3], p[i*3+1] - p[i*3-2]) + Math.hypot(p[i*3+3] - p[i*3], p[i*3+4] - p[i*3+1])) / 2; f = d <= 3 ? 1 : d >= 8 ? 0 : (8 - d) / 5; }
-    X[i] = f ? p[i*3] + f * ((p[i*3-3] + 2*p[i*3] + p[i*3+3]) / 4 - p[i*3]) : p[i*3];
-    Y[i] = f ? p[i*3+1] + f * ((p[i*3-2] + 2*p[i*3+1] + p[i*3+4]) / 4 - p[i*3+1]) : p[i*3+1];
-    const pr = mid ? (p[i*3-1] + 2*p[i*3+2] + p[i*3+5]) / 4 : p[i*3+2];
-    Rr[i] = it.hl ? base : Math.max(0.3, base * (0.3 + pr));
-  }
-  if(m < 3) return {xs: X, ys: Y, rs: Rr, n: m, at: X.map((_, i) => i)};
-  // (1.47) smooth curves: between recorded points the line follows a centripetal Catmull-Rom curve instead of a
-  // straight piece, so fast writing (points far apart) gives round letters instead of corners. Rendering only;
-  // the stored points are unchanged, so older strokes get it too and the data format stays the same.
-  const step = Math.max(0.6, base * 0.5);
-  const xs = [X[0]], ys = [Y[0]], rs = [Rr[0]], at = [0];   // at[i] = index in xs of recorded point i
-  for(let i = 0; i < m - 1; i++){
-    const len = Math.hypot(X[i+1] - X[i], Y[i+1] - Y[i]);
-    const k = Math.min(16, Math.floor(len / step));
-    if(k >= 2){
-      const a = i > 0 ? i - 1 : i, d = i + 2 < m ? i + 2 : i + 1;
-      const P = [[X[a], Y[a]], [X[i], Y[i]], [X[i+1], Y[i+1]], [X[d], Y[d]]];
-      if(a === i) P[0] = [2*X[i] - X[i+1], 2*Y[i] - Y[i+1]];
-      if(d === i + 1) P[3] = [2*X[i+1] - X[i], 2*Y[i+1] - Y[i]];
-      const tj = (q, r) => Math.max(1e-4, Math.sqrt(Math.hypot(r[0] - q[0], r[1] - q[1])));
-      const t1 = tj(P[0], P[1]), t2 = t1 + tj(P[1], P[2]), t3 = t2 + tj(P[2], P[3]);
-      for(let j = 1; j < k; j++){
-        const t = t1 + (t2 - t1) * j / k;
-        const out = [0, 1].map(c => {
-          const A1 = ((t1 - t) * P[0][c] + t * P[1][c]) / t1;
-          const A2 = ((t2 - t) * P[1][c] + (t - t1) * P[2][c]) / (t2 - t1);
-          const A3 = ((t3 - t) * P[2][c] + (t - t2) * P[3][c]) / (t3 - t2);
-          const B1 = ((t2 - t) * A1 + t * A2) / t2;
-          const B2 = ((t3 - t) * A2 + (t - t1) * A3) / (t3 - t1);
-          return ((t2 - t) * B1 + (t - t1) * B2) / (t2 - t1);
-        });
-        if(!isFinite(out[0]) || !isFinite(out[1])) continue;
-        xs.push(out[0]); ys.push(out[1]); rs.push(Rr[i] + (Rr[i+1] - Rr[i]) * j / k);
-      }
-    }
-    xs.push(X[i+1]); ys.push(Y[i+1]); rs.push(Rr[i+1]); at.push(xs.length - 1);
-  }
-  return {xs, ys, rs, n: xs.length, at};
-}
-// Filled outline of a variable-width stroke, as a Path2D or an SVG path string.
-// (1.57) a filled stroke (fl:1, e.g. a graph's solid background): its points are the outline, filled as is
-function fillPath(it, svg){
-  const p = it.p, n = p.length / 3;
-  if(n < 3) return svg ? '' : new Path2D();
-  if(svg){ let d = `M${r1(p[0])} ${r1(p[1])}`; for(let i = 3; i < p.length; i += 3) d += `L${r1(p[i])} ${r1(p[i+1])}`; return d + 'Z'; }
-  const P = new Path2D(); P.moveTo(p[0], p[1]); for(let i = 3; i < p.length; i += 3) P.lineTo(p[i], p[i+1]); P.closePath(); return P;
-}
-// drawing order: fills first, then highlighter, then pen ink on top
-const inkPass = it => it.fl ? 2 : it.hl ? 1 : 0;
-function strokePath(it, svg){
-  if(it.fl) return fillPath(it, svg);
-  const {xs, ys, rs, n} = strokeShape(it);
-  if(!n) return svg ? '' : new Path2D();
-  let single = n === 1;
-  if(!single){ let span = 0; for(let i = 1; i < n; i++) span = Math.max(span, Math.abs(xs[i]-xs[0]) + Math.abs(ys[i]-ys[0])); single = span < 0.6; }
-  if(single){
-    const r = rs[0];
-    if(svg) return `M${r1(xs[0]-r)} ${r1(ys[0])}a${r1(r)} ${r1(r)} 0 1 0 ${r1(2*r)} 0a${r1(r)} ${r1(r)} 0 1 0 ${r1(-2*r)} 0Z`;
-    const P = new Path2D(); P.arc(xs[0], ys[0], r, 0, Math.PI * 2); return P;
-  }
-  return inkOutline(xs, ys, rs, n, 0, n - 1, true, true, svg);
-}
-/* Outline of samples s0..s1 of a stroke shape (strokePath and the live preview's pieces use it).
-   Normally one outline along both edges with round ends. (1.61.1) Where a wide stroke turns back sharply
-   (scribbling with the highlighter) that outline folds over itself and the folds cancel out, leaving holes;
-   such strokes are filled instead as overlapping pieces: a band per step plus a round piece at each bend, all
-   turning the same way so they only add up. Everything the pen passed over is then ink. */
-function inkOutline(xs, ys, rs, n, s0, s1, capA, capB, svg){
-  const L = [], R = [], A = [];
-  let lnx = 0, lny = -1;
-  for(let i = s0; i <= s1; i++){
-    const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
-    let dx = xs[i1] - xs[i0], dy = ys[i1] - ys[i0];
-    const len = Math.hypot(dx, dy);
-    let nx, ny;
-    if(len < 1e-6){ nx = lnx; ny = lny; } else { dx /= len; dy /= len; nx = -dy; ny = dx; }
-    lnx = nx; lny = ny;
-    A.push(Math.atan2(ny, nx));
-    L.push([xs[i] + nx * rs[i], ys[i] + ny * rs[i]]);
-    R.push([xs[i] - nx * rs[i], ys[i] - ny * rs[i]]);
-  }
-  const k = L.length;
-  // does an edge run backwards anywhere (the outline folds)?
-  let fold = false;
-  for(let j = 0; j + 1 < k && !fold; j++){
-    const cx = xs[s0 + j + 1] - xs[s0 + j], cy = ys[s0 + j + 1] - ys[s0 + j];
-    if(Math.abs(cx) + Math.abs(cy) < 1e-6) continue;
-    if((L[j+1][0] - L[j][0]) * cx + (L[j+1][1] - L[j][1]) * cy < 0 || (R[j+1][0] - R[j][0]) * cx + (R[j+1][1] - R[j][1]) * cy < 0) fold = true;
-  }
-  strokePath.lastMode = fold ? 'pieces' : 'outline';
-  if(fold) return inkPieces(xs, ys, rs, s0, s1, svg);
-  if(svg){
-    let d = `M${r1(L[0][0])} ${r1(L[0][1])}`;
-    for(let i = 1; i < k; i++) d += `L${r1(L[i][0])} ${r1(L[i][1])}`;
-    if(capB){ const re = rs[s1]; d += `A${r1(re)} ${r1(re)} 0 0 0 ${r1(R[k-1][0])} ${r1(R[k-1][1])}`; } else d += `L${r1(R[k-1][0])} ${r1(R[k-1][1])}`;
-    for(let i = k - 2; i >= 0; i--) d += `L${r1(R[i][0])} ${r1(R[i][1])}`;
-    if(capA) d += `A${r1(rs[s0])} ${r1(rs[s0])} 0 0 0 ${r1(L[0][0])} ${r1(L[0][1])}`;
-    return d + 'Z';
-  }
-  const P = new Path2D();
-  P.moveTo(L[0][0], L[0][1]);
-  for(let i = 1; i < k; i++) P.lineTo(L[i][0], L[i][1]);
-  if(capB) P.arc(xs[s1], ys[s1], rs[s1], A[k-1], A[k-1] - Math.PI, true); else P.lineTo(R[k-1][0], R[k-1][1]);
-  for(let i = k - 2; i >= 0; i--) P.lineTo(R[i][0], R[i][1]);
-  if(capA) P.arc(xs[s0], ys[s0], rs[s0], A[0] + Math.PI, A[0], true);
-  P.closePath();
-  return P;
-}
-// (1.61.1) a stroke as overlapping pieces: one band per step (its own direction, so it never twists) and a disc
-// wherever two steps meet at an angle, plus both ends. All pieces wind the same way, so with the normal fill rule
-// overlaps add up and never cancel (no holes).
-function inkPieces(xs, ys, rs, s0, s1, svg){
-  const P = svg ? null : new Path2D();
-  let d = '';
-  const disc = (x, y, r) => {
-    if(svg) d += `M${r1(x + r)} ${r1(y)}a${r1(r)} ${r1(r)} 0 1 0 ${r1(-2 * r)} 0a${r1(r)} ${r1(r)} 0 1 0 ${r1(2 * r)} 0Z`;
-    else { P.moveTo(x + r, y); P.arc(x, y, r, 0, Math.PI * 2, true); }
-  };
-  let pdx = 0, pdy = 0, have = false;
-  disc(xs[s0], ys[s0], rs[s0]);
-  for(let i = s0; i < s1; i++){
-    let dx = xs[i+1] - xs[i], dy = ys[i+1] - ys[i];
-    const len = Math.hypot(dx, dy);
-    if(len < 1e-6) continue;
-    dx /= len; dy /= len;
-    // a disc at this point if the path bends here (keeps the outer side of the bend filled)
-    if(have && (pdx * dx + pdy * dy) < 0.9995 && rs[i] * Math.acos(Math.max(-1, Math.min(1, pdx * dx + pdy * dy))) > 0.05) disc(xs[i], ys[i], rs[i]);
-    const nx = -dy, ny = dx, a = rs[i], b = rs[i+1];
-    const q = [[xs[i] + nx * a, ys[i] + ny * a], [xs[i+1] + nx * b, ys[i+1] + ny * b], [xs[i+1] - nx * b, ys[i+1] - ny * b], [xs[i] - nx * a, ys[i] - ny * a]];
-    if(svg) d += `M${r1(q[0][0])} ${r1(q[0][1])}L${r1(q[1][0])} ${r1(q[1][1])}L${r1(q[2][0])} ${r1(q[2][1])}L${r1(q[3][0])} ${r1(q[3][1])}Z`;
-    else { P.moveTo(q[0][0], q[0][1]); P.lineTo(q[1][0], q[1][1]); P.lineTo(q[2][0], q[2][1]); P.lineTo(q[3][0], q[3][1]); }   // no closePath: filling closes each piece anyway, and closePath made Chrome's Path2D ~100x slower here
-    pdx = dx; pdy = dy; have = true;
-  }
-  disc(xs[s1], ys[s1], rs[s1]);
-  return svg ? d : P;
-}
-function strokeBox(it){
-  const p = it.p; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for(let i = 0; i < p.length; i += 3){ const x = p[i], y = p[i+1]; if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y; }
-  const m = it.w / 2 + 1;
-  return [x0 - m, y0 - m, x1 + m, y1 + m];
-}
 const geo = new Map();
 // imported pages/pictures (always shown light, also in dark mode)
 function paperRects(){
@@ -6864,6 +6609,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.61.3', '2026-10-25', ['Behind the scenes: part of the app moved into separate files with fast automatic checks, so future changes are safer. Nothing changes in how the app works']],
   ['1.61.2', '2026-10-25', ['Pencil: on curves the line drawn ahead of the tip now bends with the curve (in 1.61 it went straight on for a moment and then snapped back)']],
   ['1.61.1', '2026-10-25', ['Fix: scribbling with the highlighter (or the pen) back and forth no longer leaves white gaps and slits in the colour, on screen and in exported PDFs']],
   ['1.61', '2026-10-25', ['Pencil: the line keeps up with the tip better (drawn slightly ahead while you write fast in one direction; what is saved is exactly what you wrote)', 'Long strokes and drawings stay smooth while drawing (only the newest part is redrawn)', 'Word import, backups and formulas now also work offline the first time (before they needed to be used once online)']],
@@ -7290,60 +7036,6 @@ $('compassOpen').addEventListener('click', () => {
 /* =====================================================================
    Graphs: axes with ticks, numbers, grid and an optional plotted function
    ===================================================================== */
-// Small safe formula parser for y = f(x): numbers, x (or t), + - * / ^, brackets, implicit multiplication,
-// sin cos tan asin acos atan sqrt abs exp ln log, pi, e
-function parseFn(src){
-  const s = String(src || '').replace(/^\s*[yf]\s*(\(\s*[xt]\s*\))?\s*=/i, '').replace(/·|×/g, '*').replace(/−/g, '-').replace(/,/g, '.').trim();
-  if(!s) return null;
-  const toks = []; let i = 0;
-  while(i < s.length){
-    const c = s[i];
-    if(/\s/.test(c)){ i++; continue; }
-    const num = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(s.slice(i));
-    if(num && !(num[2] && /^e[a-z]/i.test(s.slice(i + num[1].length)))){ toks.push({t: 'n', v: parseFloat(num[0])}); i += num[0].length; continue; }
-    const id = /^[a-z]+/i.exec(s.slice(i));
-    if(id){ toks.push({t: 'i', v: id[0].toLowerCase()}); i += id[0].length; continue; }
-    if('+-*/^()'.includes(c)){ toks.push({t: c}); i++; continue; }
-    throw new Error('Unknown sign "' + c + '"');
-  }
-  const F = {sin: Math.sin, cos: Math.cos, tan: Math.tan, asin: Math.asin, acos: Math.acos, atan: Math.atan, sqrt: Math.sqrt, abs: Math.abs, exp: Math.exp, ln: Math.log, log: Math.log10};
-  let p = 0;
-  const peek = () => toks[p], next = () => toks[p++];
-  const startsPrimary = t => t && (t.t === 'n' || t.t === 'i' || t.t === '(');
-  function expr(){ let a = term(); while(peek() && (peek().t === '+' || peek().t === '-')){ const op = next().t, l = a, r = term(); a = op === '+' ? x => l(x) + r(x) : x => l(x) - r(x); } return a; }
-  function term(){
-    let a = unary();
-    for(;;){
-      const t = peek();
-      if(t && (t.t === '*' || t.t === '/')){ next(); const l = a, r = unary(); a = t.t === '*' ? x => l(x) * r(x) : x => l(x) / r(x); }
-      else if(startsPrimary(t)){ const l = a, r = power(); a = x => l(x) * r(x); }
-      else return a;
-    }
-  }
-  function unary(){ const t = peek(); if(t && (t.t === '-' || t.t === '+')){ next(); const a = unary(); return t.t === '-' ? x => -a(x) : a; } return power(); }
-  function power(){ const b = primary(); if(peek() && peek().t === '^'){ next(); const e = unary(); return x => Math.pow(b(x), e(x)); } return b; }
-  function primary(){
-    const t = next();
-    if(!t) throw new Error('The formula ends too early');
-    if(t.t === 'n'){ const v = t.v; return () => v; }
-    if(t.t === '('){ const a = expr(); if(!peek() || next().t !== ')') throw new Error('A bracket is not closed'); return a; }
-    if(t.t === 'i'){
-      if(t.v === 'x' || t.v === 't') return x => x;
-      if(t.v === 'pi') return () => Math.PI;
-      if(t.v === 'e') return () => Math.E;
-      if(F[t.v]){
-        const f = F[t.v];
-        if(peek() && peek().t === '('){ next(); const a = expr(); if(!peek() || next().t !== ')') throw new Error('A bracket is not closed'); return x => f(a(x)); }
-        const a = power(); return x => f(a(x));
-      }
-      throw new Error('Unknown name "' + t.v + '"');
-    }
-    throw new Error('Unexpected "' + t.t + '"');
-  }
-  const f = expr();
-  if(p < toks.length) throw new Error('Unexpected "' + (toks[p].v ?? toks[p].t) + '"');
-  return f;
-}
 function labelTex(s){
   s = String(s || '').trim();
   if(!s) return '';
@@ -8351,28 +8043,6 @@ const jobWhy = code => ({not_allowed: 'This account is not allowed to use Claude
 /* =====================================================================
    Put an Ask Claude answer on the page
    ===================================================================== */
-const GREEK = {alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', phi: 'φ', varphi: 'φ', omega: 'ω', eta: 'η', Delta: 'Δ', Omega: 'Ω', Sigma: 'Σ', Phi: 'Φ', Gamma: 'Γ', Theta: 'Θ', Lambda: 'Λ', Pi: 'Π'};
-const SUP = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '⁺', 'n': 'ⁿ'};
-const SUB = {'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉'};
-// Inline maths as readable plain text for a text box (the text box cannot show LaTeX).
-function texPlain(t){
-  let s = String(t);
-  for(let i = 0; i < 6; i++){
-    const before = s;
-    s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_, a, b) => (/^[\w.]+$/.test(a) ? a : '(' + a + ')') + '/' + (/^[\w.]+$/.test(b) ? b : '(' + b + ')'))
-         .replace(/\\sqrt\s*\{([^{}]*)\}/g, (_, a) => '√' + (/^[\w.]+$/.test(a) ? a : '(' + a + ')'))
-         .replace(/\\(?:text|mathrm|mathbf|operatorname|mathit)\s*\{([^{}]*)\}/g, '$1');
-    if(s === before) break;
-  }
-  s = s.replace(/\^\{?\\circ\}?/g, '°').replace(/\\degree/g, '°')
-       .replace(/\^\{([0-9+\-n]+)\}|\^([0-9+\-n])/g, (_, a, b) => [...(a || b)].map(ch => SUP[ch] || ch).join(''))
-       .replace(/_\{([0-9]+)\}|_([0-9])/g, (_, a, b) => [...(a || b)].map(ch => SUB[ch] || ch).join(''))
-       .replace(/\\(cdot)/g, '·').replace(/\\times/g, '×').replace(/\\div/g, '÷').replace(/\\pm/g, '±').replace(/\\approx/g, '≈')
-       .replace(/\\neq?/g, '≠').replace(/\\le(q)?/g, '≤').replace(/\\ge(q)?/g, '≥').replace(/\\infty/g, '∞').replace(/\\(?:right|Right)arrow|\\to/g, '→')
-       .replace(/\\Rightarrow/g, '⇒').replace(/\\left|\\right/g, '').replace(/\\[,;:!]|\\quad|\\qquad|~/g, ' ')
-       .replace(/\\([A-Za-z]+)/g, (m, w) => GREEK[w] || w).replace(/[{}]/g, '').replace(/\s{2,}/g, ' ');
-  return s.trim();
-}
 function mdInline(t){
   return esc(t).replace(/`([^`]+)`/g, '$1').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
 }
@@ -9459,71 +9129,6 @@ function fmtCalc(v){
   let s = a >= 1e12 || a < 1e-9 ? v.toExponential(8).replace(/\.?0+e/, 'e') : String(parseFloat(v.toPrecision(10)));
   return s.replace(/e\+?/, ' × 10^').replace(/^-/, '−');
 }
-// Safe evaluator: + − × ÷ ^ ( ) % ! E, implicit multiplication, functions, π, e, Ans; missing ")" are added.
-function calcEval(src, ans, deg){
-  const s = String(src).replace(/×10\^/g, 'E');
-  const toks = []; let i = 0;
-  while(i < s.length){
-    const c = s[i];
-    if(/\s/.test(c)){ i++; continue; }
-    const num = /^(\d+\.?\d*|\.\d+)/.exec(s.slice(i));
-    if(num){ toks.push({t: 'n', v: parseFloat(num[0])}); i += num[0].length; continue; }
-    const id = /^(asin|acos|atan|sin|cos|tan|sqrt|cbrt|ln|log|exp|abs|pi|Ans|e)/.exec(s.slice(i));
-    if(id){ toks.push({t: 'i', v: id[0]}); i += id[0].length; continue; }
-    if('+-*/^()%!E'.includes(c)){ toks.push({t: c}); i++; continue; }
-    throw new Error('Unknown sign ' + c);
-  }
-  const open = toks.filter(t => t.t === '(').length - toks.filter(t => t.t === ')').length;
-  for(let k = 0; k < open; k++) toks.push({t: ')'});
-  const D = deg ? Math.PI / 180 : 1;
-  const F = {sin: x => Math.sin(x * D), cos: x => Math.cos(x * D), tan: x => { const r = Math.tan(x * D); return deg && Math.abs(((x % 180) + 180) % 180 - 90) < 1e-12 ? NaN : r; },
-    asin: x => Math.asin(x) / D, acos: x => Math.acos(x) / D, atan: x => Math.atan(x) / D,
-    sqrt: Math.sqrt, cbrt: Math.cbrt, ln: Math.log, log: Math.log10, exp: Math.exp, abs: Math.abs};
-  let p = 0;
-  const peek = () => toks[p], next = () => toks[p++];
-  const starts = t => t && (t.t === 'n' || t.t === 'i' || t.t === '(');
-  const fact = n => { if(n < 0 || n !== Math.floor(n) || n > 170) return NaN; let r = 1; for(let k = 2; k <= n; k++) r *= k; return r; };
-  function expr(){ let a = term(); while(peek() && (peek().t === '+' || peek().t === '-')){ const op = next().t, b = term(); a = op === '+' ? a + b : a - b; } return a; }
-  function term(){
-    let a = unary();
-    for(;;){
-      const t = peek();
-      if(t && (t.t === '*' || t.t === '/')){ next(); const b = unary(); a = t.t === '*' ? a * b : a / b; }
-      else if(starts(t)){ a *= power(); }
-      else return a;
-    }
-  }
-  function unary(){ const t = peek(); if(t && (t.t === '-' || t.t === '+')){ next(); const a = unary(); return t.t === '-' ? -a : a; } return power(); }
-  function power(){ const b = postfix(); if(peek() && peek().t === '^'){ next(); return Math.pow(b, unary()); } return b; }
-  function postfix(){
-    let a = primary();
-    for(;;){
-      const t = peek();
-      if(t && t.t === '%'){ next(); a /= 100; }
-      else if(t && t.t === '!'){ next(); a = fact(a); }
-      else if(t && t.t === 'E'){ next(); a *= Math.pow(10, unary()); }
-      else return a;
-    }
-  }
-  function primary(){
-    const t = next();
-    if(!t) throw new Error('Incomplete');
-    if(t.t === 'n') return t.v;
-    if(t.t === '('){ const a = expr(); if(!peek() || peek().t !== ')') throw new Error('Missing )'); next(); return a; }
-    if(t.t === 'i'){
-      if(t.v === 'pi') return Math.PI;
-      if(t.v === 'e') return Math.E;
-      if(t.v === 'Ans') return ans;
-      const f = F[t.v];
-      if(peek() && peek().t === '('){ next(); const a = expr(); if(peek() && peek().t === ')') next(); return f(a); }
-      return f(power());
-    }
-    throw new Error('Incomplete');
-  }
-  const v = expr();
-  if(p < toks.length) throw new Error('Check the expression');
-  return v;
-}
 {
   // keys: [label, inverse label, token, inverse token, class]
   const K = [
@@ -10286,6 +9891,6 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {Live, HLS, invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, Ask, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, Ask, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, detectLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {Live, HLS, invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });
 })();

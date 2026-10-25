@@ -1,7 +1,8 @@
 // Inkwell offline cache. Bump VERSION whenever app files change.
-const VERSION = 'inkwell-1.61.2';   // releases: 1.0, then 1.1, 1.2, …
+const VERSION = 'inkwell-1.61.3';   // releases: 1.0, then 1.1, 1.2, …
 const SHELL = [
   './', './index.html', './app.css', './app.js', './config.js', './manifest.webmanifest',
+  './core/util.js', './core/ink.js', './core/merge.js', './core/text.js',
   './lib/pdf.min.js', './lib/pdf.worker.min.js', './lib/supabase.js',
   './lib/katex/katex.min.js', './lib/katex/katex.min.css',
   './lib/pdf-lib.min.js', './lib/docx/html2canvas.min.js',

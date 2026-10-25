@@ -119,8 +119,10 @@ RELEASING A CHANGE
      fix only          1.40 -> 1.40.1 -> 1.40.2
      new feature       1.40.2 -> 1.41
      big update        1.x -> 2.0 (redesign, new storage or sync)
-3. Run the tests: tests/run.sh (headless Chromium with Playwright,
-   fake Supabase and Google). They also run on GitHub on every push.
+3. Run the tests: tests/run.sh. First the fast checks (tests/unit with
+   Node, about a second; ESLint if installed), then the browser tests
+   (headless Chromium with Playwright, fake Supabase and Google).
+   They also run on GitHub on every push.
 4. Commit and push to main. GitHub Pages redeploys in about a minute.
 5. On the iPad: close Inkwell fully and open it again.
 
@@ -130,11 +132,14 @@ converted when it loads.
 
 Files:
   index.html, app.css, app.js   the app
+  core/                         pure code app.js uses (ink shapes, merging,
+                                maths, helpers); loaded before app.js
   config.js                     Supabase URL + key, Google and OneNote client IDs
   sw.js                         offline cache (VERSION)
   manifest.webmanifest, icons/  home-screen app
   privacy.html                  privacy page for the Google consent screen
   lib/                          pdf.js, pdf-lib, KaTeX, supabase-js, docx-preview
   setup.sql, supabase/          database setup, migrations, edge functions
-  tests/                        browser tests
+  tests/                        browser tests; tests/unit = fast Node tests
+  eslint.config.js              code check settings (finds mistakes, no build)
   .github/workflows/            tests on every push, Supabase keep-alive

@@ -15,6 +15,18 @@ for i in $(seq 1 50); do
 done
 OUT=$(mktemp -d)
 fail=0
+# (1.61.3) fast checks first: the pure code in core/ with Node (a second), then the lint report if ESLint is there
+echo "=== tests/unit (Node)"
+if node --test tests/unit/*.test.js > "$OUT/unit.log" 2>&1; then grep -E '^# (pass|fail)' "$OUT/unit.log"
+else
+  cat "$OUT/unit.log"; echo "FAILED: tests/unit"; fail=1
+  [ -n "${GITHUB_ACTIONS:-}" ] && grep -E '^not ok' "$OUT/unit.log" | head -20 | while IFS= read -r line; do echo "::error title=unit tests::${line//%/%25}"; done
+fi
+ESL="${ESLINT:-}"; [ -z "$ESL" ] && [ -x node_modules/.bin/eslint ] && ESL=node_modules/.bin/eslint
+if [ -n "$ESL" ]; then
+  echo "=== lint (ESLint)"
+  if ! "$ESL" --no-config-lookup -c eslint.config.js app.js core/*.js sw.js config.js; then echo "FAILED: lint"; fail=1; fi
+fi
 for t in tests/test_*.py; do
   echo "=== $t"
   log="$OUT/$(basename "$t").log"

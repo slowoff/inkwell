@@ -26,6 +26,6 @@ jobs:
         with:
           node-version: '22'
       - name: Install ESLint (checks the code for mistakes; the app itself has no build step)
-        run: npm install --no-save --no-package-lock eslint@9.13.0 globals@15.11.0
+        run: npm install --no-save --no-package-lock eslint@9.13.0 globals@15.11.0 acorn@8.14.0 acorn-walk@8.3.4
       - name: Run tests
         run: tests/run.sh

@@ -25,7 +25,7 @@ fi
 ESL="${ESLINT:-}"; [ -z "$ESL" ] && [ -x node_modules/.bin/eslint ] && ESL=node_modules/.bin/eslint
 if [ -n "$ESL" ]; then
   echo "=== lint (ESLint)"
-  if ! "$ESL" --no-config-lookup -c eslint.config.js app.js core/*.js sw.js config.js; then echo "FAILED: lint"; fail=1; fi
+  if ! "$ESL" --no-config-lookup -c eslint.config.js app.js app/*.js core/*.js sw.js config.js; then echo "FAILED: lint"; fail=1; fi
 fi
 for t in tests/test_*.py; do
   echo "=== $t"

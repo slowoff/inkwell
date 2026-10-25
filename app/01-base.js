@@ -45,7 +45,7 @@ const DEFAULT_PREFS = {
   finger: false,
   autoText: false,   // Write to text: pen writing becomes a typed text box (needs sign-in)
   snapLines: true,
-  lassoMode: 'free', // (1.53) Select tool: 'free' loop or 'box' rectangle
+  lassoMode: 'free', // (1.53) Select tool: 'free' loop or 'box' rectangle; (1.63) 'tap' = tap things to select them
   refLine: false,   // Reference line (1.42): faint line under the handwriting line being written
   ruler: {on: false, cx: null, cy: null, a: 0},
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},

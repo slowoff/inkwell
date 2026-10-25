@@ -111,7 +111,7 @@ function onUp(e){
     if(!gesture) return;
     if(gesture.kind === 'pending'){
       gesture = null;
-      if(performance.now() - t.t < 500) tapAt(t.target, sx, sy);
+      if(performance.now() - t.t < 500){ if(tapPick()) tapSelect(sx, sy, t.target); else tapAt(t.target, sx, sy); }   // (1.63) Tap mode: a finger tap selects too
     } else if(touches.size === 1 && gesture.kind === 'pinch'){
       const o = [...touches.values()][0];
       gesture = {kind: 'pan', lx: o.x, ly: o.y};
@@ -228,7 +228,7 @@ function startTool(e, sx, sy, pr){
     clearSel(); act.kind = 'erase'; act.mode = prefs.eraser.mode === 'area' ? 'area' : 'stroke';
     act.removed = []; act.added = new Map(); act.cursor = [sx, sy]; act.lastW = null; eraseAt(sx, sy);
   } else if(tool === 'lasso'){
-    act.kind = 'lasso'; act.poly = [sx, sy]; act.box = prefs.lassoMode === 'box';
+    act.kind = 'lasso'; act.poly = [sx, sy]; act.box = prefs.lassoMode === 'box'; act.tap = prefs.lassoMode === 'tap';
   } else if(tool === 'tape'){
     clearSel(); act.kind = 'tape'; act.w0 = [wx, wy]; act.w1 = [wx, wy];
   } else {

@@ -590,6 +590,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.63', '2026-10-25', ['Select tool: new "Tap" choice next to Free and Box. Tap things to select them (Pencil or finger), tap more to add them, tap a selected one to drop it, tap empty space to clear', 'Tapping writing on an imported page now selects the writing, not the whole page']],
   ['1.62.1', '2026-10-25', ['Behind the scenes: the app is now split into 13 smaller files by area, with automatic checks that they load in the right order. Nothing changes in how the app works']],
   ['1.62', '2026-10-25', ['Highlighter works like a real one: black text and lines under a highlight stay black, only the paper takes the colour (on screen, when printing and in exported PDFs)']],
   ['1.61.3', '2026-10-25', ['Behind the scenes: part of the app moved into separate files with fast automatic checks, so future changes are safer. Nothing changes in how the app works']],

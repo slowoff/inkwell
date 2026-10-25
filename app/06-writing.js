@@ -470,13 +470,18 @@ function pip(x, y, poly){
   }
   return inside;
 }
+// what is under a tap: (1.63) typed text and formulas first, then ink, then pictures and imported pages. Before,
+// a picture came before the ink on it, so a tap on writing over an imported page picked the whole page.
 function hitItem(sx, sy, target){
-  const el = target && target.closest && target.closest('.it');
-  if(el && cur.items.has(el.dataset.id)) return el.dataset.id;
-  for(const e2 of document.elementsFromPoint(SR.left + sx, SR.top + sy)){
-    const it = e2.closest && e2.closest('.it');
-    if(it && cur.items.has(it.dataset.id)) return it.dataset.id;
-  }
+  const back = [];
+  const look = el => {
+    const it = el && el.closest && el.closest('.it');
+    if(!it || !cur.items.has(it.dataset.id)) return null;
+    if(worldBack.contains(it)){ if(!back.includes(it.dataset.id)) back.push(it.dataset.id); return null; }
+    return it.dataset.id;
+  };
+  const f = look(target); if(f) return f;
+  for(const e2 of document.elementsFromPoint(SR.left + sx, SR.top + sy)){ const id = look(e2); if(id) return id; }
   const [wx, wy] = toWorld(sx, sy), tol = 14 / cam.z;
   const list = [...cur.items.values()].reverse();
   for(const it of list){
@@ -489,7 +494,21 @@ function hitItem(sx, sy, target){
       if(i + 3 < p.length && segDist2(wx, wy, p[i], p[i+1], p[i+3], p[i+4]) <= lim) return it.id;
     }
   }
-  return null;
+  return back[0] || null;
+}
+/* (1.63) Select tool, Tap mode (prefs.lassoMode 'tap'): tap things to select them, with the Pencil, a finger or the
+   mouse. Each tap adds what is under it (with its group); tapping something already selected drops it; tapping empty
+   space clears the selection. Drawing a loop still selects like Free. */
+const tapPick = () => prefs.tool === 'lasso' && prefs.lassoMode === 'tap';
+function tapSelect(sx, sy, target){
+  if(!cur) return;
+  const id = hitItem(sx, sy, target) || groupAt(sx, sy);
+  if(!id){ clearSel(); tapAt(target, sx, sy); return; }
+  const ids = withGroups([id]), now = sel ? sel.ids : [];
+  if(ids.every(x => now.includes(x))){
+    const left = now.filter(x => !ids.includes(x));
+    if(left.length) selectIds(left); else clearSel();
+  } else selectIds([...new Set([...now, ...ids])]);
 }
 // (1.53) rectangle as a loop (screen px), once around with 8 points per side so the lasso tests work unchanged
 function boxPoly(x0, y0, x1, y1){
@@ -500,6 +519,7 @@ function boxPoly(x0, y0, x1, y1){
 function finishLasso(a){
   const poly = a.poly;
   if(!a.moved || poly.length < 12){
+    if(a.tap){ tapSelect(a.sx, a.sy, a.target); return; }
     const id = hitItem(a.sx, a.sy, a.target) || groupAt(a.sx, a.sy);
     if(id) selectIds([id]); else { clearSel(); tapAt(a.target, a.sx, a.sy); }
     return;
@@ -655,6 +675,8 @@ const endSelDrag = e => {
   $('selAng').hidden = true;
   if(d.moved && d.cur){ commit(d.orig.map(it => [it.id, it]), d.cur.map(it => [it.id, it])); changed(); }
   else if(!d.moved){
+    // (1.63) Tap mode: a tap inside the selection adds or drops the thing under it
+    if(tapPick() && !d.handle && !d.rot){ tapSelect(d.sx, d.sy, null); return; }
     // tap inside the selection: open a formula or a text box directly
     if(d.orig.length === 1){ const it = d.orig[0]; if(it.t === 'm'){ clearSel(); openMath(it); } else if(it.t === 'x'){ clearSel(); startEditing(it.id); } }
   }

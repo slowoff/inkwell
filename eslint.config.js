@@ -33,5 +33,5 @@ const rules = {
 module.exports = [
   {ignores: ['lib/**', 'tests/**', 'supabase/**', 'node_modules/**']},
   {files: ['app/*.js'], languageOptions: {...base, globals: {...globals.browser, ...LIBS, ...APP}}, rules},
-  {files: ['core/*.js', 'sw.js', 'config.js'], languageOptions: {...base, globals: {...globals.browser, ...globals.serviceworker, ...LIBS, module: 'readonly', require: 'readonly'}}, rules}
+  {files: ['app.js', 'core/*.js', 'sw.js', 'config.js'], languageOptions: {...base, globals: {...globals.browser, ...globals.serviceworker, ...LIBS, module: 'readonly', require: 'readonly'}}, rules}
 ];

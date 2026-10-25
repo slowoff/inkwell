@@ -3,7 +3,8 @@ const VERSION = 'inkwell-1.62.1';   // releases: 1.0, then 1.1, 1.2, …
 const SHELL = [
   './', './index.html', './app.css', './config.js', './manifest.webmanifest',
   './core/util.js', './core/ink.js', './core/merge.js', './core/text.js',
-  // (1.62.1) the app itself, in load order (was app.js)
+  // (1.62.1) app.js loads and runs these (the app itself)
+  './app.js',
   './app/01-base.js',
   './app/02-store.js',
   './app/03-sync.js',

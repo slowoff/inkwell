@@ -1,7 +1,7 @@
 // (1.62.1) The app is split into app/NN-*.js classic scripts sharing one global scope. Checks:
 // - code that runs while a file loads uses nothing from a later file (it would not exist yet)
 // - no top-level name is declared in two files (the second file would fail to load)
-// - index.html loads core/ then app/ files in file-name order, and sw.js keeps all of them for offline use
+// - index.html loads core/ then app.js, which runs every app/ file in file-name order in one go; sw.js keeps them
 // Needs the acorn parser (installed by the Tests workflow; locally: npm i --no-save acorn acorn-walk).
 'use strict';
 const test = require('node:test');
@@ -14,18 +14,18 @@ try { acorn = require('acorn'); require('acorn-walk'); } catch {}
 const appFiles = fs.readdirSync(path.join(root, 'app')).filter(f => f.endsWith('.js')).sort();
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 
-test('index.html loads core/ and app/ files in order, sw.js keeps them offline', () => {
+test('index.html loads core/ files, then app.js, which runs every app/ file in order; sw.js keeps them offline', () => {
   const html = read('index.html');
   const srcs = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(m => m[1]);
   const core = ['core/util.js', 'core/ink.js', 'core/merge.js', 'core/text.js'];
-  const want = [...core, ...appFiles.map(f => 'app/' + f)];
-  const got = srcs.filter(s => s.startsWith('core/') || s.startsWith('app/'));
-  assert.deepEqual(got, want);
-  assert.ok(srcs.indexOf('config.js') < srcs.indexOf(want[0]), 'config.js first');
-  assert.ok(!srcs.includes('app.js'), 'no app.js any more');
+  assert.deepEqual(srcs.filter(s => s.startsWith('core/') || s === 'app.js'), [...core, 'app.js']);
+  assert.ok(!srcs.some(s => s.startsWith('app/')), 'app/ files are run by app.js, not by separate script tags');
+  assert.ok(srcs.indexOf('config.js') < srcs.indexOf(core[0]), 'config.js first');
+  const loader = read('app.js');
+  const listed = [...loader.matchAll(/'(app\/[^']+\.js)'/g)].map(m => m[1]);
+  assert.deepEqual(listed, appFiles.map(f => 'app/' + f), 'app.js lists every app/ file, in file-name order');
   const sw = read('sw.js');
-  for(const f of want) assert.ok(sw.includes(`'./${f}'`), `sw.js keeps ${f}`);
-  assert.ok(!sw.includes("'./app.js'"));
+  for(const f of [...core, 'app.js', ...listed]) assert.ok(sw.includes(`'./${f}'`), `sw.js keeps ${f}`);
 });
 
 test('every app file starts strict and none is empty', () => {

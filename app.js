@@ -1283,9 +1283,17 @@ function strokePath(it, svg){
     if(svg) return `M${r1(xs[0]-r)} ${r1(ys[0])}a${r1(r)} ${r1(r)} 0 1 0 ${r1(2*r)} 0a${r1(r)} ${r1(r)} 0 1 0 ${r1(-2*r)} 0Z`;
     const P = new Path2D(); P.arc(xs[0], ys[0], r, 0, Math.PI * 2); return P;
   }
+  return inkOutline(xs, ys, rs, n, 0, n - 1, true, true, svg);
+}
+/* Outline of samples s0..s1 of a stroke shape (strokePath and the live preview's pieces use it).
+   Normally one outline along both edges with round ends. (1.61.1) Where a wide stroke turns back sharply
+   (scribbling with the highlighter) that outline folds over itself and the folds cancel out, leaving holes;
+   such strokes are filled instead as overlapping pieces: a band per step plus a round piece at each bend, all
+   turning the same way so they only add up. Everything the pen passed over is then ink. */
+function inkOutline(xs, ys, rs, n, s0, s1, capA, capB, svg){
   const L = [], R = [], A = [];
   let lnx = 0, lny = -1;
-  for(let i = 0; i < n; i++){
+  for(let i = s0; i <= s1; i++){
     const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
     let dx = xs[i1] - xs[i0], dy = ys[i1] - ys[i0];
     const len = Math.hypot(dx, dy);
@@ -1296,23 +1304,60 @@ function strokePath(it, svg){
     L.push([xs[i] + nx * rs[i], ys[i] + ny * rs[i]]);
     R.push([xs[i] - nx * rs[i], ys[i] - ny * rs[i]]);
   }
+  const k = L.length;
+  // does an edge run backwards anywhere (the outline folds)?
+  let fold = false;
+  for(let j = 0; j + 1 < k && !fold; j++){
+    const cx = xs[s0 + j + 1] - xs[s0 + j], cy = ys[s0 + j + 1] - ys[s0 + j];
+    if(Math.abs(cx) + Math.abs(cy) < 1e-6) continue;
+    if((L[j+1][0] - L[j][0]) * cx + (L[j+1][1] - L[j][1]) * cy < 0 || (R[j+1][0] - R[j][0]) * cx + (R[j+1][1] - R[j][1]) * cy < 0) fold = true;
+  }
+  strokePath.lastMode = fold ? 'pieces' : 'outline';
+  if(fold) return inkPieces(xs, ys, rs, s0, s1, svg);
   if(svg){
     let d = `M${r1(L[0][0])} ${r1(L[0][1])}`;
-    for(let i = 1; i < n; i++) d += `L${r1(L[i][0])} ${r1(L[i][1])}`;
-    const re = rs[n-1];
-    d += `A${r1(re)} ${r1(re)} 0 0 0 ${r1(R[n-1][0])} ${r1(R[n-1][1])}`;
-    for(let i = n - 2; i >= 0; i--) d += `L${r1(R[i][0])} ${r1(R[i][1])}`;
-    d += `A${r1(rs[0])} ${r1(rs[0])} 0 0 0 ${r1(L[0][0])} ${r1(L[0][1])}Z`;
-    return d;
+    for(let i = 1; i < k; i++) d += `L${r1(L[i][0])} ${r1(L[i][1])}`;
+    if(capB){ const re = rs[s1]; d += `A${r1(re)} ${r1(re)} 0 0 0 ${r1(R[k-1][0])} ${r1(R[k-1][1])}`; } else d += `L${r1(R[k-1][0])} ${r1(R[k-1][1])}`;
+    for(let i = k - 2; i >= 0; i--) d += `L${r1(R[i][0])} ${r1(R[i][1])}`;
+    if(capA) d += `A${r1(rs[s0])} ${r1(rs[s0])} 0 0 0 ${r1(L[0][0])} ${r1(L[0][1])}`;
+    return d + 'Z';
   }
   const P = new Path2D();
   P.moveTo(L[0][0], L[0][1]);
-  for(let i = 1; i < n; i++) P.lineTo(L[i][0], L[i][1]);
-  P.arc(xs[n-1], ys[n-1], rs[n-1], A[n-1], A[n-1] - Math.PI, true);
-  for(let i = n - 2; i >= 0; i--) P.lineTo(R[i][0], R[i][1]);
-  P.arc(xs[0], ys[0], rs[0], A[0] + Math.PI, A[0], true);
+  for(let i = 1; i < k; i++) P.lineTo(L[i][0], L[i][1]);
+  if(capB) P.arc(xs[s1], ys[s1], rs[s1], A[k-1], A[k-1] - Math.PI, true); else P.lineTo(R[k-1][0], R[k-1][1]);
+  for(let i = k - 2; i >= 0; i--) P.lineTo(R[i][0], R[i][1]);
+  if(capA) P.arc(xs[s0], ys[s0], rs[s0], A[0] + Math.PI, A[0], true);
   P.closePath();
   return P;
+}
+// (1.61.1) a stroke as overlapping pieces: one band per step (its own direction, so it never twists) and a disc
+// wherever two steps meet at an angle, plus both ends. All pieces wind the same way, so with the normal fill rule
+// overlaps add up and never cancel (no holes).
+function inkPieces(xs, ys, rs, s0, s1, svg){
+  const P = svg ? null : new Path2D();
+  let d = '';
+  const disc = (x, y, r) => {
+    if(svg) d += `M${r1(x + r)} ${r1(y)}a${r1(r)} ${r1(r)} 0 1 0 ${r1(-2 * r)} 0a${r1(r)} ${r1(r)} 0 1 0 ${r1(2 * r)} 0Z`;
+    else { P.moveTo(x + r, y); P.arc(x, y, r, 0, Math.PI * 2, true); }
+  };
+  let pdx = 0, pdy = 0, have = false;
+  disc(xs[s0], ys[s0], rs[s0]);
+  for(let i = s0; i < s1; i++){
+    let dx = xs[i+1] - xs[i], dy = ys[i+1] - ys[i];
+    const len = Math.hypot(dx, dy);
+    if(len < 1e-6) continue;
+    dx /= len; dy /= len;
+    // a disc at this point if the path bends here (keeps the outer side of the bend filled)
+    if(have && (pdx * dx + pdy * dy) < 0.9995 && rs[i] * Math.acos(Math.max(-1, Math.min(1, pdx * dx + pdy * dy))) > 0.05) disc(xs[i], ys[i], rs[i]);
+    const nx = -dy, ny = dx, a = rs[i], b = rs[i+1];
+    const q = [[xs[i] + nx * a, ys[i] + ny * a], [xs[i+1] + nx * b, ys[i+1] + ny * b], [xs[i+1] - nx * b, ys[i+1] - ny * b], [xs[i] - nx * a, ys[i] - ny * a]];
+    if(svg) d += `M${r1(q[0][0])} ${r1(q[0][1])}L${r1(q[1][0])} ${r1(q[1][1])}L${r1(q[2][0])} ${r1(q[2][1])}L${r1(q[3][0])} ${r1(q[3][1])}Z`;
+    else { P.moveTo(q[0][0], q[0][1]); P.lineTo(q[1][0], q[1][1]); P.lineTo(q[2][0], q[2][1]); P.lineTo(q[3][0], q[3][1]); }   // no closePath: filling closes each piece anyway, and closePath made Chrome's Path2D ~100x slower here
+    pdx = dx; pdy = dy; have = true;
+  }
+  disc(xs[s1], ys[s1], rs[s1]);
+  return svg ? d : P;
 }
 function strokeBox(it){
   const p = it.p; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -2438,29 +2483,7 @@ const PRED_MS = 12, PRED_MAX = 14, PRED_LIFE = 45;
 const Live = {
   bake: null, bctx: null, upto: 0, key: '',
   // outline of samples s0..s1 of a strokeShape result, with round ends only where asked
-  part(sh, s0, s1, capA, capB){
-    const {xs, ys, rs, n} = sh, L = [], R = [], A = [];
-    let lnx = 0, lny = -1;
-    for(let i = s0; i <= s1; i++){
-      const i0 = Math.max(0, i - 1), i1 = Math.min(n - 1, i + 1);
-      let dx = xs[i1] - xs[i0], dy = ys[i1] - ys[i0];
-      const len = Math.hypot(dx, dy);
-      let nx, ny;
-      if(len < 1e-6){ nx = lnx; ny = lny; } else { dx /= len; dy /= len; nx = -dy; ny = dx; }
-      lnx = nx; lny = ny;
-      A.push(Math.atan2(ny, nx));
-      L.push([xs[i] + nx * rs[i], ys[i] + ny * rs[i]]);
-      R.push([xs[i] - nx * rs[i], ys[i] - ny * rs[i]]);
-    }
-    const k = L.length, P = new Path2D();
-    P.moveTo(L[0][0], L[0][1]);
-    for(let i = 1; i < k; i++) P.lineTo(L[i][0], L[i][1]);
-    if(capB) P.arc(xs[s1], ys[s1], rs[s1], A[k-1], A[k-1] - Math.PI, true); else P.lineTo(R[k-1][0], R[k-1][1]);
-    for(let i = k - 2; i >= 0; i--) P.lineTo(R[i][0], R[i][1]);
-    if(capA) P.arc(xs[s0], ys[s0], rs[s0], A[0] + Math.PI, A[0], true);
-    P.closePath();
-    return P;
-  },
+  part(sh, s0, s1, capA, capB){ return inkOutline(sh.xs, sh.ys, sh.rs, sh.n, s0, s1, capA, capB, false); },
   reset(){ this.upto = 0; this.key = ''; if(this.bctx){ this.bctx.setTransform(1, 0, 0, 1, 0, 0); this.bctx.clearRect(0, 0, this.bake.width, this.bake.height); } },
   // shape of recorded points from..to (inclusive), with enough neighbours that the middle comes out exactly as in the whole stroke
   win(a, from, to, extra){
@@ -6828,6 +6851,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.61.1', '2026-10-25', ['Fix: scribbling with the highlighter (or the pen) back and forth no longer leaves white gaps and slits in the colour, on screen and in exported PDFs']],
   ['1.61', '2026-10-25', ['Pencil: the line keeps up with the tip better (drawn slightly ahead while you write fast in one direction; what is saved is exactly what you wrote)', 'Long strokes and drawings stay smooth while drawing (only the newest part is redrawn)', 'Word import, backups and formulas now also work offline the first time (before they needed to be used once online)']],
   ['1.60.2', '2026-10-25', ['Fix: a keyboard shortcut pressed right after Ctrl+V (cut, undo, delete) is no longer ignored', 'Fix: sync can no longer lose strokes when two devices upload the same page at the same moment (the server now refuses to overwrite a newer copy; the device merges and tries again)', 'Fix: a change that reached the server a moment late could be skipped by your other devices for good; it is now picked up', 'Fix: a stroke erased on another device no longer comes back', 'Faster, lighter sync: it no longer reads all your notes every 20 seconds, only what changed']],
   ['1.60.1', '2026-10-22', ['Stick to text: highlights now fit the letters on imported pages (measured on the page itself), sit centred on the line and cover whole words, also on big headings']],

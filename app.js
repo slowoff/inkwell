@@ -16,6 +16,18 @@ const TABS = 6;
 const LSget = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } };
 const LSset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const pad2 = x => String(x).padStart(2, '0');
+// (1.60.2) server times ("2026-10-25T15:15:45.181416+00:00") compared safely: Safari's Date.parse may not take
+// six decimals, and two copies of one time may be written differently
+const tsMs = s => Date.parse(String(s).replace(/(\.\d{3})\d+/, '$1'));
+function tsKey(s){
+  if(!s) return '';
+  const ms = tsMs(s);
+  if(isNaN(ms)) return String(s);
+  const m = /\.(\d+)/.exec(s);
+  return String(Math.floor(ms / 1000)).padStart(12, '0') + ((m ? m[1] : '') + '000000').slice(0, 6);
+}
+const tsEq = (a, b) => !!a && !!b && (a === b || tsKey(a) === tsKey(b));
+const PULL_OVERLAP = 60000, PULL_LIST = 1000;
 const hhmm = ts => { const d = new Date(ts); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
 function fmtDate(ts){
   if(!ts || ts < 1e11) return '';
@@ -120,16 +132,37 @@ const IDB = {
   async open(){
     try {
       this.db = await new Promise((res, rej) => {
-        const r = indexedDB.open(Acct.name(), 1);
-        r.onupgradeneeded = () => {
+        // version 2 (1.60.2): index 'dirty' on docs, so a sync finds the unsynced docs without reading all of them
+        const r = indexedDB.open(Acct.name(), 2);
+        let waitT = 0;
+        r.onupgradeneeded = e => {
           const d = r.result;
-          d.createObjectStore('docs', {keyPath: 'id'});
-          d.createObjectStore('assets', {keyPath: 'id'});
-          d.createObjectStore('meta');
+          if(e.oldVersion < 1){
+            d.createObjectStore('docs', {keyPath: 'id'});
+            d.createObjectStore('assets', {keyPath: 'id'});
+            d.createObjectStore('meta');
+          }
+          const st = r.transaction.objectStore('docs');
+          if(!st.indexNames.contains('dirty')) st.createIndex('dirty', 'dirty');
+          // only numbers go into the index: any older "dirty: true" becomes 1, so no unsynced doc is missed
+          if(e.oldVersion >= 1) st.openCursor().onsuccess = ev => {
+            const c = ev.target.result; if(!c) return;
+            const v = c.value;
+            if(v.dirty && v.dirty !== 1){ v.dirty = 1; c.update(v); }
+            c.continue();
+          };
         };
-        r.onsuccess = () => res(r.result);
-        r.onerror = () => rej(r.error);
-        r.onblocked = () => rej(new Error('blocked'));
+        r.onsuccess = () => {
+          clearTimeout(waitT);
+          const db = r.result;
+          // a later version opened in another tab: let it upgrade (save first, then reload into the new version)
+          db.onversionchange = () => { flushSaves().catch(() => {}).finally(() => { db.close(); location.reload(); }); };
+          res(db);
+        };
+        r.onerror = () => { clearTimeout(waitT); rej(r.error); };
+        // (1.60.2) another tab still runs the previous version: wait for it (it reloads by itself after the update)
+        // instead of giving up and keeping notes in memory only, as before
+        r.onblocked = () => { clearTimeout(waitT); waitT = setTimeout(() => toast('Updating your notes: close other Inkwell tabs or windows to continue.'), 2500); };
       });
     } catch(e){
       this.mem = {docs: new Map(), assets: new Map(), meta: new Map()};
@@ -153,7 +186,18 @@ const IDB = {
     return this.req(store, 'readwrite', s => key !== undefined ? s.put(val, key) : s.put(val));
   },
   del(store, key){ if(this.mem){ this.mem[store].delete(key); return Promise.resolve(); } return this.req(store, 'readwrite', s => s.delete(key)); },
-  all(store){ if(this.mem) return Promise.resolve([...this.mem[store].values()]); return this.req(store, 'readonly', s => s.getAll()); }
+  all(store){ if(this.mem) return Promise.resolve([...this.mem[store].values()]); return this.req(store, 'readonly', s => s.getAll()); },
+  // (1.60.2) docs not uploaded yet, read through the 'dirty' index (before, every sync read the whole database twice)
+  dirty(){
+    if(this.mem) return Promise.resolve([...this.mem.docs.values()].filter(d => d.dirty).map(d => structuredClone(d)));
+    return this.req('docs', 'readonly', s => s.indexNames.contains('dirty') ? s.index('dirty').getAll(IDBKeyRange.only(1)) : s.getAll())
+      .then(list => (list || []).filter(d => d.dirty));
+  },
+  // docs whose id starts with prefix (e.g. 'c_' = page contents)
+  prefix(p){
+    if(this.mem) return Promise.resolve([...this.mem.docs.values()].filter(d => d.id.startsWith(p)));
+    return this.req('docs', 'readonly', s => s.getAll(IDBKeyRange.bound(p, p + '￿')));
+  }
 };
 
 /* Documents: nb (notebook), sec (section), page (title + order), content (paper + items), tmpl (template) */
@@ -332,34 +376,71 @@ const Sync = {
     this.running = false; setStatus(); renderSettings();
     if(this.again){ this.again = false; this.run(); }
   },
+  /* Pull (1.60.2). The server stamps a row (server_ts) when it is written, but the row only becomes visible when
+     its upload finishes, so a slow upload can show up with a time older than a faster one that a pull already
+     saw. Pulling strictly after the last time seen skipped such rows for good. Now every pull looks back
+     PULL_OVERLAP: first a light list of id + time, then only the rows not seen yet are downloaded in full. */
+  async seenLoad(){
+    const k = 'pullSeen:' + this.user.id;
+    if(!this.seen || this.seenUser !== this.user.id){ this.seen = (await IDB.get('meta', k)) || {}; this.seenUser = this.user.id; }
+    return this.seen;
+  },
+  seenSave(cursor){
+    if(!this.seen) return Promise.resolve();
+    if(cursor){   // keep only what a later overlapping pull can still list
+      const cut = tsKey(new Date(tsMs(cursor) - 2 * PULL_OVERLAP).toISOString());
+      for(const [id, ts] of Object.entries(this.seen)) if(tsKey(ts) < cut) delete this.seen[id];
+    }
+    return IDB.put('meta', this.seen, 'pullSeen:' + this.seenUser);
+  },
   async pull(){
     const key = 'pull:' + this.user.id;
-    let cursor = (await IDB.get('meta', key)) || '1970-01-01T00:00:00Z';
-    let changed = false;
+    const cursor = (await IDB.get('meta', key)) || null;
+    const seen = await this.seenLoad();
+    let from = cursor ? new Date(tsMs(cursor) - PULL_OVERLAP).toISOString() : '1970-01-01T00:00:00Z';
+    let top = cursor, changed = false, gte = false;
     for(let guard = 0; guard < 500; guard++){
-      const {data, error} = await this.sb.from('docs')
-        .select('id,kind,data,deleted,updated_at,server_ts')
-        .gt('server_ts', cursor).order('server_ts', {ascending: true}).limit(100);
+      let q = this.sb.from('docs').select('id,server_ts').order('server_ts', {ascending: true}).limit(PULL_LIST);
+      q = gte ? q.gte('server_ts', from) : q.gt('server_ts', from);
+      const {data, error} = await q;
       if(error) throw error;
-      for(const row of data) if(await applyRemote(row)) changed = true;
-      if(data.length){ cursor = data[data.length - 1].server_ts; await IDB.put('meta', cursor, key); }
-      if(data.length < 100) break;
+      const list = data || [];
+      const need = [...new Set(list.filter(r => !tsEq(seen[r.id], r.server_ts)).map(r => r.id))];
+      for(let i = 0; i < need.length; i += 100){
+        const full = await this.sb.from('docs').select('id,kind,data,deleted,updated_at,server_ts').in('id', need.slice(i, i + 100));
+        if(full.error) throw full.error;
+        const rows = (full.data || []).sort((a, b) => tsKey(a.server_ts) < tsKey(b.server_ts) ? -1 : 1);
+        for(const row of rows){
+          if(await applyRemote(row)) changed = true;
+          seen[row.id] = row.server_ts;
+          if(!top || tsKey(row.server_ts) > tsKey(top)) top = row.server_ts;
+        }
+      }
+      for(const r of list){ if(!seen[r.id]) seen[r.id] = r.server_ts; if(!top || tsKey(r.server_ts) > tsKey(top)) top = r.server_ts; }
+      if(list.length < PULL_LIST) break;
+      const last = list[list.length - 1].server_ts;
+      if(gte && tsEq(last, from)) break;   // a whole page with one time (cannot really happen): stop instead of looping
+      from = last; gte = true;
     }
+    if(top && top !== cursor) await IDB.put('meta', top, key);
+    await this.seenSave(top);
     if(changed) remoteChanged();
   },
   // Right before uploading: if another device changed one of these docs since this device last saw it,
   // fetch that version and merge it in first, so the upload does not overwrite it.
-  async checkStale(){
-    const cand = (await IDB.all('docs')).filter(d => d.dirty && !d.deleted && d.data && MERGE_KINDS.has(d.kind));
+  // (1.60.2) With the server's docs_put this is only needed for docs whose base has no server time yet (seeded
+  // from an old install); docs_put itself refuses to overwrite a newer copy. Without docs_put: all, as before.
+  async checkStale(seededOnly){
+    const cand = (await IDB.dirty()).filter(d => !d.deleted && d.data && MERGE_KINDS.has(d.kind));
     let merged = 0;
     for(let i = 0; i < cand.length; i += 100){
       const part = cand.slice(i, i + 100), bases = new Map();
-      for(const d of part){ const b = await baseGet(d.id); if(b) bases.set(d.id, b); }
+      for(const d of part){ const b = await baseGet(d.id); if(b && (!seededOnly || !b.ts)) bases.set(d.id, b); }
       const ids = part.filter(d => bases.has(d.id)).map(d => d.id);
       if(!ids.length) continue;
       const {data, error} = await this.sb.from('docs').select('id,server_ts').in('id', ids);
       if(error) throw error;
-      const stale = (data || []).filter(r => r.server_ts !== bases.get(r.id).ts).map(r => r.id);
+      const stale = (data || []).filter(r => !tsEq(r.server_ts, bases.get(r.id).ts)).map(r => r.id);
       if(!stale.length) continue;
       const full = await this.sb.from('docs').select('id,kind,data,deleted,updated_at,server_ts').in('id', stale);
       if(full.error) throw full.error;
@@ -371,38 +452,96 @@ const Sync = {
     }
     if(merged) remoteChanged();
   },
+  // server copy of conflicting docs: merge it in (they stay dirty, now based on the server copy) for the next try
+  async resolve(ids){
+    let merged = 0;
+    for(let i = 0; i < ids.length; i += 100){
+      const full = await this.sb.from('docs').select('id,kind,data,deleted,updated_at,server_ts').in('id', ids.slice(i, i + 100));
+      if(full.error) throw full.error;
+      for(const row of full.data || []) if(await applyRemote(row)) merged++;
+    }
+    if(merged) remoteChanged();
+  },
+  // what the server copy must still be for a doc to be written (see supabase/migrations/20261025_docs_put.sql)
+  async expOf(d){
+    if(!MERGE_KINDS.has(d.kind) || d.deleted || !d.data) return null;
+    const b = await baseGet(d.id);
+    return b ? (b.ts || null) : 'new';
+  },
   async push(){
-    await this.checkStale();
-    const all = await IDB.all('docs');
-    const dirty = all.filter(d => d.dirty);
-    let batch = [], size = 0, refused = null;
+    if(this.noPut) await this.checkStale(false);
+    else await this.checkStale(true);
+    this.refused = null;
+    let sent = 0, only = null;
+    for(let round = 0; round < 3; round++){
+      let dirty = await IDB.dirty();
+      if(only) dirty = dirty.filter(d => only.has(d.id));
+      if(!dirty.length) break;
+      const r = await this.upload(dirty);
+      if(r === 'retry') return this.push();   // docs_put is missing on this server: start over the old way
+      sent += r.sent;
+      if(!r.conflicts.length) break;
+      await this.resolve(r.conflicts);
+      only = new Set(r.conflicts);
+    }
+    return sent;
+  },
+  async upload(dirty){
+    let batch = [], size = 0, sent = 0;
+    const conflicts = [];
     const LIMIT = /notes_full|doc_too_big/;
+    const seen = await this.seenLoad();
+    const put = async rows => {
+      if(this.noPut){
+        const {data, error} = await this.sb.from('docs').upsert(rows.map(({exp, ...r}) => Object.assign(r, {user_id: this.user.id})), {onConflict: 'user_id,id'}).select('id,server_ts');
+        return {ok: data || [], conflict: [], error};
+      }
+      if(typeof this.sb.rpc !== 'function'){ this.noPut = true; return 'retry'; }
+      const {data, error, status} = await this.sb.rpc('docs_put', {p_rows: rows});
+      // the server has no docs_put yet (migration not applied): use the plain upload, as before 1.60.2
+      const odd = !error && !(data && Array.isArray(data.ok));
+      if((error && (error.code === 'PGRST202' || status === 404 || /Could not find the function/i.test(String(error.message || '')))) || (odd && (status === 404 || !data))){
+        console.warn('docs_put missing, using plain upload', error || status); this.noPut = true; return 'retry';
+      }
+      // an answer that is neither an error nor a result must not count as uploaded
+      if(odd) throw new Error('unexpected answer from the server (' + status + ')');
+      return {ok: data ? data.ok : [], conflict: (data && data.conflict) || [], error};
+    };
     const flush = async () => {
       if(!batch.length) return;
-      const rows = batch.map(d => ({user_id: this.user.id, id: d.id, kind: d.kind, data: d.data ?? null, deleted: !!d.deleted, updated_at: d.updated}));
-      let {data: back, error} = await this.sb.from('docs').upsert(rows, {onConflict: 'user_id,id'}).select('id,server_ts');
+      const rows = [];
+      for(const d of batch) rows.push({id: d.id, kind: d.kind, data: d.data ?? null, deleted: !!d.deleted, updated_at: d.updated, exp: await this.expOf(d)});
+      let res = await put(rows);
+      if(res === 'retry') return 'retry';
+      let {ok, conflict, error} = res;
       // (1.36) the server refused a doc (notes limit reached, or one doc too big): upload the others one by one,
       // so one refused doc does not stop everything else from syncing. Refused ones stay on this device.
-      if(error && LIMIT.test(String(error.message || '')) && batch.length > 1){
-        const ok = [];
-        back = [];
-        for(let i = 0; i < batch.length; i++){
-          const one = await this.sb.from('docs').upsert([rows[i]], {onConflict: 'user_id,id'}).select('id,server_ts');
+      if(error && LIMIT.test(String(error.message || '')) && rows.length === 1){ this.refused = String(error.message).match(LIMIT)[0]; ok = []; conflict = []; error = null; }
+      else if(error && LIMIT.test(String(error.message || ''))){
+        ok = []; conflict = [];
+        for(const row of rows){
+          const one = await put([row]);
+          if(one === 'retry') return 'retry';
           if(one.error){
             if(!LIMIT.test(String(one.error.message || ''))) throw one.error;
-            refused = String(one.error.message).match(LIMIT)[0];
-          } else { ok.push(batch[i]); back.push(...(one.data || [])); }
+            this.refused = String(one.error.message).match(LIMIT)[0];
+          } else { ok.push(...one.ok); conflict.push(...one.conflict); }
         }
-        batch = ok; error = null;
-      } else if(error && LIMIT.test(String(error.message || ''))){ refused = String(error.message).match(LIMIT)[0]; batch = []; error = null; }
+        error = null;
+      }
       if(error) throw error;
-      const ts = new Map((back || []).map(r => [r.id, r.server_ts]));
+      conflicts.push(...conflict);
+      const ts = new Map(ok.map(r => [r.id, r.server_ts]));
       for(const d of batch){
+        if(!ts.has(d.id)) continue;
+        seen[d.id] = ts.get(d.id);
         if(!MERGE_KINDS.has(d.kind)) continue;
         if(d.deleted || !d.data) await baseDel(d.id);
         else await baseSet(d.id, d.data, ts.get(d.id));
       }
       for(const d of batch){
+        if(!ts.has(d.id)) continue;
+        sent++;
         const now = await IDB.get('docs', d.id);
         if(now && now.updated === d.updated){
           now.dirty = 0; await IDB.put('docs', now);
@@ -416,12 +555,12 @@ const Sync = {
     };
     for(const d of dirty){
       const s = JSON.stringify(d.data || null).length;
-      if(batch.length && size + s > 1500000) await flush();
+      if(batch.length && size + s > 1500000){ if(await flush() === 'retry') return 'retry'; }
       batch.push(d); size += s;
     }
-    await flush();
-    this.refused = refused;
-    return dirty.length;
+    if(await flush() === 'retry') return 'retry';
+    await this.seenSave();
+    return {sent, conflicts};
   },
   async pushAssets(){
     let pend = (await IDB.get('meta', 'pendingAssets')) || [];
@@ -936,13 +1075,16 @@ async function mergeCurrent(row, base){
   // (1.59.1) an incoming copy that lacks strokes written here a moment ago is an older copy that won a crossing
   // upload: merge (which keeps them) and upload again, instead of taking it as it is
   const rIds = new Set(((row.data && row.data.items) || []).map(it => it && it.id));
-  const busy = isBusy() || [...c.items.keys()].some(id => isFresh(id) && !rIds.has(id));
+  // (1.60.2) only needed while the server lacks docs_put: with it, a crossing upload is refused instead of winning,
+  // and keeping "fresh" strokes made a stroke erased on the other device come back here
+  const keepFresh = Sync.noPut ? isFresh : null;
+  const busy = isBusy() || (!!keepFresh && [...c.items.keys()].some(id => keepFresh(id) && !rIds.has(id)));
   let data, copies = 0;
   if(!busy){
     if(!base && lrec && lrec.updated >= row.updated_at) return false;
     data = row.data;
   } else {
-    const m = mergeContent(base && base.d, snap(), row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing || !!act, isFresh);
+    const m = mergeContent(base && base.d, snap(), row.data, (lrec ? lrec.updated : Date.now()) > row.updated_at || !!editing || !!act, keepFresh);
     data = m.data; copies = m.copies;
   }
   const next = new Map();
@@ -982,7 +1124,7 @@ async function applyRemote(row){
   const local = await IDB.get('docs', row.id);
   const mk = MERGE_KINDS.has(row.kind);
   const base = mk ? await baseGet(row.id) : null;
-  if(base && base.ts && base.ts === row.server_ts) return false;   // this device's own upload
+  if(base && base.ts && tsEq(base.ts, row.server_ts)) return false;   // this device's own upload
   if(mk && local && local.data && row.data && !local.deleted && !row.deleted){
     if(row.kind === 'content' && cur && row.id === 'c_' + cur.id) return mergeCurrent(row, base);
     if(local.dirty){
@@ -5993,7 +6135,7 @@ $('exportPrint').addEventListener('click', () => { Pdf.abort = true; hideModal('
    ===================================================================== */
 $('status').addEventListener('click', openSettings);
 $('settingsBtn').addEventListener('click', openSettings);
-function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(); showModal('settingsDlg'); }
+function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(); showModal('settingsDlg'); updTrashInfo(true); }
 async function renderSettings(){
   renderPrefSettings(); updTrashInfo(); renderVersion();
   const ready = !!Sync.sb;
@@ -6479,7 +6621,9 @@ function trashLabel(gr){
   if(t.kind === 'tmpl') return {name: d.name || 'Template', sub: 'Template'};
   return {name: nameOf(t) || t.kind, sub: t.kind};
 }
-async function updTrashInfo(){
+async function updTrashInfo(force){
+  // (1.60.2) only while Settings is open: it reads every doc, and renderSettings runs after every sync
+  if(!force && $('settingsDlg').hidden) return;
   const n = (await trashGroups()).length;
   $('trashInfo').textContent = 'Recently deleted' + (n ? ` (${n})` : '');
 }
@@ -6573,6 +6717,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.60.2', '2026-10-25', ['Fix: a keyboard shortcut pressed right after Ctrl+V (cut, undo, delete) is no longer ignored', 'Fix: sync can no longer lose strokes when two devices upload the same page at the same moment (the server now refuses to overwrite a newer copy; the device merges and tries again)', 'Fix: a change that reached the server a moment late could be skipped by your other devices for good; it is now picked up', 'Fix: a stroke erased on another device no longer comes back', 'Faster, lighter sync: it no longer reads all your notes every 20 seconds, only what changed']],
   ['1.60.1', '2026-10-22', ['Stick to text: highlights now fit the letters on imported pages (measured on the page itself), sit centred on the line and cover whole words, also on big headings']],
   ['1.60', '2026-10-22', ['Highlighter: new "Stick to text" switch. Highlights snap onto the line of text under them (imported pages and typed text), straight and as tall as the text; drawn down across lines, each line gets marked', 'Without text under it, a level highlight becomes one straight band']],
   ['1.59.3', '2026-10-22', ['Fix: typed text and formulas no longer shift and fall apart when zooming (1.59.2 change undone)']],
@@ -8184,7 +8329,7 @@ const HW = {
   async scanAll(){
     if(!this.on()) return;
     this.lastScan = Date.now();
-    const all = await IDB.all('docs');
+    const all = await IDB.prefix('c_')   // (1.60.2) page contents only;
     for(const d of all){
       if(d.kind !== 'content' || d.deleted || !d.data) continue;
       const pid = d.id.slice(2), page = getDoc(pid); if(!page) continue;
@@ -8526,7 +8671,7 @@ const PT = {
   // pictures on live pages (open page first) that have no text doc yet
   async scanAll(){
     if(!this.on()) return;
-    const all = await IDB.all('docs'), first = [], rest = [];
+    const all = await IDB.prefix('c_'), first = [], rest = [];   // (1.60.2) page contents only
     for(const d of all){
       if(d.kind !== 'content' || d.deleted || !d.data) continue;
       const pid = d.id.slice(2); if(!getDoc(pid)) continue;
@@ -9280,7 +9425,10 @@ function calcEval(src, ans, deg){
    ===================================================================== */
 document.addEventListener('keydown', e => {
   const ae = document.activeElement;
-  const typing = ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName));
+  // (1.60.2) the hidden paste catcher (focused for a moment after Ctrl/Cmd+V) is not a text field: a shortcut pressed
+  // right after a paste (Ctrl+X, Ctrl+Z, Delete) was ignored while it held the focus
+  if(ae && ae.id === 'pasteCatch' && !(e.key.toLowerCase() === 'v' && (e.metaKey || e.ctrlKey))) ae.blur();
+  const typing = ae && ae.id !== 'pasteCatch' && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName));
   if(typing){ if(e.key === 'Escape' && editing) finishEditing(); return; }
   if(e.key === ' '){ spaceDown = true; e.preventDefault(); return; }
   if(e.metaKey || e.ctrlKey){

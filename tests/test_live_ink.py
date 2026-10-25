@@ -109,6 +109,18 @@ PRED = """async () => {
   // very fast: capped
   path = []; for(let i = 0; i < 12; i++) path.push([100 + i * 40, 300, 5000 + i * 8]);
   a = run(path); out.fastLead = a.pred ? +(toScreen(a.pred)[0] - (100 + 11 * 40)).toFixed(1) : null;
+  // (1.61.2) on a curve the lead follows the curve (1.61 went straight on, up to ~9 px off it)
+  let worst = 0, on = 0;
+  for(const [R, v] of [[25, 1.2], [40, 1.5], [80, 1.5]]){
+    const b = mk(); let ang = 0;
+    for(let k = 0; k < 40; k++){
+      ang += v * 8 / R;
+      const x = 300 + R * Math.cos(ang), y = 300 + R * Math.sin(ang);
+      b.pts.push(...W.toWorld(x, y), .5); L.predict(b, ev(6000 + R * 100 + k * 8), x, y);
+      if(k > 5 && b.pred){ on++; const q = toScreen(b.pred); worst = Math.max(worst, Math.abs(Math.hypot(q[0] - 300, q[1] - 300) - R)); }
+    }
+  }
+  out.curveOff = +worst.toFixed(2); out.curveOn = on;
   return out;
 }"""
 
@@ -146,11 +158,12 @@ async def main():
         await page.evaluate("() => { __inkwell.toWorld = (x, y) => [(x - __inkwell.cam.ox) / __inkwell.cam.z, (y - __inkwell.cam.oy) / __inkwell.cam.z]; }")
         r = await page.evaluate(PRED)
         st = r['straight']
-        check(st is not None and 100 + 11 * 8 + 4 < st[0] <= 100 + 11 * 8 + 14.1 and abs(st[1] - 300) < 0.5, f'fast straight line: the preview runs a few px ahead ({st})')
+        check(st is not None and 100 + 11 * 8 + 4 < st[0] <= 100 + 11 * 8 + 12.1 and abs(st[1] - 300) < 0.5, f'fast straight line: the preview runs a few px ahead ({st})')
         check(not r['turn'], 'no lead on a sharp turn')
+        check(r['curveOn'] > 50 and r['curveOff'] < 1.0, f'on a curve the lead follows the curve (at most {r["curveOff"]} px off, on {r["curveOn"]} times)')
         check(not r['slow'], 'no lead while slowing to a stop')
         check(not r['mouse'], 'no lead for the mouse')
-        check(r['fastLead'] is not None and r['fastLead'] <= 14.1, f'lead capped at 14 px ({r["fastLead"]})')
+        check(r['fastLead'] is not None and r['fastLead'] <= 12.1, f'lead capped at 12 px ({r["fastLead"]})')
 
         # the lead disappears by itself when the Pencil stops (no more move events)
         r = await page.evaluate("""async () => { const W = __inkwell, L = W.Live;

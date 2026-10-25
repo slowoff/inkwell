@@ -2479,7 +2479,7 @@ function clearLive(){ liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(
      direction (the system's predicted points where the browser gives them), so the line keeps up with the tip.
      Never stored; dropped when the Pencil slows, turns sharply, stops or lifts. */
 const LIVE_MIN = 120, LIVE_CHUNK = 60, LIVE_CTX = 6, LIVE_END = 6;
-const PRED_MS = 12, PRED_MAX = 14, PRED_LIFE = 45;
+const PRED_MS = 10, PRED_MAX = 12, PRED_LIFE = 45;
 const Live = {
   bake: null, bctx: null, upto: 0, key: '',
   // outline of samples s0..s1 of a strokeShape result, with round ends only where asked
@@ -2532,21 +2532,34 @@ const Live = {
     if(e.pointerType !== 'pen' || a.snapped || a.edge) return;
     const t = e.timeStamp || performance.now();
     const h = a.ph || (a.ph = []);
-    h.push([sx, sy, t]); while(h.length > 8 || (h.length > 3 && t - h[0][2] > 60)) h.shift();
+    h.push([sx, sy, t]); while(h.length > 5 || (h.length > 3 && t - h[0][2] > 36)) h.shift();
     let px = null, py = null;
     const pe = e.getPredictedEvents ? e.getPredictedEvents() : null;
     if(pe && pe.length){ const q = pt(pe[pe.length - 1]); px = q[0] - sx; py = q[1] - sy; }
     else {
+      // (1.61.2) follow the curve: speed and turning rate from the older and the newer half of the recent samples,
+      // so on a curve the lead bends with it (1.61 went straight on, up to ~9 px off a curve, then snapped back)
       if(h.length < 3) return;
-      const o = h[0], mid = h[Math.floor(h.length / 2)], dt = t - o[2], dt2 = t - mid[2];
-      if(dt < 6 || dt > 60 || dt2 < 2) return;
-      const vx = (sx - o[0]) / dt, vy = (sy - o[1]) / dt;
-      const ux = (sx - mid[0]) / dt2, uy = (sy - mid[1]) / dt2;
-      const sp = Math.hypot(vx, vy), su = Math.hypot(ux, uy);
-      if(sp < 0.08 || su < 0.08) return;                          // slow or stopping: no lead
-      if((vx * ux + vy * uy) / (sp * su) < Math.cos(35 * Math.PI / 180)) return;   // turning: no lead
-      if(su < 0.6 * sp) return;                                   // slowing down hard
-      px = ux * PRED_MS; py = uy * PRED_MS;
+      const o = h[0], mid = h[Math.floor(h.length / 2)], dt1 = mid[2] - o[2], dt2 = t - mid[2];
+      if(dt1 < 3 || dt2 < 3 || t - o[2] > 40) return;
+      const vx = (mid[0] - o[0]) / dt1, vy = (mid[1] - o[1]) / dt1, ux = (sx - mid[0]) / dt2, uy = (sy - mid[1]) / dt2;
+      const sv = Math.hypot(vx, vy), su = Math.hypot(ux, uy);
+      if(sv < 0.08 || su < 0.08) return;                          // slow or stopping: no lead
+      if(su < 0.6 * sv) return;                                   // slowing down hard
+      let turn = Math.atan2(uy, ux) - Math.atan2(vy, vx);
+      if(turn > Math.PI) turn -= 2 * Math.PI; else if(turn < -Math.PI) turn += 2 * Math.PI;
+      const w = turn / ((t - o[2]) / 2);                            // turning rate (rad per ms)
+      const ahead = (t - (mid[2] + t) / 2) + PRED_MS;              // from the newer half's middle to the end of the lead
+      if(Math.abs(turn) > 1.0 || Math.abs(w * ahead) > 0.9) return;   // turning too hard to guess
+      // the guess must agree with the Pencil's latest step (a corner is not a curve that keeps turning)
+      const pv = h[h.length - 2], lx = sx - pv[0], ly = sy - pv[1];
+      if(Math.hypot(lx, ly) > 0.5){
+        let dd = Math.atan2(ly, lx) - (Math.atan2(uy, ux) + w * ((pv[2] + t) / 2 - (mid[2] + t) / 2));
+        dd = Math.atan2(Math.sin(dd), Math.cos(dd));
+        if(Math.abs(dd) > 0.12) return;
+      }
+      const head = Math.atan2(uy, ux) + w * ((t - (mid[2] + t) / 2) + PRED_MS / 2);
+      px = Math.cos(head) * su * PRED_MS; py = Math.sin(head) * su * PRED_MS;
     }
     const d = Math.hypot(px, py);
     if(!(d > 0.5)) return;
@@ -6851,6 +6864,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.61.2', '2026-10-25', ['Pencil: on curves the line drawn ahead of the tip now bends with the curve (in 1.61 it went straight on for a moment and then snapped back)']],
   ['1.61.1', '2026-10-25', ['Fix: scribbling with the highlighter (or the pen) back and forth no longer leaves white gaps and slits in the colour, on screen and in exported PDFs']],
   ['1.61', '2026-10-25', ['Pencil: the line keeps up with the tip better (drawn slightly ahead while you write fast in one direction; what is saved is exactly what you wrote)', 'Long strokes and drawings stay smooth while drawing (only the newest part is redrawn)', 'Word import, backups and formulas now also work offline the first time (before they needed to be used once online)']],
   ['1.60.2', '2026-10-25', ['Fix: a keyboard shortcut pressed right after Ctrl+V (cut, undo, delete) is no longer ignored', 'Fix: sync can no longer lose strokes when two devices upload the same page at the same moment (the server now refuses to overwrite a newer copy; the device merges and tries again)', 'Fix: a change that reached the server a moment late could be skipped by your other devices for good; it is now picked up', 'Fix: a stroke erased on another device no longer comes back', 'Faster, lighter sync: it no longer reads all your notes every 20 seconds, only what changed']],

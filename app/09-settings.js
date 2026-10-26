@@ -634,6 +634,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.64.1', '2026-10-26', ['Behind the scenes: the biggest app file (writing tools) is split into four smaller ones. Nothing changes in how the app works']],
   ['1.64', '2026-10-26', ['Settings → Your notes shows how full the notes server is (of 500 MB), with a reminder once a day when it is over 80 % full']],
   ['1.63.1', '2026-10-26', ['Page history keeps the last 10 versions of each page (was 30), so your notes take less space on the server. Older versions go when the page gets a new one']],
   ['1.63', '2026-10-25', ['Select tool: new "Tap" choice next to Free and Box. Tap things to select them (Pencil or finger), tap more to add them, tap a selected one to drop it, tap empty space to clear', 'Tapping writing on an imported page now selects the writing, not the whole page']],

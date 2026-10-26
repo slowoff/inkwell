@@ -134,7 +134,7 @@ converted when it loads.
 
 Files:
   index.html, app.css           the page and its styles
-  app/                          the app, 13 files by area (01-base … 13-start),
+  app/                          the app, 16 files by area (01-base … 13-start),
                                 loaded in order; they share one global scope
   core/                         pure code the app uses (ink shapes, merging,
                                 maths, helpers); loaded before app/

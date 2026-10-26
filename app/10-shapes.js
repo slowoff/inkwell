@@ -394,8 +394,27 @@ function drawGraphPreview(){
   }
   ctx.globalAlpha = 1;
 }
+/* (1.65) The graph window remembers what was typed in it (labels, ranges, steps, function, numbers, grid, type) on
+   this device (prefs.graphForm), so it is filled in the next time, also after closing the app. Picking another type
+   still puts that type's usual ranges in. */
+const G_FIELDS = ['gLx', 'gLy', 'gLz', 'gX0', 'gX1', 'gXs', 'gY0', 'gY1', 'gYs', 'gFn'];
+const saveGraphForm = debounce(() => {
+  const v = {}; for(const id of G_FIELDS) v[id] = $(id).value;
+  prefs.graphForm = {type: graphType, v, nums: $('gNums').checked, grid: $('gGrid').checked};
+  savePrefs();
+}, 400);
+function restoreGraphForm(){
+  const f = prefs.graphForm;
+  if(!f || typeof f !== 'object' || !f.v || !GRAPH_DEFAULTS[f.type] && f.type !== '3d') return false;
+  setGraphType(f.type);
+  for(const id of G_FIELDS) if(typeof f.v[id] === 'string') $(id).value = f.v[id];
+  $('gNums').checked = !!f.nums; $('gGrid').checked = !!f.grid;
+  drawGraphPreview();
+  return true;
+}
 $('graphOpen').addEventListener('click', () => {
   closePops();
+  if(!$('gX1').value && !$('gLx').value) restoreGraphForm();   // first time since the app started: the last values
   if(!$('gLx').value) $('gLx').value = 'x';
   if(!$('gLy').value) $('gLy').value = 'y';
   if(!$('gLz').value) $('gLz').value = 'z';
@@ -404,12 +423,12 @@ $('graphOpen').addEventListener('click', () => {
   showModal('graphDlg');
   renderGLook();
 });
-$('gType').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b) setGraphType(b.dataset.v); });
+$('gType').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b){ setGraphType(b.dataset.v); saveGraphForm(); } });
 $('gFn').addEventListener('input', () => {
   try { parseFn($('gFn').value); $('gFnMsg').textContent = ''; } catch(err){ $('gFnMsg').textContent = err.message; }
 });
-$('graphDlg').addEventListener('input', e => { if(e.target.id !== 'gGridO' && e.target.id !== 'gAllO') drawGraphPreview(); });
-$('graphDlg').addEventListener('change', e => { if(e.target.matches('input[type=checkbox]') && e.target.id !== 'gArrows' && e.target.id !== 'gBg') drawGraphPreview(); });
+$('graphDlg').addEventListener('input', e => { if(e.target.id !== 'gGridO' && e.target.id !== 'gAllO'){ drawGraphPreview(); if(G_FIELDS.includes(e.target.id)) saveGraphForm(); } });
+$('graphDlg').addEventListener('change', e => { if(e.target.matches('input[type=checkbox]') && e.target.id !== 'gArrows' && e.target.id !== 'gBg'){ drawGraphPreview(); saveGraphForm(); } });
 for(const [box, key, num] of [['gSize', 'size', 1], ['gFnW', 'fnW', 1], ['gFnS', 'fnS', 0]])
   $(box).addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b) setGLook(key, num ? +b.dataset.v : b.dataset.v); });
 for(const [box, key] of [['gAxC', 'axC'], ['gFnC', 'fnC']])
@@ -425,6 +444,7 @@ $('gInsert').addEventListener('click', () => {
   const S = g.o.look.size || 1;
   const [gx, gy] = toWorld(Math.max(40, W / 2 - 240 * S * cam.z), Math.max(40, H / 2 - 170 * S * cam.z));
   const items = buildGraph(g.o, gx, gy);
+  saveGraphForm(); saveGraphForm.flush();
   hideModal('graphDlg');
   addItems(items);
   setTool('lasso'); setTimeout(() => selectIds(items.map(it => it.id)), 60);

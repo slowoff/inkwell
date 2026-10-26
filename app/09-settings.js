@@ -8,7 +8,7 @@
    ===================================================================== */
 $('status').addEventListener('click', openSettings);
 $('settingsBtn').addEventListener('click', openSettings);
-function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(); showModal('settingsDlg'); updTrashInfo(true); }
+function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(); showModal('settingsDlg'); updTrashInfo(true); DbSize.render(); DbSize.get().then(() => DbSize.render()).catch(() => {}); }
 async function renderSettings(){
   renderPrefSettings(); updTrashInfo(); renderVersion();
   const ready = !!Sync.sb;
@@ -62,6 +62,50 @@ function renderGD(){
     return !c.folder_ok ? ' · the Drive folder is missing!' : c.missing ? ` · ${c.missing} picture${c.missing === 1 ? '' : 's'} missing in Drive` : ` · all ${c.total} pictures checked`;
   }
 }
+/* (1.64) How full the notes server is (Supabase free plan: 500 MB). Asks the database function db_size
+   (supabase/migrations/20261026_db_size.sql) at most once an hour; a server without it shows nothing (no error).
+   Settings shows "Notes server: x of 500 MB"; from 80 % a reminder (at most once a day) says it is nearly full. */
+const DB_CAP_MB = 500, DB_WARN = 0.8;
+const DbSize = {
+  mb: null, at: 0, missing: false, busy: false,
+  async get(force){
+    if(!Sync.sb || !Sync.user || this.missing || this.busy) return this.mb;
+    if(!force && this.mb !== null && Date.now() - this.at < 3600000) return this.mb;
+    this.busy = true;
+    try {
+      const {data, error, status} = await Sync.sb.rpc('db_size');
+      if(error){
+        if(error.code === 'PGRST202' || status === 404 || /Could not find the function/i.test(String(error.message || ''))) this.missing = true;
+        else console.warn('db size', error);
+      } else if(Number(data) > 0){ this.mb = Number(data) / 1048576; this.at = Date.now(); }
+    } catch(e){ console.warn('db size', e); }
+    finally { this.busy = false; }
+    return this.mb;
+  },
+  share(){ return this.mb === null ? null : this.mb / DB_CAP_MB; },
+  render(){
+    const row = $('dbRow'), sh = this.share();
+    if(sh === null || !Sync.user){ row.hidden = true; return; }
+    row.hidden = false;
+    const bar = $('dbBar');
+    $('dbUsed').style.width = (Math.min(1, sh) * 100).toFixed(1) + '%';
+    bar.classList.toggle('near', sh >= DB_WARN && sh < 0.95); bar.classList.toggle('full', sh >= 0.95);
+    bar.setAttribute('aria-valuenow', Math.round(sh * 100));
+    $('dbInfo').textContent = `Notes server: ${fmtMB(this.mb)} of ${fmtMB(DB_CAP_MB)}` +
+      (sh >= 0.95 ? ' · almost full: soon new changes may stop syncing' : sh >= DB_WARN ? ' · nearly full' : '');
+  },
+  // after a sync: refresh (hourly) and remind once a day from 80 %
+  async check(){
+    const mb = await this.get();
+    if(!$('settingsDlg').hidden) this.render();
+    const sh = this.share();
+    if(sh === null || sh < DB_WARN) return;
+    const day = new Date().toDateString();
+    if(LSget('inkwell.dbWarn', '') === day) return;
+    LSset('inkwell.dbWarn', day);
+    toast(`The notes server is ${Math.round(sh * 100)} % full (${fmtMB(mb)} of ${fmtMB(DB_CAP_MB)}). Page history can be trimmed to free space.`);
+  }
+};
 function renderCloud(){
   const i = Files.info, row = $('cloudRow');
   renderGD();
@@ -590,6 +634,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.64', '2026-10-26', ['Settings → Your notes shows how full the notes server is (of 500 MB), with a reminder once a day when it is over 80 % full']],
   ['1.63.1', '2026-10-26', ['Page history keeps the last 10 versions of each page (was 30), so your notes take less space on the server. Older versions go when the page gets a new one']],
   ['1.63', '2026-10-25', ['Select tool: new "Tap" choice next to Free and Box. Tap things to select them (Pencil or finger), tap more to add them, tap a selected one to drop it, tap empty space to clear', 'Tapping writing on an imported page now selects the writing, not the whole page']],
   ['1.62.1', '2026-10-25', ['Behind the scenes: the app is now split into 13 smaller files by area, with automatic checks that they load in the right order. Nothing changes in how the app works']],

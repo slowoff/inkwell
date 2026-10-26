@@ -88,6 +88,7 @@ const Sync = {
       // picture check and the move of old pictures all start from it. Before, it only loaded when Settings was opened
       // or a picture had to be uploaded or downloaded, so on most starts the notes copy in Drive was not updated.
       Files.on().catch(() => {});
+      DbSize.check().catch(() => {});   // (1.64) how full the notes server is (hourly)
       this.state = 'synced'; this.msg = ''; this.lastOk = Date.now();
       if(this.refused){
         this.state = 'warn';

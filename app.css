@@ -785,6 +785,9 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .cloud-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;width:0}
 #cloudAll{background:var(--accent);opacity:.35}
 #cloudMine{background:var(--accent)}
+#dbUsed{background:var(--accent)}
+.cloud-bar.near #dbUsed{background:var(--tape)}
+.cloud-bar.full #dbUsed{background:var(--danger)}
 .cloud-bar.near #cloudAll,.cloud-bar.near #cloudMine{background:var(--tape)}
 .cloud-bar.full #cloudAll,.cloud-bar.full #cloudMine{background:var(--danger)}
 .cu-list .trash-item{cursor:pointer}

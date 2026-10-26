@@ -39,6 +39,7 @@ b) SQL Editor -> New query. Paste and Run, in this order:
      supabase/migrations/20261018_gdrive.sql
      supabase/migrations/20261018_guard_fix.sql
      supabase/migrations/20261025_docs_put.sql
+     supabase/migrations/20261026_db_size.sql
    Each should say "Success".
 c) Project Settings -> API Keys: copy the "publishable" key
    (starts with sb_publishable_). Project Settings -> Data API:

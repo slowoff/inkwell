@@ -153,7 +153,8 @@ async function removeDoc(id, kind, group, purge){
    A version keeps a page as it was before an editing session (at most one per VER_GAP of editing), before changes
    from another device are merged in and before a restore. The newest VER_KEEP per page are kept; older ones are purged.
    Versions sync like other docs (so they are on the server too) but stay out of the in-memory docs map. */
-const VER_GAP = 30 * 60000, VER_KEEP = 30;
+// (1.63.1) 10 versions per page (was 30): page history was most of the database; older ones go when the page gets a new one
+const VER_GAP = 30 * 60000, VER_KEEP = 10;
 async function versionsOf(pid){
   const lo = 'v_' + pid + '_', hi = lo + '\uffff';
   const list = IDB.mem ? [...IDB.mem.docs.values()].filter(d => d.id >= lo && d.id < hi)

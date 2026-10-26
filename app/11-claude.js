@@ -6,7 +6,22 @@
 /* =====================================================================
    Ask Claude: scan a question (or just type) and get help in a floating window
    ===================================================================== */
-const ASK_MAX_SCANS = 4;   // (1.52) scans attached to one question
+const ASK_MAX_SCANS = 4;   // (1.52) scans attached to one question; (1.67) photos count too
+const ASK_PHOTO_PX = 1568;  // longest side of an uploaded picture (more is not used by Claude, only costs time)
+// an image file (also iPad HEIC photos, which Safari can show) as a JPEG data URL, at most ASK_PHOTO_PX, white behind
+// transparent parts
+async function photoJpeg(file){
+  const u = URL.createObjectURL(file);
+  try {
+    const img = new Image(); img.src = u; await img.decode();
+    const w = img.naturalWidth, h = img.naturalHeight; if(!w || !h) throw new Error('empty picture');
+    const k = Math.min(1, ASK_PHOTO_PX / Math.max(w, h)), c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    const out = c.toDataURL('image/jpeg', 0.85); c.width = c.height = 1;
+    return out;
+  } finally { URL.revokeObjectURL(u); }
+}
 const Ask = {
   msgs: [],        // API messages for this chat; scanned images are kept as assets: {type:'image', a: assetId}
   view: [],        // what the chat shows: {who:'user', text, a?, box?, page?} / {who:'bot', text, model?}
@@ -25,7 +40,7 @@ const Ask = {
   },
   close(){ $('askPanel').hidden = true; if(this.ctrl) this.ctrl.abort(); },
   empty(){
-    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.<br><br><b>Practice</b> (same menu): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
+    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, add a <b>photo</b> (the picture icon), or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.<br><br><b>Practice</b> (same menu): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
   },
   chats(){ return [...docs.values()].filter(d => d.kind === 'chat' && live(d)).sort((a, b) => (b.data.at || 0) - (a.data.at || 0)); },
   showHistory(){
@@ -129,9 +144,28 @@ const Ask = {
     // attach the scan to the message box; it goes out when Send is tapped, with whatever is typed
     // (1.52) several scans can be attached (up to ASK_MAX_SCANS); they go out together in one question
     if(!Array.isArray(this.pending)) this.pending = [];
-    if(this.pending.length >= ASK_MAX_SCANS){ toast('Up to ' + ASK_MAX_SCANS + ' scans per question'); return; }
+    if(this.pending.length >= ASK_MAX_SCANS){ toast('Up to ' + ASK_MAX_SCANS + ' pictures per question'); return; }
     this.pending.push({url, typed, box: [x0, y0, x1, y1]});
     this.renderPending();
+    if(this.histOpen) this.showChat();
+    try { $('askIn').focus({preventScroll: true}); } catch {}
+  },
+  // (1.67) photos and pictures from the iPad (camera, Photos, Files), pasted or dropped: attached like scans,
+  // made smaller first (longest side ASK_PHOTO_PX, JPEG) so they upload fast and stay well under the server limit
+  async addPhotos(files){
+    const list = [...(files || [])].filter(f => f && (/^image\//.test(f.type) || /\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name || '')));
+    if(!list.length) return;
+    this.open();
+    if(!Array.isArray(this.pending)) this.pending = [];
+    let skipped = 0, bad = 0;
+    for(const f of list){
+      if(this.pending.length >= ASK_MAX_SCANS){ skipped++; continue; }
+      try { this.pending.push({url: await photoJpeg(f), typed: '', box: null, photo: true}); }
+      catch(e){ console.warn('ask photo', e); bad++; }
+      this.renderPending();
+    }
+    if(skipped) toast('Up to ' + ASK_MAX_SCANS + ' pictures per question');
+    else if(bad) toast(bad === 1 ? 'That picture could not be opened' : bad + ' pictures could not be opened');
     if(this.histOpen) this.showChat();
     try { $('askIn').focus({preventScroll: true}); } catch {}
   },
@@ -146,11 +180,13 @@ const Ask = {
         d.innerHTML = `<img alt="Scan ${i + 1}"><button class="ask-thumb-x" data-i="${i}" title="Remove this scan" aria-label="Remove scan ${i + 1}"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>`;
         d.querySelector('img').src = x.url; th.appendChild(d);
       });
-      $('askAttN').textContent = p.length === 1 ? 'Scan attached' : p.length + ' scans attached';
+      const word = p.some(x => x.photo) ? 'picture' : 'scan';
+      $('askAttN').textContent = p.length === 1 ? word[0].toUpperCase() + word.slice(1) + ' attached' : p.length + ' ' + word + 's attached';
       $('askAttMore').hidden = p.length >= ASK_MAX_SCANS;
     }
     const many = p && p.length > 1;
-    $('askIn').placeholder = this.mode === 'practice' ? (p ? 'Add a note, or just Send' : 'Your answer, or scan your work') : p ? (many ? 'Ask about the scans, or just Send' : 'Ask about the scan, or just Send') : 'Ask about your notes…';
+    const what = p && p.some(x => x.photo) ? (many ? 'them' : 'it') : many ? 'the scans' : 'the scan';
+    $('askIn').placeholder = this.mode === 'practice' ? (p ? 'Add a note, or just Send' : 'Your answer, or scan your work') : p ? `Ask about ${what}, or just Send` : 'Ask about your notes…';
     $('askSend').disabled = this.busy;
   },
   // Send button / Enter: typed text, plus the attached scan if there is one
@@ -163,7 +199,8 @@ const Ask = {
     if(p){
       const many = p.length > 1;
       const typed = many ? p.map((x, i) => x.typed ? 'Scan ' + (i + 1) + ':\n' + x.typed : '').filter(Boolean).join('\n\n') : p[0].typed;
-      this.send(t || (this.mode === 'practice' ? (many ? 'Here are my answers.' : 'Here is my answer.') : prefs.askMode === 'solve' ? (many ? 'Solve these questions.' : 'Solve this question.') : (many ? 'Help me with these.' : 'Help me with this question.')), p.map(x => x.url), typed, p[0].box);
+      const box = (p.find(x => x.box) || {}).box || null, photos = p.filter(x => x.photo).length;
+      this.send(t || (this.mode === 'practice' ? (many ? 'Here are my answers.' : 'Here is my answer.') : prefs.askMode === 'solve' ? (many ? 'Solve these questions.' : 'Solve this question.') : (many ? 'Help me with these.' : 'Help me with this question.')), p.map(x => x.url), typed, box, photos ? {photos} : undefined);
     }
     else this.send(t);
   },
@@ -233,7 +270,8 @@ const Ask = {
     }
     assetId = assetIds[0] || null;
     let full = text;
-    if(urls.length > 1) full += '\n\n[' + urls.length + ' scanned parts of my page, in the order I scanned them]';
+    if(opts.photos) full += '\n\n[' + (opts.photos === urls.length ? (urls.length === 1 ? 'A picture I uploaded (photo or image file)' : urls.length + ' pictures I uploaded (photos or image files), in order') : urls.length + ' pictures in order: scanned parts of my page and photos or image files I uploaded') + ']';
+    else if(urls.length > 1) full += '\n\n[' + urls.length + ' scanned parts of my page, in the order I scanned them]';
     if(typedInScan) full += '\n\n[Typed text inside the scanned area]\n' + typedInScan;
     if(opts.content){ content.push(...opts.content); full = null; }
     else if(!this.msgs.length && cur){
@@ -349,6 +387,18 @@ $('askSend').addEventListener('click', () => Ask.submit());
 $('askAttX').addEventListener('click', () => { Ask.pending = null; Ask.renderPending(); });
 $('askThumbs').addEventListener('click', e => { const b = e.target.closest('.ask-thumb-x'); if(!b || !Array.isArray(Ask.pending)) return; Ask.pending.splice(+b.dataset.i, 1); Ask.renderPending(); });
 $('askAttMore').addEventListener('click', () => $('askScan').click());
+// (1.67) upload pictures: the photo button (camera, Photos or Files on the iPad), paste, or drop on the panel
+$('askPhoto').addEventListener('click', () => { $('askPhotoFile').value = ''; $('askPhotoFile').click(); });
+$('askPhotoFile').addEventListener('change', e => Ask.addPhotos(e.target.files));
+$('askIn').addEventListener('paste', e => {
+  const files = [...(e.clipboardData && e.clipboardData.files || [])].filter(f => /^image\//.test(f.type));
+  if(files.length){ e.preventDefault(); e.stopPropagation(); Ask.addPhotos(files); }
+});
+$('askPanel').addEventListener('dragover', e => { if(e.dataTransfer && [...e.dataTransfer.types].includes('Files')){ e.preventDefault(); e.stopPropagation(); } });
+$('askPanel').addEventListener('drop', e => {
+  const files = e.dataTransfer && e.dataTransfer.files; if(!files || !files.length) return;
+  e.preventDefault(); e.stopPropagation(); Ask.addPhotos(files);
+});
 function autoGrow(){ const t = $('askIn'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
 $('askIn').addEventListener('input', autoGrow);
 $('askIn').addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); $('askSend').click(); } });

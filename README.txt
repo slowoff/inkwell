@@ -142,7 +142,8 @@ Files:
   sw.js                         offline cache (VERSION)
   manifest.webmanifest, icons/  home-screen app
   privacy.html                  privacy page for the Google consent screen
-  lib/                          pdf.js, pdf-lib, KaTeX, supabase-js, docx-preview
+  lib/                          pdf.js, pdf-lib, KaTeX, supabase-js, docx-preview,
+                                spell/ (spell check: Hunspell + word lists, see its README)
   setup.sql, supabase/          database setup, migrations, edge functions
   tests/                        browser tests; tests/unit = fast Node tests
   eslint.config.js              code check settings (finds mistakes, no build)

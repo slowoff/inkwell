@@ -473,67 +473,135 @@ async function renderPng(el, w, h, scale){
     return new Uint8Array(await blob.arrayBuffer());
   } finally { box.remove(); }
 }
-const Pdf = {abort: false, file: null};
+// (1.66) how a page is cut into PDF pages: [{ya, yb, x0, cw, s, m, W, H}] (world top/bottom/left/width, scale,
+// margin and page size in A4 units). A page made of imported document pages (PDF, Word, one under the other) gets one
+// PDF page per imported page, so the numbers match the original (page 94 stays page 94); notes further down follow
+// on A4 sheets. Anything else is cut into A4 sheets as before.
+function pdfSheets(items, b){
+  const margin = 40, pw = A4W - 2 * margin, ph = A4H - 2 * margin;
+  const x0 = b[0] - 12, cw = b[2] - b[0] + 24, top = b[1] - 12, bottom = b[3] + 12;
+  const out = [];
+  const a4 = (ya, yb) => {
+    const s = Math.min(1, pw / cw), slice = ph / s, n = Math.max(1, Math.ceil((yb - ya) / slice - 1e-6));
+    for(let i = 0; i < n; i++) out.push({ya: ya + i * slice, yb: ya + (i + 1) * slice, x0, cw, s, m: margin, W: A4W, H: A4H});
+  };
+  const docs = items.filter(it => it.t === 'i' && it.doc && it.h > 0).sort((p, q) => p.y - q.y);
+  const stacked = docs.length > 0 && docs.every((d, i) => !i || d.y >= docs[i - 1].y + docs[i - 1].h - 2);
+  if(!stacked){ a4(top, bottom); return out; }
+  // pages are cut at the edges of the imported pages; a gap between two of them is shared out only if something
+  // was written into it. Writing beside a page makes that PDF page wider (and its content smaller).
+  const boxes = items.filter(it => !(it.t === 'i' && it.doc)).map(it => itemBox(it));
+  const used = (y0, y1) => boxes.some(q => q[3] > y0 + 1 && q[1] < y1 - 1);
+  docs.forEach((d, i) => {
+    const pv = docs[i - 1], nx = docs[i + 1];
+    const ya = !pv ? Math.min(b[1], d.y) : used(pv.y + pv.h, d.y) ? (pv.y + pv.h + d.y) / 2 : d.y;
+    const yb = !nx ? d.y + d.h : used(d.y + d.h, nx.y) ? (d.y + d.h + nx.y) / 2 : d.y + d.h;
+    let px0 = d.x, px1 = d.x + d.w;
+    for(const q of boxes) if(q[3] > ya && q[1] < yb){ px0 = Math.min(px0, q[0]); px1 = Math.max(px1, q[2]); }
+    const s = A4W / (px1 - px0);
+    out.push({ya, yb, x0: px0, cw: px1 - px0, s, m: 0, W: A4W, H: (yb - ya) * s, doc: true});
+  });
+  const end = out[out.length - 1].yb;
+  if(b[3] > end + 1) a4(end, bottom);
+  return out;
+}
+// "3", "2-5, 8" -> [1, 2, 3, 4, 7] (0-based, sorted), or null if it is not a list of pages 1..n
+// (stricter than parsePages for imports: a page that does not exist is an error, not left out)
+function exportPagesList(t, n){
+  const set = new Set(), parts = String(t || '').replace(/\s*[-–]\s*/g, '-').split(/[\s,;]+/).filter(Boolean);
+  for(const part of parts){
+    const m = /^(\d+)(?:-(\d+))?$/.exec(part); if(!m) return null;
+    let a = +m[1], z = m[2] ? +m[2] : a; if(a > z) [a, z] = [z, a];
+    if(a < 1 || z > n) return null;
+    for(let i = a; i <= z; i++) set.add(i - 1);
+  }
+  return set.size ? [...set].sort((a, b) => a - b) : null;
+}
+// [0, 1, 2, 5] -> "1–3, 6"
+function pagesLabel(list){
+  const out = [];
+  for(let i = 0; i < list.length; i++){
+    let j = i; while(j + 1 < list.length && list[j + 1] === list[j] + 1) j++;
+    out.push(j > i ? `${list[i] + 1}–${list[j] + 1}` : String(list[i] + 1)); i = j;
+  }
+  return out.join(', ');
+}
+const Pdf = {abort: false, file: null, run: 0, page: null, n: 0, only: null};
 async function exportPdfFile(){
   if(!cur) return;
   finishEditing();
-  const b = contentBox();
-  if(!b){ toast('This page is empty'); return; }
-  const page0 = cur, title = ($('title').value || 'Inkwell page').trim();
-  Pdf.abort = false; Pdf.file = null;
+  if(!contentBox()){ toast('This page is empty'); return; }
+  Pdf.page = cur; Pdf.only = null; Pdf.n = 0;
   $('exportTitle').textContent = 'Export as PDF'; $('exportParts').innerHTML = ''; $('exportActs').hidden = false;
-  $('exportSave').disabled = true; $('exportInfo').textContent = 'Making the PDF…';
+  $('exportPick').hidden = true; $('exportPages').value = ''; $('exportPages').hidden = true;
+  $('exportPick').querySelectorAll('[data-pick]').forEach(x => x.classList.toggle('on', x.dataset.pick === 'all'));
   showModal('exportDlg');
-  const say = t => { $('exportInfo').textContent = t; };
+  await makePdf();
+}
+// builds the PDF of Pdf.page: all pages, or only Pdf.only (0-based page numbers). A newer call stops an older one.
+async function makePdf(){
+  const run = ++Pdf.run, page0 = Pdf.page;
+  Pdf.abort = false; Pdf.file = null;
+  const stop = () => Pdf.abort || run !== Pdf.run;
+  $('exportSave').disabled = true; $('exportInfo').textContent = 'Making the PDF…';
+  const say = t => { if(run === Pdf.run) $('exportInfo').textContent = t; };
   const tick = () => new Promise(r => setTimeout(r, 0));
+  const b = page0 === cur ? contentBox() : null;
+  if(!b){ say('This page is empty'); return; }
+  const title = ($('title').value || 'Inkwell page').trim();
   try {
     await pdfLibs();
+    if(stop()) return;
     const {PDFDocument, LineCapStyle, pushGraphicsState, popGraphicsState, rectangle, clip, endPath} = PDFLib;
-    const margin = 40, pw = A4W - 2 * margin, ph = A4H - 2 * margin;
-    const x0 = b[0] - 12, y0 = b[1] - 12, cw = b[2] - b[0] + 24, ch = b[3] - b[1] + 24;
-    const s = Math.min(1, pw / cw), slice = ph / s, n = Math.max(1, Math.ceil(ch / slice));
-    const PW = 595.28, PH = 841.89, k = PW / A4W;
+    const items = [...page0.items.values()];
+    const all = pdfSheets(items, b);
+    Pdf.n = all.length;
+    $('exportPick').hidden = all.length < 2;
+    const pick = Pdf.only ? Pdf.only.filter(i => i < all.length) : null;
+    const sheets = pick && pick.length ? pick.map(i => all[i]) : all;
+    const PW = 595.28, k = PW / A4W;
     const doc = await PDFDocument.create();
     doc.setTitle(title); doc.setCreator('Inkwell'); doc.setProducer('Inkwell');
-    const items = [...page0.items.values()];
     const box = it => itemBox(it);
+    const reachAny = q => sheets.some(sh => q[3] >= sh.ya - 4 && q[1] <= sh.yb + 4);
+    const sMax = Math.max(...sheets.map(sh => sh.s));
     // text boxes and formulas: rendered once each, placed on every sheet they reach
     const tops = [];
-    const texts = items.filter(it => (it.t === 'x' || it.t === 'm') && elMap.get(it.id));
+    const texts = items.filter(it => (it.t === 'x' || it.t === 'm') && elMap.get(it.id) && reachAny(box(it)));
     for(let i = 0; i < texts.length; i++){
-      if(Pdf.abort) return;
+      if(stop()) return;
       if(i % 4 === 0){ say(`Preparing text ${i + 1} of ${texts.length}…`); await tick(); }
       const it = texts[i], el = elMap.get(it.id), w = el.offsetWidth, h = el.offsetHeight;
       if(!w || !h) continue;
       const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.opacity = ''; c.style.transform = ''; c.style.zoom = '';
       if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
-      const sc = Math.max(1, Math.min(s * 2.5, Math.sqrt(12e6 / (w * h))));
+      const sc = Math.max(1, Math.min(sMax * 2.5, Math.sqrt(12e6 / (w * h))));
       const png = await doc.embedPng(await renderPng(c, w, h, sc));
       tops.push({it, png, x: it.x, y: it.y, w: w + 2, h: h + 2, b: [it.x, it.y, it.x + w, it.y + h]});
     }
     // form values on imported pages: one transparent overlay per page picture
     const overlays = new Map();
-    for(const it of items.filter(i => i.t === 'i' && i.f && i.f.length)){
-      if(Pdf.abort) return;
+    for(const it of items.filter(i => i.t === 'i' && i.f && i.f.length && reachAny(box(i)))){
+      if(stop()) return;
       const html = fieldParts(it, 0, 0).map(p => p.h).join(''); if(!html) continue;
       const d = document.createElement('div'); d.style.cssText = `position:absolute;width:${it.w}px;height:${it.h}px`; d.innerHTML = html;
-      const sc = Math.max(1, Math.min(s * 2.5, Math.sqrt(12e6 / (it.w * it.h))));
+      const sc = Math.max(1, Math.min(sMax * 2.5, Math.sqrt(12e6 / (it.w * it.h))));
       overlays.set(it.id, await doc.embedPng(await renderPng(d, it.w, it.h, sc)));
     }
     const pics = items.filter(it => it.t === 'i' && it.a), embedded = new Map();
     const inks = [2, 1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && inkPass(it) === pass));
     const inkBoxes = new Map(inks.map(it => [it.id, box(it)]));
-    const X = wx => (margin + (wx - x0) * s) * k;
-    for(let sh = 0; sh < n; sh++){
-      if(Pdf.abort) return;
-      say(`Making page ${sh + 1} of ${n}…`); await tick();
-      const ya = y0 + sh * slice, yb = ya + slice;
-      const Y = wy => PH - (margin + (wy - ya) * s) * k;
+    for(let si = 0; si < sheets.length; si++){
+      if(stop()) return;
+      say(`Making page ${si + 1} of ${sheets.length}…`); await tick();
+      const sh = sheets[si], {ya, yb, s, m} = sh, PH = sh.H * k;
+      const X = wx => (m + (wx - sh.x0) * s) * k;
+      const Y = wy => PH - (m + (wy - ya) * s) * k;
       const reach = (top, bottom) => bottom >= ya - 4 && top <= yb + 4;
       const page = doc.addPage([PW, PH]);
-      page.pushOperators(pushGraphicsState(), rectangle(margin * k, PH - (margin + ph) * k, pw * k, ph * k), clip(), endPath());
+      page.pushOperators(pushGraphicsState(), rectangle(m * k, PH - (m + (yb - ya) * s) * k, (sh.W - 2 * m) * k, (yb - ya) * s * k), clip(), endPath());
       const at = {x: X(0), y: Y(0), scale: s * k};
-      const d = paperPath(page0.bg, ya, yb, x0, x0 + cw);
+      const d = paperPath(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
       if(d) page.drawSvgPath(d, page0.bg.type === 'dots' ? {...at, borderColor: hexRgb('#AEBBC9'), borderWidth: 1.6, borderLineCap: LineCapStyle.Round} : {...at, borderColor: hexRgb('#D5DFEA'), borderWidth: 0.8});
       for(const it of pics){
         if(!reach(it.y, it.y + it.h)) continue;
@@ -566,17 +634,39 @@ async function exportPdfFile(){
     }
     say('Saving…'); await tick();
     const bytes = await doc.save();
-    if(Pdf.abort) return;
-    const name = (title.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Inkwell page') + '.pdf';
+    if(stop()) return;
+    const part = pick && pick.length ? (pick.length === 1 ? ` (page ${pick[0] + 1})` : ` (pages ${pagesLabel(pick).replace(/–/g, '-')})`) : '';
+    const name = ((title + part).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Inkwell page') + '.pdf';
     Pdf.file = new File([bytes], name, {type: 'application/pdf'});
-    const mb = bytes.length / 1048576;
-    say(`Ready: ${n} page${n === 1 ? '' : 's'}, ${mb < 0.1 ? '< 0.1' : mb.toFixed(1)} MB.`);
+    const mb = bytes.length / 1048576, size = `${mb < 0.1 ? '< 0.1' : mb.toFixed(1)} MB`;
+    say(pick && pick.length ? `Ready: page${pick.length === 1 ? '' : 's'} ${pagesLabel(pick)} of ${all.length}, ${size}.`
+      : `Ready: ${all.length} page${all.length === 1 ? '' : 's'}${all.some(sh => sh.doc) ? ' (the imported pages keep their numbers)' : ''}, ${size}.`);
     $('exportSave').disabled = false;
   } catch(e){
     console.warn('pdf export', e);
     say('The PDF could not be made: ' + (e.message || e) + '. Try Print instead.');
   }
 }
+// (1.66) "All pages" or "Only pages: 3, 5-7": the PDF is made again with just those
+$('exportPick').addEventListener('click', e => {
+  const b = e.target.closest('[data-pick]'); if(!b) return;
+  $('exportPick').querySelectorAll('[data-pick]').forEach(x => x.classList.toggle('on', x === b));
+  const some = b.dataset.pick === 'some';
+  $('exportPages').hidden = !some;
+  if(some){ $('exportPages').focus(); if($('exportPages').value.trim()) pagesTyped(); else { Pdf.run++; Pdf.file = null; $('exportSave').disabled = true; $('exportInfo').textContent = `Type the pages you want, from 1 to ${Pdf.n}: e.g. 3 or 2-5, 8`; } }
+  else if(Pdf.only){ Pdf.only = null; makePdf(); }
+});
+let pagesTimer = 0;
+function pagesTyped(){
+  clearTimeout(pagesTimer);
+  const list = exportPagesList($('exportPages').value, Pdf.n);
+  Pdf.run++; Pdf.file = null; $('exportSave').disabled = true;
+  if(!list){ $('exportInfo').textContent = `Type the pages you want, from 1 to ${Pdf.n}: e.g. 3 or 2-5, 8`; return; }
+  $('exportInfo').textContent = 'Making the PDF…';
+  pagesTimer = setTimeout(() => { Pdf.only = list; makePdf(); }, 600);
+}
+$('exportPages').addEventListener('input', pagesTyped);
+$('exportPages').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('exportPages').blur(); } });
 async function savePdfFile(){
   const f = Pdf.file; if(!f) return;
   // iPad / phone: the share sheet (Save to Files, Mail, …); computer: a normal download

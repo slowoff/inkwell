@@ -112,7 +112,7 @@
         <button class="tb nofield" data-act="mark" aria-label="Highlight text"><svg viewBox="0 0 24 24"><path d="m9 15 7-7 3 3-7 7H9v-3z"/><path d="M4 21h9"/></svg></button>
         <button class="tb" data-act="tcolor" aria-label="Text colour"><span class="tcolor-a">A</span></button>
         <button class="tb nofield" data-act="link" aria-label="Link to page"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Link</span></button>
-        <button class="tb spell-btn" data-act="spell" aria-label="Spelling" title="Spell check: underline misspelled words while typing"><svg viewBox="0 0 24 24"><path d="M3 15 6.5 5 10 15M4.3 11.5h4.4"/><path d="M13 15V5h3a2.5 2.5 0 0 1 0 5h-3 3.5a2.5 2.5 0 0 1 0 5H13z"/><path d="m4 19 2 2 4-4" class="spell-ok"/><path d="M13 20c1-1 2-1 3 0s2 1 3 0 2-1 3 0" class="spell-wave"/></svg></button>
+        <button class="tb spell-btn" data-act="spell" aria-label="Spelling" title="Spell check: on or off, and the language"><svg viewBox="0 0 24 24"><path d="M3 15 6.5 5 10 15M4.3 11.5h4.4"/><path d="M13 15V5h3a2.5 2.5 0 0 1 0 5h-3 3.5a2.5 2.5 0 0 1 0 5H13z"/><path d="m4 19 2 2 4-4" class="spell-ok"/><path d="M13 20c1-1 2-1 3 0s2 1 3 0 2-1 3 0" class="spell-wave"/></svg></button>
         <button class="tb" data-act="done">Done</button>
       </div>
       <span class="spacer"></span>
@@ -230,6 +230,15 @@
   <p class="hint">Tap a colour to use it. Press and hold a swatch in the toolbar to swap it for the current colour.</p>
 </div>
 
+<div class="pop" id="spellPop" hidden>
+  <div class="pop-title">Spell check</div>
+  <div class="seg"><button data-spell="on">On</button><button data-spell="off">Off</button></div>
+  <div class="pop-title">Language</div>
+  <div class="spell-langs" id="spellLangs"></div>
+  <p class="hint" id="spellNote"></p>
+  <button class="menu-item" id="spellForget" hidden></button>
+</div>
+<div class="spell-bar" id="spellBar" hidden></div>
 <div class="pop" id="tcolorPop" hidden>
   <div class="palette" id="tpalette"></div>
   <label class="custom-color"><input type="color" id="tCustom"><span>Custom colour</span></label>
@@ -590,6 +599,10 @@
 <div class="modal" id="exportDlg" hidden>
   <div class="dlg">
     <div class="dlg-head"><h3 id="exportTitle">Export as PDF</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="export-pick" id="exportPick" hidden>
+      <div class="seg"><button data-pick="all" class="on">All pages</button><button data-pick="some">Only some pages</button></div>
+      <input id="exportPages" class="text-in" type="text" autocomplete="off" placeholder="Pages, e.g. 3 or 2-5, 8" aria-label="Pages to export" hidden>
+    </div>
     <p class="hint" id="exportInfo"></p>
     <div class="export-parts" id="exportParts"></div>
     <div class="dlg-actions" id="exportActs"><button class="btn ghost" id="exportPrint">Print instead</button><button class="btn primary" id="exportSave" disabled>Save PDF</button></div>

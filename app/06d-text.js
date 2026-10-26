@@ -35,6 +35,7 @@ function placeAt(a){
     let nt = {t: 'x', id: 'x' + newId(), x: a.w0[0] - 4 * fs, y: a.w0[1] - 16 * fs, w: clamp((W - a.sx - 16) / cam.z, 160 * fs, 460 * fs), fs, html: ''};
     const snapped = snapBoxAt(a.w0[0], a.w0[1], pf, nt.id);
     if(snapped) nt = snapped;
+    nt.lang = Spell.lang(null);   // (1.66) the box keeps the spelling language it was started in
     cur.items.set(nt.id, nt); cur.lastId = nt.id;
     itemEl(nt); refreshPaper();
     startEditing(nt.id, null, null, true);
@@ -76,6 +77,7 @@ function syncEditingHTML(){
 function finishEditing(){
   if(!editing || !cur) { editing = null; return; }
   const ed = editing; editing = null;
+  Spell.clear();
   renderFmt(); tHandle.hidden = true; tMove.hidden = true; closePop('tcolorPop'); closePop('tsizePop');
   const el = elMap.get(ed.id);
   if(!el) return;
@@ -117,6 +119,7 @@ worldFront.addEventListener('input', e => {
   fixTypeColor(elMap.get(editing.id));
   syncEditingHTML();
   fitCell(editing.id);
+  Spell.typedAt = Date.now(); Spell.hide(); Spell.soon();
   lastLocalEdit = Date.now();
   saveContentSoon();
   invalidate(0, 0, 1);
@@ -278,6 +281,7 @@ function applySentinelColor(kind, color, root){
 fmtBar.addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
   if(!editing && pfFocus){ PFmt.click(b); return; }
+  if(b.dataset.act === 'spell'){ Spell.open(b); return; }   // (1.66) on/off and language
   if(!editing) return;
   const el = elMap.get(editing.id); if(!el) return;
   if(document.activeElement !== el) el.focus({preventScroll: true});
@@ -304,8 +308,6 @@ fmtBar.addEventListener('click', e => {
     TSize.open(b); return;
   } else if(b.dataset.act === 'link'){
     openLinkPicker(); return;
-  } else if(b.dataset.act === 'spell'){
-    Spell.toggle(el); return;
   } else if(b.dataset.act === 'done'){
     finishEditing(); return;
   }
@@ -518,30 +520,214 @@ function renderFmt(){
   Spell.render();
   barFade();
 }
-// (1.55) spell check while typing (prefs `spell`, missing = on, per device). Underlines come from the system:
-// on the iPad its keyboard language(s) and Settings → General → Keyboard → Check Spelling decide what is marked
+// (1.55) spell check while typing (prefs `spell`, missing = on, per device).
+// (1.66) Inkwell's own checker: Hunspell with built-in word lists (lib/spell, run in a Web Worker), the same on the
+// iPad and the PC and offline once a language was used. Wrong words in the box being typed in get a red wavy line
+// (CSS Custom Highlight API, nothing is added to the text). Tapping such a word shows fixes and "Add to dictionary".
+// Language: prefs.spellLang for new boxes, a box can have its own (item field `lang`; boxes without it use
+// prefs.spellLang, so old notes keep working). Added words: prefs.spellWords (this device).
+// PDF form fields keep the system's spell check. If a word list cannot be loaded, the system's check is used.
+const SPELL_LANGS = [['de-CH', 'Deutsch (Schweiz)'], ['de-DE', 'Deutsch (Deutschland)'], ['en-GB', 'English (UK)'], ['en-US', 'English (US)'], ['pt-PT', 'Português (Portugal)'], ['pt-BR', 'Português (Brasil)']];
+const SPELL_WORD = /[\p{L}\p{M}]+(?:['’][\p{L}\p{M}]+)*/gu;
+// the words of a text box that are checked: [{n: text node, s, e, w}]. Not checked: links to pages, formulas,
+// words touching digits (3x, km2), words with capitals inside (USA, iPad), web and mail addresses
+function spellWords(el){
+  const out = [];
+  const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {acceptNode: n => n.parentElement && n.parentElement.closest('a.pl,.katex,code') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT});
+  for(let n = tw.nextNode(); n; n = tw.nextNode()){
+    const t = n.data;
+    for(const m of t.matchAll(SPELL_WORD)){
+      const w = m[0], s = m.index, e = s + w.length;
+      if(w.length < 2 || w.length > 40) continue;
+      if(/\d/.test(t[s - 1] || '') || /\d/.test(t[e] || '')) continue;
+      if(/\p{Lu}/u.test(w.slice(1))) continue;
+      let a = s, b = e;
+      while(a > 0 && !/\s/.test(t[a - 1])) a--;
+      while(b < t.length && !/\s/.test(t[b])) b++;
+      if(/[/@]|\.\p{L}/u.test(t.slice(a, b))) continue;
+      out.push({n, s, e, w: w.replace(/’/g, "'")});
+    }
+  }
+  return out;
+}
 const Spell = {
+  worker: null, seq: 0, wait: new Map(), known: new Map(), failed: new Set(), typedAt: 0, movedAt: 0, bad: [], at: null, timer: 0,
   on(){ return prefs.spell !== false; },
+  // own checker in use (else the system's): on, and the box's language could be loaded
+  active(lang){ return Spell.on() && typeof Worker !== 'undefined' && !Spell.failed.has(lang || Spell.lang(null)); },
+  lang(it){
+    const ok = l => SPELL_LANGS.some(x => x[0] === l);
+    if(it && ok(it.lang)) return it.lang;
+    if(ok(prefs.spellLang)) return prefs.spellLang;
+    const n = (navigator.language || '').toLowerCase();
+    return n === 'de-ch' ? 'de-CH' : n.startsWith('de') ? 'de-DE' : n === 'en-us' ? 'en-US' : n === 'pt-br' ? 'pt-BR' : n.startsWith('pt') ? 'pt-PT' : 'en-GB';
+  },
+  langName(l){ const x = SPELL_LANGS.find(x => x[0] === l); return x ? x[1] : l; },
+  added(w){ const list = prefs.spellWords || []; return list.includes(w) || list.includes(w.toLowerCase()); },
+  call(msg){
+    if(!Spell.worker){
+      Spell.worker = new Worker('lib/spell/worker.js');
+      Spell.worker.onmessage = e => { const f = Spell.wait.get(e.data.id); if(f){ Spell.wait.delete(e.data.id); f(e.data); } };
+      Spell.worker.onerror = e => { console.warn('spell worker', e.message); for(const f of Spell.wait.values()) f({error: e.message || 'worker'}); Spell.wait.clear(); };
+    }
+    return new Promise(res => { const id = ++Spell.seq; Spell.wait.set(id, res); Spell.worker.postMessage(Object.assign({id}, msg)); });
+  },
+  fail(lang, err){
+    if(Spell.failed.has(lang)) return;
+    Spell.failed.add(lang); console.warn('spell', lang, err);
+    toast(navigator.onLine === false ? `Spell check (${Spell.langName(lang)}) needs the internet once to download its word list. Until then the iPad's own check is used.` : `Spell check (${Spell.langName(lang)}) could not be loaded. The iPad's own check is used.`);
+    if(editing){ const el = elMap.get(editing.id); if(el) Spell.set(el); }
+  },
+  // the box being typed in: system marks only when our checker is not in use
   set(el){
-    const on = Spell.on();
-    el.spellcheck = on;
-    el.setAttribute('autocorrect', on ? 'on' : 'off');
+    const it = editing && cur ? cur.items.get(editing.id) : null, lang = Spell.lang(it);
+    el.spellcheck = Spell.on() && !Spell.active(lang);
+    el.setAttribute('autocorrect', Spell.on() ? 'on' : 'off');
+    el.setAttribute('lang', lang);
+    Spell.soon(0);
+  },
+  soon(ms){ clearTimeout(Spell.timer); Spell.timer = setTimeout(() => Spell.check(), ms == null ? 350 : ms); },
+  async check(){
+    const el = editing && elMap.get(editing.id), it = el && cur.items.get(editing.id), lang = Spell.lang(it);
+    if(!el || !Spell.active(lang)){ Spell.clear(); return; }
+    const known = Spell.known.get(lang) || new Map(); Spell.known.set(lang, known);
+    const ask = [...new Set(spellWords(el).map(x => x.w).filter(w => !known.has(w)))];
+    if(ask.length){
+      const r = await Spell.call({op: 'check', lang, words: ask});
+      if(r.error){ Spell.fail(lang, r.error); Spell.clear(); return; }
+      const bad = new Set(r.bad);
+      for(const w of ask) known.set(w, !bad.has(w));
+      if(known.size > 20000) Spell.known.set(lang, new Map());
+    }
+    if(!editing || elMap.get(editing.id) !== el) return;
+    // the word being typed is not marked until the cursor leaves it
+    const g = getSelection(), typing = Spell.typedAt >= Spell.movedAt;
+    Spell.bad = spellWords(el).filter(x => known.get(x.w) === false && !Spell.added(x.w)
+      && !(typing && g.isCollapsed && g.anchorNode === x.n && g.anchorOffset >= x.s && g.anchorOffset <= x.e));
+    Spell.paint();
+  },
+  paint(){
+    if(!window.CSS || !CSS.highlights || typeof Highlight === 'undefined') return;
+    if(!Spell.bad.length){ CSS.highlights.delete('inkspell'); return; }
+    CSS.highlights.set('inkspell', new Highlight(...Spell.bad.map(x => { const r = document.createRange(); r.setStart(x.n, x.s); r.setEnd(x.n, x.e); return r; })));
+  },
+  clear(){ Spell.bad = []; if(window.CSS && CSS.highlights) CSS.highlights.delete('inkspell'); Spell.hide(); },
+  // the wrong word the cursor is in (after a tap), or null
+  atCaret(){
+    const g = getSelection();
+    if(!editing || !g.rangeCount || !g.isCollapsed) return null;
+    return Spell.bad.find(x => x.n === g.anchorNode && g.anchorOffset >= x.s && g.anchorOffset <= x.e && x.n.isConnected && x.n.data.slice(x.s, x.e).replace(/’/g, "'") === x.w) || null;
+  },
+  async show(x){
+    const bar = $('spellBar');
+    if(Spell.at === x && !bar.hidden) return;
+    Spell.at = x;
+    const lang = Spell.lang(cur.items.get(editing.id));
+    bar.innerHTML = '<span class="spell-wait">…</span><button class="spell-add" data-add>Add to dictionary</button>';
+    bar.hidden = false; Spell.place();
+    const r = await Spell.call({op: 'suggest', lang, word: x.w});
+    if(Spell.at !== x) return;
+    const list = (r.list || []).slice(0, 4);
+    bar.innerHTML = (list.length ? list.map(w => `<button data-fix="${esc(w)}">${esc(w)}</button>`).join('') : '<span class="spell-none">No suggestions</span>')
+      + '<button class="spell-add" data-add>Add to dictionary</button>';
+    Spell.place();
+  },
+  place(){
+    const bar = $('spellBar'), x = Spell.at;
+    if(bar.hidden || !x) return;
+    if(!x.n.isConnected){ Spell.hide(); return; }
+    const r = document.createRange(); r.setStart(x.n, x.s); r.setEnd(x.n, x.e);
+    const q = r.getBoundingClientRect(), bw = bar.offsetWidth, bh = bar.offsetHeight;
+    let y = q.bottom + 8; if(y + bh > innerHeight - 8) y = Math.max(8, q.top - bh - 8);
+    bar.style.left = clamp(q.left + q.width / 2 - bw / 2, 8, Math.max(8, innerWidth - bw - 8)) + 'px';
+    bar.style.top = y + 'px';
+  },
+  hide(){ Spell.at = null; const bar = $('spellBar'); if(bar) bar.hidden = true; },
+  fix(word){
+    const x = Spell.at, el = editing && elMap.get(editing.id);
+    Spell.hide();
+    if(!x || !el || !x.n.isConnected) return;
+    if(document.activeElement !== el) el.focus({preventScroll: true});
+    const r = document.createRange(); r.setStart(x.n, x.s); r.setEnd(x.n, x.e);
+    const g = getSelection(); g.removeAllRanges(); g.addRange(r);
+    document.execCommand('insertText', false, word);   // keeps the formatting of the word, undo works
+  },
+  add(){
+    const x = Spell.at; Spell.hide(); if(!x) return;
+    prefs.spellWords = [...new Set([...(prefs.spellWords || []), x.w])].slice(-2000); savePrefs();
+    toast(`"${x.w}" added to the dictionary`);
+    Spell.check(); Spell.renderPop();
   },
   render(){ const b = fmtBar.querySelector('[data-act="spell"]'); if(b){ b.classList.toggle('on', Spell.on()); b.setAttribute('aria-pressed', Spell.on() ? 'true' : 'false'); } },
-  toggle(el){
-    prefs.spell = !Spell.on(); savePrefs();
+  setOn(on){
+    prefs.spell = !!on; savePrefs();
     document.querySelectorAll('input.pf-tx, textarea.pf-tx').forEach(c => { c.spellcheck = Spell.on(); });
-    if(el){
-      Spell.set(el);
-      // re-check the text with the new setting: browsers only redraw the marks after the box is focused again
-      const keep = TSize.offsets(el);
-      el.blur(); el.focus({preventScroll: true});
-      TSize.restore(el, keep);
+    if(editing){
+      const el = elMap.get(editing.id);
+      if(el){
+        Spell.set(el);
+        // browsers only redraw the system's marks after the box is focused again
+        const keep = TSize.offsets(el);
+        el.blur(); el.focus({preventScroll: true});
+        TSize.restore(el, keep);
+      }
     }
-    Spell.render();
-    toast(Spell.on() ? 'Spell check on: misspelled words are underlined while you type' : 'Spell check off');
-  }
+    if(!Spell.on()) Spell.clear();
+    Spell.render(); Spell.renderPop();
+  },
+  toggle(){ Spell.setOn(!Spell.on()); toast(Spell.on() ? 'Spell check on: misspelled words are underlined while you type' : 'Spell check off'); },
+  // picking a language: for the box being typed in, and for new boxes from now on
+  setLang(l){
+    if(!SPELL_LANGS.some(x => x[0] === l)) return;
+    prefs.spellLang = l; savePrefs();
+    if(editing && cur){
+      const it = cur.items.get(editing.id);
+      if(it && it.lang !== l){ cur.items.set(it.id, Object.assign({}, it, {lang: l})); saveContentSoon(); }
+      const el = elMap.get(editing.id); if(el) Spell.set(el);
+    }
+    Spell.failed.delete(l);
+    Spell.renderPop();
+  },
+  renderPop(){
+    const p = $('spellPop'); if(!p || p.hidden) return;
+    const it = editing && cur ? cur.items.get(editing.id) : null, l = Spell.lang(it), on = Spell.on();
+    p.querySelectorAll('[data-spell]').forEach(b => b.classList.toggle('on', (b.dataset.spell === 'on') === on));
+    $('spellLangs').innerHTML = SPELL_LANGS.map(([c, n]) => `<button class="menu-item${c === l ? ' on' : ''}" data-lang="${c}"${on ? '' : ' disabled'}>${esc(n)}</button>`).join('');
+    $('spellNote').textContent = editing ? 'For this text box and new ones.' : 'For new text boxes.';
+    const n = (prefs.spellWords || []).length;
+    $('spellForget').hidden = !n; $('spellForget').textContent = `Forget ${n} added word${n === 1 ? '' : 's'}`;
+  },
+  open(b){ Spell.hide(); openPop('spellPop', b); Spell.renderPop(); },
+  // load the usual language soon after start, so the first box is checked right away (and it is stored for offline)
+  warm(){ if(Spell.active()) Spell.call({op: 'load', lang: Spell.lang(null)}).then(r => { if(r.error) Spell.failed.add(Spell.lang(null)); }); }
 };
+$('spellPop').addEventListener('pointerdown', e => { if(e.target.closest('button')) e.preventDefault(); });
+$('spellPop').addEventListener('mousedown', e => { if(e.target.closest('button')) e.preventDefault(); });
+$('spellPop').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.spell) Spell.setOn(b.dataset.spell === 'on');
+  else if(b.dataset.lang) Spell.setLang(b.dataset.lang);
+  else if(b.id === 'spellForget'){ prefs.spellWords = []; savePrefs(); Spell.check(); Spell.renderPop(); toast('Added words forgotten'); }
+});
+$('spellBar').addEventListener('pointerdown', e => e.preventDefault());
+$('spellBar').addEventListener('mousedown', e => e.preventDefault());
+$('spellBar').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  if(b.dataset.fix != null) Spell.fix(b.dataset.fix);
+  else if(b.hasAttribute('data-add')) Spell.add();
+});
+document.addEventListener('selectionchange', () => {
+  if(!editing) return;
+  if(Date.now() - Spell.typedAt > 150) Spell.movedAt = Date.now();
+  clearTimeout(Spell.selTimer);
+  Spell.selTimer = setTimeout(() => {
+    if(!editing) return;
+    const x = Spell.atCaret();
+    if(x && Spell.movedAt > Spell.typedAt) Spell.show(x); else Spell.hide();
+    if(Spell.movedAt > Spell.typedAt) Spell.soon(0);   // the word just left gets checked
+  }, 250);
+});
+setTimeout(() => Spell.warm(), 5000);
 // (1.56) the formatting bar on a PDF text field: bold, italic, underline, size and colour of the whole field
 const PFmt = {
   item(){ return pfFocus && cur ? cur.items.get(pfFocus.id) : null; },
@@ -568,7 +754,7 @@ const PFmt = {
     const a = b.dataset.act;
     if(a === 'tsize') TSize.open(b);
     else if(a === 'tcolor') openPop('tcolorPop', b);
-    else if(a === 'spell'){ Spell.toggle(null); const c = pfFocus.c; c.blur(); c.focus({preventScroll: true}); }
+    else if(a === 'spell'){ Spell.toggle(); const c = pfFocus.c; c.blur(); c.focus({preventScroll: true}); }
     else if(a === 'done') pfFocus.c.blur();
   }
 };
@@ -659,4 +845,5 @@ function positionOverlays(){
     }
   }
   if(prefs.ruler.on && rulerZ !== cam.z) renderRulerTicks();
+  Spell.place();
 }

@@ -1142,9 +1142,9 @@ function openPop(id, anchor){
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }
-function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop']) closePop(id); }
+function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop', 'spellPop']) closePop(id); }
 document.addEventListener('pointerdown', e => {
-  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"]')) return;
+  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"],[data-act="spell"]')) return;
   closePops();
 }, true);
 let modalAt = 0;

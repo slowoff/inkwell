@@ -1,5 +1,6 @@
 # 1.55: the text formatting bar sits in the top tool bar (with the Text tool; greyed until a box is typed in)
-# instead of floating over the box; Spelling toggle (prefs spell, default on) sets spellcheck on the box.
+# instead of floating over the box; Spelling (prefs spell, default on). (1.66) the Spelling button opens a menu (On/Off,
+# language); Inkwell's own checker is used, so the box's system spellcheck stays off (tests/test_spell.py).
 import asyncio, os
 from playwright.async_api import async_playwright
 PORT = os.environ.get('INKWELL_PORT', '8766')
@@ -12,7 +13,7 @@ def check(ok, what):
 STATE = """(() => { const f = document.getElementById('fmtBar'), r = f.getBoundingClientRect(), st = document.getElementById('stage').getBoundingClientRect();
   const ed = document.querySelector('.it-text[contenteditable=true]');
   return {shown: !f.hidden && r.width > 0, inBar: !!f.closest('#toolbar'), idle: f.classList.contains('idle'), above: r.bottom <= st.top + 1,
-          editing: !!ed, focus: !!ed && document.activeElement === ed, spell: ed ? ed.spellcheck : null,
+          editing: !!ed, focus: !!ed && document.activeElement === ed, spell: ed ? __inkwell.Spell.on() && !ed.spellcheck : null,
           spellOn: document.querySelector('#fmtBar [data-act=spell]').classList.contains('on')}; })()"""
 
 async def boot(page):
@@ -55,12 +56,14 @@ async def main():
 
         # spell toggle
         await page.evaluate("() => { const el = document.querySelector('.it-text'); const t = [...el.childNodes].find(n => n.nodeType === 3 && n.data.includes('wrold')); const r = document.createRange(); r.setStart(t, 3); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }")
-        await page.click('#fmtBar [data-act="spell"]'); await page.wait_for_timeout(400)
+        await page.click('#fmtBar [data-act="spell"]'); await page.wait_for_timeout(200)
+        await page.click('#spellPop [data-spell="off"]'); await page.wait_for_timeout(400)
         s = await page.evaluate(STATE)
         caret = await page.evaluate("(() => { const g = getSelection(); return g.isCollapsed && g.anchorNode.textContent + '|' + g.anchorOffset; })()")
         pref = await page.evaluate("__inkwell.prefs.spell")
         check(s['spell'] is False and not s['spellOn'] and pref is False, f'Spelling off: box and setting off ({s}, {pref})')
         check(s['editing'] and s['focus'] and caret == ' wrold|3', f'toggling keeps the box open and the cursor in place ({caret})')
+        await page.evaluate("() => document.getElementById('spellPop').hidden = true")
         await page.keyboard.press('Escape'); await page.wait_for_timeout(300)
         s = await page.evaluate(STATE)
         check(s['shown'] and s['idle'], 'box closed: buttons stay in the bar, greyed')
@@ -71,9 +74,11 @@ async def main():
         await page.mouse.click(st[0] + 250, st[1] + 500); await page.wait_for_timeout(300)
         s = await page.evaluate(STATE)
         check(s['spell'] is False and not s['spellOn'], 'off is remembered after a reload')
-        await page.click('#fmtBar [data-act="spell"]'); await page.wait_for_timeout(400)
+        await page.click('#fmtBar [data-act="spell"]'); await page.wait_for_timeout(200)
+        await page.click('#spellPop [data-spell="on"]'); await page.wait_for_timeout(400)
         s = await page.evaluate(STATE)
         check(s['spell'] is True and s['spellOn'], 'turned on again')
+        await page.evaluate("() => document.getElementById('spellPop').hidden = true")
         await page.evaluate("() => __inkwell.setTool('pen')"); await page.wait_for_timeout(300)
         s = await page.evaluate(STATE)
         check(not s['shown'] and not s['editing'], 'switching to the pen closes the box and hides the text buttons')

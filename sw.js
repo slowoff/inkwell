@@ -1,5 +1,5 @@
 // Inkwell offline cache. Bump VERSION whenever app files change.
-const VERSION = 'inkwell-1.65';   // releases: 1.0, then 1.1, 1.2, …
+const VERSION = 'inkwell-1.66';   // releases: 1.0, then 1.1, 1.2, …
 const SHELL = [
   './', './index.html', './app.css', './config.js', './manifest.webmanifest',
   './core/util.js', './core/ink.js', './core/merge.js', './core/text.js',
@@ -28,6 +28,8 @@ const SHELL = [
   // formula fonts (before, formulas showed in a fallback font and Word import / backups failed when offline
   // until they had been used once online)
   './lib/docx/docx-preview.min.js', './lib/docx/jszip.min.js',
+  // (1.66) spell check: the worker comes with each version; Hunspell and the word lists are in SPELL_CACHE (below)
+  './lib/spell/worker.js',
   './lib/katex/fonts/KaTeX_AMS-Regular.woff2',
   './lib/katex/fonts/KaTeX_Caligraphic-Bold.woff2',
   './lib/katex/fonts/KaTeX_Caligraphic-Regular.woff2',
@@ -51,6 +53,11 @@ const SHELL = [
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'
 ];
 
+// (1.66) Hunspell (lib/spell/hunspell.js) and the word lists (lib/spell/dict/, 0.5-5 MB each) are downloaded when a
+// language is first used and kept in this cache, which app updates do not empty. Raise the number if they change.
+const SPELL_CACHE = 'inkwell-spell-1';
+const isSpellFile = url => /\/lib\/spell\/(hunspell\.js|dict\/)/.test(url.pathname);
+
 self.addEventListener('install', e => {
   // cache: 'reload' skips the browser's HTTP cache. GitHub Pages lets browsers keep files for 10 minutes,
   // so without it a new version could be stored with the previous version's files.
@@ -60,7 +67,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== SPELL_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -89,6 +96,13 @@ self.addEventListener('fetch', e => {
       if (!stored) return net;
       return Promise.race([net.catch(() => stored), new Promise(res => setTimeout(() => res(stored), 2000))]);
     })());
+    return;
+  }
+  if (isSpellFile(url)) {
+    e.respondWith(caches.open(SPELL_CACHE).then(c => c.match(e.request, {ignoreSearch: true}).then(hit => hit || fetch(e.request).then(r => {
+      if (r.ok) c.put(e.request, r.clone());
+      return r;
+    }))));
     return;
   }
   e.respondWith(

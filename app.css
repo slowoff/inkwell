@@ -292,6 +292,18 @@ select.pf-ls option:checked{background:#9fbbe8}
 .fmt .spell-btn.on .spell-ok{display:inline}
 .fmt .spell-btn.on .spell-wave{display:none}
 .fmt .spell-btn:not(.on) .spell-wave{stroke:var(--danger)}
+/* (1.66) Inkwell's spell check: wrong words in the box being typed in, and the fixes shown when one is tapped */
+::highlight(inkspell){text-decoration:underline wavy #E5372C;text-decoration-thickness:1.5px;text-decoration-skip-ink:none}
+.spell-langs{display:flex;flex-direction:column;gap:2px}
+.spell-langs .menu-item{display:flex;align-items:center;padding:9px 10px}
+.spell-langs .menu-item.on{color:var(--accent);font-weight:600}
+.spell-langs .menu-item.on::after{content:'✓';margin-left:auto;padding-left:12px}
+.spell-langs .menu-item:disabled{opacity:.45}
+#spellPop .hint{margin:0;padding:0 4px;font-size:12.5px}
+.spell-bar{position:fixed;z-index:21;display:flex;gap:4px;align-items:center;max-width:calc(100vw - 16px);overflow-x:auto;background:var(--raise);border-radius:12px;box-shadow:var(--shadow),0 0 0 1px var(--line);padding:5px}
+.spell-bar button{height:36px;padding:0 12px;border-radius:8px;font-size:15px;font-weight:600;color:var(--fg);white-space:nowrap;background:var(--well)}
+.spell-bar button.spell-add{background:none;color:var(--accent);font-weight:500;font-size:14px}
+.spell-bar .spell-wait,.spell-bar .spell-none{padding:0 10px;color:var(--muted);font-size:14px;white-space:nowrap}
 .tcolor-a{font-weight:700;font-size:16px;border-bottom:3px solid var(--tc,var(--accent));line-height:1}
 .tsize-btn{gap:2px;padding:0 4px 0 8px;font-variant-numeric:tabular-nums}
 .tsize-btn #tsizeVal{min-width:18px;text-align:right}
@@ -412,6 +424,7 @@ select.pf-ls option:checked{background:#9fbbe8}
 .pdf-render .it-text,.pdf-render .it-math{color:#18212B}
 .pdf-render .it-text a.pl{color:#1F4FCF}
 .export-parts{display:flex;flex-direction:column;gap:8px}
+.export-pick{display:flex;flex-direction:column;gap:8px;margin:2px 0 4px}
 .export-parts .btn{justify-content:space-between;display:flex;align-items:center;width:100%}
 .export-parts .btn .hint{margin:0}
 .export-parts .btn.done{opacity:.6}

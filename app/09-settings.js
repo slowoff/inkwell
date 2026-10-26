@@ -634,6 +634,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.66', '2026-10-26', ['Spell check is now Inkwell\'s own, the same on the iPad and the PC and also offline: pick the language with the Spelling button (Deutsch Schweiz/Deutschland, English UK/US, Português Portugal/Brasil); each text box keeps its language', 'Tap a word with a red line for fixes, or Add to dictionary', 'Export as PDF: choose Only some pages (e.g. 3 or 2-5, 8). Imported documents give one PDF page per imported page, with the same numbers']],
   ['1.65', '2026-10-26', ['The graph window remembers what you typed last (axis names, ranges, steps, function, numbers and grid), also after closing the app']],
   ['1.64.3', '2026-10-26', ['Fix: Inkwell now starts when the Wi-Fi is connected but the internet is not working (before it could stay empty, with Settings not opening)']],
   ['1.64.2', '2026-10-26', ['If Inkwell fails to start, it now shows what went wrong on screen (with a Reload button) instead of staying empty']],

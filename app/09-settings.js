@@ -634,6 +634,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.64.3', '2026-10-26', ['Fix: Inkwell now starts when the Wi-Fi is connected but the internet is not working (before it could stay empty, with Settings not opening)']],
   ['1.64.2', '2026-10-26', ['If Inkwell fails to start, it now shows what went wrong on screen (with a Reload button) instead of staying empty']],
   ['1.64.1', '2026-10-26', ['Behind the scenes: the biggest app file (writing tools) is split into four smaller ones. Nothing changes in how the app works']],
   ['1.64', '2026-10-26', ['Settings → Your notes shows how full the notes server is (of 500 MB), with a reminder once a day when it is over 80 % full']],

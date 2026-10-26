@@ -1,5 +1,5 @@
 // Inkwell offline cache. Bump VERSION whenever app files change.
-const VERSION = 'inkwell-1.64.2';   // releases: 1.0, then 1.1, 1.2, …
+const VERSION = 'inkwell-1.64.3';   // releases: 1.0, then 1.1, 1.2, …
 const SHELL = [
   './', './index.html', './app.css', './config.js', './manifest.webmanifest',
   './core/util.js', './core/ink.js', './core/merge.js', './core/text.js',
@@ -74,8 +74,21 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return; // sync traffic goes straight to the network
   if (url.pathname.endsWith('/config.js')) {
-    // network first, so a changed config is picked up right away
-    e.respondWith(fetch(e.request).then(r => { const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); return r; }).catch(() => caches.match(e.request)));
+    // network first, so a changed config is picked up right away.
+    // (1.64.3) but never wait long: on a connection that is up but not working (Wi-Fi with no internet) the request
+    // just hung, and config.js is loaded before everything else, so Inkwell did not start at all (no notes, no
+    // Settings). With a stored copy, the network gets 2 seconds. Only a real script is accepted and stored: a Wi-Fi
+    // login page answering instead must not replace the stored copy.
+    e.respondWith((async () => {
+      const net = fetch(e.request).then(r => {
+        if (!r.ok || !/javascript|ecmascript/i.test(r.headers.get('content-type') || '')) throw new Error('config.js: ' + r.status);
+        const copy = r.clone(); caches.open(VERSION).then(c => c.put(e.request, copy));
+        return r;
+      });
+      const stored = await caches.match(e.request, {ignoreSearch: true});
+      if (!stored) return net;
+      return Promise.race([net.catch(() => stored), new Promise(res => setTimeout(() => res(stored), 2000))]);
+    })());
     return;
   }
   e.respondWith(

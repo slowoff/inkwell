@@ -579,8 +579,10 @@ async function boot(){
   ON.catchRedirect();
   GD.catchRedirect();
   readTokens();
+  window.__inkwellStep = 'opening the notes database';
   await IDB.open();
   await Acct.load();
+  window.__inkwellStep = 'reading notebooks';
   await loadDocs();
   if(!docs.size){ await seed(); await loadDocs(); if(!ui.page){ ui.nb = 'nb-school'; ui.sec = 'sec-general'; ui.page = 'pg-welcome'; } }
   ensureUi();
@@ -588,6 +590,7 @@ async function boot(){
   $('mSnap').classList.toggle('on', prefs.snapLines);
   if(prefs.focus && width() !== 'narrow') app.classList.add('focus');
   if(prefs.calc) Calc.open();
+  window.__inkwellStep = 'showing notebooks';
   setTool(prefs.tool);
   renderNav(); renderList();
   resize();
@@ -600,6 +603,7 @@ async function boot(){
     toast(`Inkwell closed unexpectedly while "${pg ? (pg.data.title || 'Untitled page') : 'a page'}" was open, so it was not reopened. Tap it in the list to open it.`);
   } else if(ui.page && getDoc(ui.page)){
     LSset('inkwell.opening', ui.page);
+    window.__inkwellStep = 'opening the last page';
     await openPage(ui.page);
     setTimeout(() => LSset('inkwell.opening', null), 12000);
     if(width() === 'narrow') app.dataset.view = 'list';
@@ -607,6 +611,7 @@ async function boot(){
     const first = ui.sec && pagesOf(ui.sec)[0];
     if(first && width() !== 'narrow') await openPage(first.id); else showEmpty();
   }
+  window.__inkwellStep = 'started'; window.__inkwellBooted = true;   // (1.64.2) see app.js
   setStatus();
   const note = LSget('inkwell.note', null);   // a message from just before a reload (1.36: switching accounts)
   if(note){ LSset('inkwell.note', null); setTimeout(() => toast(note), 800); }

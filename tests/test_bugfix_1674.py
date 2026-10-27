@@ -37,12 +37,6 @@ async def main():
         b = await p.chromium.launch()
         ctx = await b.new_context(viewport={'width': 1180, 'height': 820})
         await ctx.route('**/*.supabase.co/**', lambda r: r.abort())
-        allow = {'zz': False}   # the library is unreachable until the test allows it (the service worker may ask too)
-        async def zz(route):
-            if not allow['zz']: await route.abort(); return
-            await asyncio.sleep(0.4)
-            await route.fulfill(status=200, content_type='application/javascript', body='window.__zz = (window.__zz || 0) + 1;')
-        await ctx.route('**/lib/zz-test.js', zz)
         async def ask(route):
             await asyncio.sleep(1.5)
             body = 'data: ' + json.dumps({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': 'x^2'}}) + '\n\n'
@@ -76,12 +70,24 @@ async def main():
         check(r['curve'] >= 1, f'y = sinx is drawn as a curve ({r["curve"]} curve strokes)')
 
         # ---- 2. loadScript: second call waits, failed load is tried again
-        e1 = await page.evaluate("""async () => {
+        # (its own context without the service worker, so only this test decides whether the file can be reached)
+        ctx3 = await b.new_context(viewport={'width': 1180, 'height': 820}, service_workers='block')
+        await ctx3.route('**/*.supabase.co/**', lambda r: r.abort())
+        allow = {'zz': False}
+        async def zz(route):
+            if not allow['zz']: await route.abort(); return
+            await asyncio.sleep(0.4)
+            await route.fulfill(status=200, content_type='application/javascript', body='window.__zz = (window.__zz || 0) + 1;')
+        await ctx3.route('**/lib/zz-test.js', zz)
+        pg3 = await ctx3.new_page()
+        await pg3.goto(URL)
+        await pg3.wait_for_function('!!(window.__inkwell && window.__inkwellBooted)', timeout=20000)
+        e1 = await pg3.evaluate("""async () => {
           const L = __inkwell.loadScript;
           try { await Promise.all([L('lib/zz-test.js'), L('lib/zz-test.js')]); return ''; } catch(e){ return e.message; }
         }""")
         allow['zz'] = True
-        r = await page.evaluate("""async () => {
+        r = await pg3.evaluate("""async () => {
           const L = __inkwell.loadScript;
           const p1 = L('lib/zz-test.js'), p2 = L('lib/zz-test.js');
           await p2;
@@ -89,6 +95,7 @@ async def main():
           await p1;
           return {after2, n: window.__zz || 0, same: p1 === p2, tags: document.querySelectorAll('script[data-src="lib/zz-test.js"]').length};
         }""")
+        await ctx3.close()
         check('Could not load' in e1, f'a failed load reports an error ({e1!r})')
         check(r['after2'] == 1 and r['n'] == 1 and r['same'] and r['tags'] == 1, f'after a failed load it loads again; a second call waits until it has loaded, runs once ({r})')
 

@@ -108,7 +108,9 @@ async function loadImport(f){
   if(isPdf){
     if(!window.pdfjsLib) throw new Error('PDF reader missing');
     const pdf = await pdfOpen(new Uint8Array(await f.arrayBuffer()));
-    imp = {kind: 'pdf', pdf, n: pdf.numPages, name: f.name.replace(/\.pdf$/i, '').trim()};
+    // (1.67.4) close: the PDF is let go when the dialog closes or the import ends (before, every PDF ever opened stayed in
+    // memory with pdf.js until Inkwell was closed, which adds up on the iPad with big worksheets and books)
+    imp = {kind: 'pdf', pdf, n: pdf.numPages, name: f.name.replace(/\.pdf$/i, '').trim(), close: () => { pdf.destroy().catch(() => {}); }};
     $('impPagesWrap').hidden = false; $('impPages').value = '';
     $('impCount').textContent = `(${pdf.numPages} page${pdf.numPages === 1 ? '' : 's'})`;
     for(let i = 1; i <= Math.min(5, pdf.numPages); i++){ const r = await renderPdfPage(pdf, i, 120); prev.appendChild(r.canvas); }
@@ -248,10 +250,16 @@ $('impGo').addEventListener('click', async () => {
     c.width = Math.round(src.w * scale); c.height = Math.round(src.h * scale);
     const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(src.img, 0, 0, c.width, c.height);
+    if(src.url) URL.revokeObjectURL(src.url);
     if(rot) c = rotCanvas(c, rot);
+    const pid = cur.id, page = cur;
     const a = await saveAsset(await canvasBlob(c));
-    if(!cur) return;
-    addItems([{t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wWorld, h: hWorld, a}]);
+    c.width = c.height = 1;
+    const item = {t: 'i', id: 'i' + newId(), x: x0, y: y0, w: wWorld, h: hWorld, a};
+    // (1.67.4) the picture goes onto the page it was imported on, also if another page was opened meanwhile
+    // (before, it landed on whatever page was open when it was ready)
+    if(cur !== page){ await impPlace({pid, y: y0 - 24, cur: null, op: null}, item); toast('Placed on the page'); PT.soon(); return; }
+    addItems([item]);
     cam.ox = (W > 600 ? 48 : 16) - x0 * cam.z; cam.oy = 24 - y0 * cam.z; invalidate(); saveCamSoon(); PT.soon();
     toast('Placed on the page');
     return;

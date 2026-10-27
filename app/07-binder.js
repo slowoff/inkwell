@@ -275,7 +275,7 @@ $('search').addEventListener('input', () => {
 $('nbList').addEventListener('click', async e => {
   const t = e.target.closest('button'); if(!t) return;
   if(t.dataset.nb){ prefs.open[t.dataset.nb] = !prefs.open[t.dataset.nb]; savePrefs(); renderNav(); return; }
-  if(t.dataset.editnb){ const nb = getDoc(t.dataset.editnb); editState = {kind: 'nb', id: nb.id, color: nb.data.color || 0}; renderNav(); return; }
+  if(t.dataset.editnb){ const nb = getDoc(t.dataset.editnb); if(!nb) return; editState = {kind: 'nb', id: nb.id, color: nb.data.color || 0}; renderNav(); return; }
   if(t.dataset.sec){ selectSection(t.dataset.sec); return; }
   if(t.dataset.addsec){
     const nbId = t.dataset.addsec, secs = sectionsOf(nbId), nb = getDoc(nbId);
@@ -815,13 +815,13 @@ async function clearMark(e){
   } else {
     const rec = await IDB.get('docs', 'c_' + e.pid);
     if(!rec || !rec.data) return;
-    const gone = new Set(e.g.ids), before = rec.data.items;
-    rec.data = Object.assign({}, rec.data, {items: (before || []).filter(s => !gone.has(s.id))});
+    const gone = new Set(e.g.ids), before = rec.data.items || [];
+    rec.data = Object.assign({}, rec.data, {items: before.filter(s => !gone.has(s.id))});
     await writeDoc(rec);
     toast('Mark removed', 'Undo', async () => {
       const r = await IDB.get('docs', 'c_' + e.pid); if(!r || !r.data) return;
-      const have = new Set(r.data.items.map(s => s.id));
-      r.data = Object.assign({}, r.data, {items: r.data.items.concat(before.filter(s => gone.has(s.id) && !have.has(s.id)))});
+      const have = new Set((r.data.items || []).map(s => s.id));
+      r.data = Object.assign({}, r.data, {items: (r.data.items || []).concat(before.filter(s => gone.has(s.id) && !have.has(s.id)))});
       await writeDoc(r); if(!$('laterPop').hidden) renderLater(); else scanMarks();
     });
   }
@@ -1042,7 +1042,7 @@ $('mSnap').addEventListener('click', () => { prefs.snapLines = !prefs.snapLines;
 $('mFit').addEventListener('click', () => {
   closePops(); const b = contentBox();
   if(!b){ zoomAt(W / 2, H / 2, 1); return; }
-  const z = clamp(Math.min((W - 48) / (b[2] - b[0]), (H - 48) / (b[3] - b[1])), 0.1, 2);
+  const z = clamp(Math.min((W - 48) / (b[2] - b[0]), (H - 48) / (b[3] - b[1])), Z_MIN, Math.min(2, zMax()));   // (1.67.4) respects Max zoom
   cam.z = z; cam.ox = (W - (b[2] - b[0]) * z) / 2 - b[0] * z; cam.oy = 24 - b[1] * z;
   invalidate(); saveCamSoon();
 });

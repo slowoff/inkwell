@@ -8,6 +8,21 @@
 })(typeof self !== 'undefined' ? self : this, function(root){
 'use strict';
 
+// a run of letters as known names, longest names first: "sinx" -> ['sin', 'x']; null when it cannot be split
+const FN_NAMES = ['asin', 'acos', 'atan', 'sqrt', 'sin', 'cos', 'tan', 'abs', 'exp', 'log', 'ln', 'pi', 'x', 't', 'e'];
+function splitName(w){
+  if(FN_NAMES.includes(w)) return [w];
+  const memo = new Map();
+  const go = i => {
+    if(i === w.length) return [];
+    if(memo.has(i)) return memo.get(i);
+    let out = null;
+    for(const n of FN_NAMES) if(w.startsWith(n, i)){ const rest = go(i + n.length); if(rest){ out = [n, ...rest]; break; } }
+    memo.set(i, out);
+    return out;
+  };
+  return go(0);
+}
 // Small safe formula parser for y = f(x): numbers, x (or t), + - * / ^, brackets, implicit multiplication,
 // sin cos tan asin acos atan sqrt abs exp ln log, pi, e
 function parseFn(src){
@@ -20,7 +35,9 @@ function parseFn(src){
     const num = /^(\d+\.?\d*|\.\d+)(e[+-]?\d+)?/i.exec(s.slice(i));
     if(num && !(num[2] && /^e[a-z]/i.test(s.slice(i + num[1].length)))){ toks.push({t: 'n', v: parseFloat(num[0])}); i += num[0].length; continue; }
     const id = /^[a-z]+/i.exec(s.slice(i));
-    if(id){ toks.push({t: 'i', v: id[0].toLowerCase()}); i += id[0].length; continue; }
+    // (1.67.4) letters written together are read as known names one after the other: "sinx" = sin x, "2xe^x" = 2·x·e^x,
+    // "pix" = π·x (before, they were one unknown name and the graph could not be drawn)
+    if(id){ const w = id[0].toLowerCase(); for(const v of splitName(w) || [w]) toks.push({t: 'i', v}); i += id[0].length; continue; }
     if('+-*/^()'.includes(c)){ toks.push({t: c}); i++; continue; }
     throw new Error('Unknown sign "' + c + '"');
   }

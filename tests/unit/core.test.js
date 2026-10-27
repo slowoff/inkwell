@@ -175,6 +175,22 @@ test('graph formulas', () => {
   assert.equal(T.parseFn(''), null);
 });
 
+test('graph formulas: letters written together (1.67.4)', () => {
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, a + ' vs ' + b);
+  near(T.parseFn('sinx')(1), Math.sin(1));
+  near(T.parseFn('2sinxcosx')(0.7), 2 * Math.sin(0.7) * Math.cos(0.7));
+  near(T.parseFn('xe^x')(2), 2 * Math.exp(2));
+  near(T.parseFn('2xe^(-x)')(1.5), 3 * Math.exp(-1.5));
+  near(T.parseFn('pix')(2), 2 * Math.PI);
+  near(T.parseFn('sqrtx')(9), 3);
+  near(T.parseFn('expx')(1), Math.E);
+  near(T.parseFn('xx')(3), 9);
+  near(T.parseFn('tan(x)')(0.3), Math.tan(0.3));
+  near(T.parseFn('sin x^2')(2), Math.sin(4));   // unchanged
+  assert.throws(() => T.parseFn('foo'), /Unknown name "foo"/);
+  assert.throws(() => T.parseFn('xy'), /Unknown name "xy"/);
+});
+
 test('formula as plain text', () => {
   assert.equal(T.texPlain('\\frac{a+b}{2}'), '(a+b)/2');
   assert.match(T.texPlain('\\sqrt{x}'), /√x/);

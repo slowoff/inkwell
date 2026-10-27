@@ -504,21 +504,23 @@ const Prac = {
       try {
         if(file.type === 'application/pdf' || /\.pdf$/i.test(file.name)){
           const pdf = await pdfOpen(new Uint8Array(await file.arrayBuffer()));
-          const n = Math.min(pdf.numPages, 40), parts = [];
-          for(let i = 1; i <= n; i++){
-            $('pracInfo').textContent = `Reading ${file.name}: page ${i} of ${n}…`;
-            const page = await pdf.getPage(i);
-            let l = await pdfLines(page);
-            if(!hasRealText(l)){
-              page.cleanup();
-              const r = await renderPdfPage(pdf, i, 1400);
-              const url = r.canvas.toDataURL('image/jpeg', 0.82); r.canvas.width = r.canvas.height = 1;
-              l = parseOcr(await claudeJob('ocr', url, 'Transcribe this page.'));
-            } else page.cleanup();
-            parts.push(l.map(x => x[1]).join('\n'));
-          }
-          entry.text = parts.map((t, i) => `Page ${i + 1}:\n${t}`).join('\n');
-          if(pdf.numPages > n) entry.text += `\n(only the first ${n} of ${pdf.numPages} pages)`;
+          try {
+            const n = Math.min(pdf.numPages, 40), parts = [];
+            for(let i = 1; i <= n; i++){
+              $('pracInfo').textContent = `Reading ${file.name}: page ${i} of ${n}…`;
+              const page = await pdf.getPage(i);
+              let l = await pdfLines(page);
+              if(!hasRealText(l)){
+                page.cleanup();
+                const r = await renderPdfPage(pdf, i, 1400);
+                const url = r.canvas.toDataURL('image/jpeg', 0.82); r.canvas.width = r.canvas.height = 1;
+                l = parseOcr(await claudeJob('ocr', url, 'Transcribe this page.'));
+              } else page.cleanup();
+              parts.push(l.map(x => x[1]).join('\n'));
+            }
+            entry.text = parts.map((t, i) => `Page ${i + 1}:\n${t}`).join('\n');
+            if(pdf.numPages > n) entry.text += `\n(only the first ${n} of ${pdf.numPages} pages)`;
+          } finally { pdf.destroy().catch(() => {}); }   // (1.67.4) let the PDF go once its text is read
         } else if(file.type.startsWith('image/') || /\.(jpe?g|png|heic|webp)$/i.test(file.name)){
           $('pracInfo').textContent = `Reading ${file.name}…`;
           const bmp = await createImageBitmap(file), k = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
@@ -1301,9 +1303,13 @@ async function strokesToFormula(){
   const strokes = sel.ids.map(id => cur.items.get(id)).filter(it => it && it.t === 's' && !it.hl);
   if(!strokes.length) return;
   const btn = $('selMath'); btn.disabled = true; btn.textContent = 'Reading…';
+  const page = cur;
   try {
     const img = inkImage(strokes, 1000);
     let tex = await claudeJob('latex', img.url, 'Convert this handwritten expression to LaTeX.');
+    // (1.67.4) another page was opened, or the ink changed, while Claude was reading: leave everything as it is
+    // (before, the formula was put on whatever page was open then)
+    if(cur !== page || strokes.some(s => cur.items.get(s.id) !== s)){ toast('The page changed while Claude was reading, so the handwriting was kept.'); return; }
     tex = tex.replace(/^```(?:latex)?\s*|\s*```$/g, '').replace(/^\$+|\$+$/g, '').replace(/^\\\[|\\\]$/g, '').trim();
     if(!tex || tex === '?' || !measureMath(tex, 40)){ toast('Could not read that as a formula. Write it a bit bigger and try again.'); return; }
     const b = img.box, bw = b[2] - b[0], bh = b[3] - b[1];

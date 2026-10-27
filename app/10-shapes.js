@@ -540,13 +540,20 @@ $('gaFn').addEventListener('input', () => { $('gaMsg').textContent = ''; });
 /* =====================================================================
    Word documents: rendered to page images, like a PDF
    ===================================================================== */
+// (1.67.4) one promise per library: a second call while it is still loading waits for it (before, it went on at once
+// and failed with "PDFLib is not defined"); a failed load (offline) is forgotten, so the next try loads it again
+// (before, the failed script tag counted as loaded and the feature broke until Inkwell restarted)
+const scriptLoads = new Map();
 function loadScript(src){
-  return new Promise((res, rej) => {
-    if(document.querySelector(`script[data-src="${src}"]`)) return res();
+  if(scriptLoads.has(src)) return scriptLoads.get(src);
+  const p = new Promise((res, rej) => {
     const s = document.createElement('script'); s.src = src; s.dataset.src = src;
-    s.onload = () => res(); s.onerror = () => rej(new Error('Could not load ' + src + ' (offline?)'));
+    s.onload = () => res();
+    s.onerror = () => { s.remove(); scriptLoads.delete(src); rej(new Error('Could not load ' + src + ' (offline?)')); };
     document.head.appendChild(s);
   });
+  scriptLoads.set(src, p);
+  return p;
 }
 async function wordLibs(){
   if(!window.JSZip) await loadScript('lib/docx/jszip.min.js');

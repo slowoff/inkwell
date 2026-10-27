@@ -259,14 +259,20 @@ function updateImages(){
     else if(el._loaded || el._img) unloadImg(el, d < Infinity);
   });
 }
+// (1.67.4) a picture that could not be found (not on this device, not on the server yet) is asked for again only after
+// IMG_RETRY: before, every scroll or zoom near it asked the server again (several requests a second while panning)
+const IMG_RETRY = 60000;
+addEventListener('online', () => { for(const el of worldBack.children) el._failAt = 0; imgSoon(); });
 function loadImg(el){
   if(el._loaded || el._loading) return;
+  if(el._failAt && Date.now() - el._failAt < IMG_RETRY) return;
   const a = el._a; el._loading = true;
   if(el._msg){ el._msg.hidden = false; el._msg.textContent = 'Loading'; }
   assetURL(a).then(u => {
     el._loading = false;
     if(el._a !== a || !el._want || !el.isConnected) return;
-    if(!u){ el._msg.textContent = 'Not downloaded yet'; return; }
+    if(!u){ el._failAt = Date.now(); el._msg.textContent = 'Not downloaded yet'; return; }
+    el._failAt = 0;
     const img = new Image(); img.decoding = 'async'; img.src = u; img.draggable = false; img.alt = '';
     img.style.cssText = 'width:100%;height:100%;display:block;border-radius:2px';
     el.insertBefore(img, el.firstChild); el._img = img; el._loaded = true;

@@ -513,7 +513,7 @@ function renderFmt(){
   const show = prefs.tool === 'text' || !!editing || fld;
   fmtBar.hidden = !show;
   fmtBar.classList.toggle('idle', !editing && !fld);
-  fmtBar.classList.toggle('field', fld);
+  fmtBar.classList.toggle('pf-mode', fld);
   if(editing || fld) TSize.label(); else $('tsizeVal').textContent = '17';
   const f = fld && PFmt.f();
   fmtBar.querySelectorAll('[data-cmd]').forEach(b => b.classList.toggle('on', !!f && !!f[{bold: 'b', italic: 'it', underline: 'u'}[b.dataset.cmd]]));

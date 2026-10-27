@@ -11,7 +11,7 @@ def check(ok, what):
 
 ST = """(() => { const f = document.getElementById('fmtBar'), c = document.querySelector('textarea.pf-tx');
   const it = __inkwell.cur.items.get('ipdf'), fl = it.f[0];
-  return {shown: !f.hidden, idle: f.classList.contains('idle'), field: f.classList.contains('field'),
+  return {shown: !f.hidden, idle: f.classList.contains('idle'), field: f.classList.contains('pf-mode'),
           h1: getComputedStyle(f.querySelector('[data-block=h1]')).pointerEvents, focus: document.activeElement === c,
           boldOn: f.querySelector('[data-cmd=bold]').classList.contains('on'), size: document.getElementById('tsizeVal').textContent,
           fw: c.style.fontWeight, fst: c.style.fontStyle, td: c.style.textDecoration, col: c.style.color, fs: c.style.fontSize,
@@ -47,6 +47,8 @@ async def main():
         s = await page.evaluate(ST)
         check(s['shown'] and not s['idle'] and s['field'] and s['focus'], f'cursor in the PDF field: bar active in field mode ({s})')
         check(s['h1'] == 'none', 'headings/lists/link greyed in a field')
+        lay = await page.evaluate("(() => { const f = document.getElementById('fmtBar'), t = document.getElementById('toolbar'); return [getComputedStyle(f).flexDirection, f.getBoundingClientRect().height, t.getBoundingClientRect().height]; })()")
+        check(lay[0] == 'row' and lay[1] < 60 and lay[2] < 70, f'1.67.2: formatting bar stays one row in a PDF field, tool bar not taller ({lay})')
         sz0 = s['size']
         await page.click('#fmtBar [data-cmd="bold"]'); await page.wait_for_timeout(300)
         s = await page.evaluate(STATE := ST)

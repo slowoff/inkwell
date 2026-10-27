@@ -634,6 +634,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.67.2', '2026-10-27', ['Fix: tapping a fill-in box of an imported worksheet no longer turns the formatting bar into a tall column over the page']],
   ['1.67.1', '2026-10-27', ['Security: imported PDFs and Word files can no longer run code inside Inkwell']],
   ['1.67', '2026-10-26', ['Ask Claude: upload photos and pictures (the picture button next to scan: camera, Photos or Files; on the PC also paste or drop). Up to 4 per question, together with scans']],
   ['1.66', '2026-10-26', ['Spell check is now Inkwell\'s own, the same on the iPad and the PC and also offline: pick the language with the Spelling button (Deutsch Schweiz/Deutschland, English UK/US, Português Portugal/Brasil); each text box keeps its language', 'Tap a word with a red line for fixes, or Add to dictionary', 'Export as PDF: choose Only some pages (e.g. 3 or 2-5, 8). Imported documents give one PDF page per imported page, with the same numbers']],

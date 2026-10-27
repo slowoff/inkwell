@@ -37,10 +37,9 @@ async def main():
         b = await p.chromium.launch()
         ctx = await b.new_context(viewport={'width': 1180, 'height': 820})
         await ctx.route('**/*.supabase.co/**', lambda r: r.abort())
-        hits = {'zz': 0}
+        allow = {'zz': False}   # the library is unreachable until the test allows it (the service worker may ask too)
         async def zz(route):
-            hits['zz'] += 1
-            if hits['zz'] == 1: await route.abort(); return
+            if not allow['zz']: await route.abort(); return
             await asyncio.sleep(0.4)
             await route.fulfill(status=200, content_type='application/javascript', body='window.__zz = (window.__zz || 0) + 1;')
         await ctx.route('**/lib/zz-test.js', zz)
@@ -77,17 +76,20 @@ async def main():
         check(r['curve'] >= 1, f'y = sinx is drawn as a curve ({r["curve"]} curve strokes)')
 
         # ---- 2. loadScript: second call waits, failed load is tried again
+        e1 = await page.evaluate("""async () => {
+          const L = __inkwell.loadScript;
+          try { await Promise.all([L('lib/zz-test.js'), L('lib/zz-test.js')]); return ''; } catch(e){ return e.message; }
+        }""")
+        allow['zz'] = True
         r = await page.evaluate("""async () => {
           const L = __inkwell.loadScript;
-          let e1 = '';
-          try { await Promise.all([L('lib/zz-test.js'), L('lib/zz-test.js')]); } catch(e){ e1 = e.message; }
           const p1 = L('lib/zz-test.js'), p2 = L('lib/zz-test.js');
           await p2;
           const after2 = window.__zz || 0;
           await p1;
-          return {e1, after2, n: window.__zz || 0, same: p1 === p2, tags: document.querySelectorAll('script[data-src="lib/zz-test.js"]').length};
+          return {after2, n: window.__zz || 0, same: p1 === p2, tags: document.querySelectorAll('script[data-src="lib/zz-test.js"]').length};
         }""")
-        check('Could not load' in r['e1'], f'a failed load reports an error ({r["e1"]!r})')
+        check('Could not load' in e1, f'a failed load reports an error ({e1!r})')
         check(r['after2'] == 1 and r['n'] == 1 and r['same'] and r['tags'] == 1, f'after a failed load it loads again; a second call waits until it has loaded, runs once ({r})')
 
         # ---- 3. PDFs are let go

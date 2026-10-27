@@ -609,6 +609,11 @@ body.scanning .toast{bottom:calc(76px + var(--sab))}
 .am-noimg{font-size:12px;color:var(--faint);padding:6px 0}
 .ah-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 2px 8px}
 .ah-head .btn{height:30px;padding:0 10px;font-size:12.5px}
+/* (1.68) chat history filter: Page / Section / Notebook / All */
+.ah-filter{display:flex;margin:0 0 8px}
+.ah-filter button{flex:1;min-width:0;padding:0 6px;font-size:12.5px;display:inline-flex;align-items:center;justify-content:center;gap:4px}
+.ah-filter button:disabled{opacity:.45}
+.ah-filter .ah-n{font-size:11px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
 .ah-row{display:flex;align-items:stretch;border-radius:10px;background:var(--panel2);box-shadow:0 0 0 1px var(--line);margin-bottom:6px}
 .ah-row.on{box-shadow:0 0 0 2px var(--accent)}
 .ah-open{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;text-align:left;border-radius:10px;color:var(--fg)}
@@ -854,3 +859,4 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 /* 1.53: Box lasso area and Copy as picture */
 .ts-box b{position:absolute;display:block;border:1.5px dashed var(--accent);border-radius:2px;background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .shot-dlg img{display:block;max-width:100%;max-height:60vh;margin:8px auto 12px;border-radius:6px;box-shadow:0 0 0 1px var(--line);background:#fff;-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto}
+@media (any-pointer:coarse){ .ah-filter button{height:44px} }

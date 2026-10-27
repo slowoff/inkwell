@@ -43,14 +43,47 @@ const Ask = {
     $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, add a <b>photo</b> (the picture icon), or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.<br><br><b>Practice</b> (same menu): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
   },
   chats(){ return [...docs.values()].filter(d => d.kind === 'chat' && live(d)).sort((a, b) => (b.data.at || 0) - (a.data.at || 0)); },
+  /* (1.68) History filter: chats from the open page, its section, its notebook, or all (prefs.askFilter, per device).
+     A chat belongs to every page it asked a question from (view entries keep their page; data.page = the first). */
+  chatPages(c){ return new Set([c.data.page, ...(c.data.view || []).filter(v => v && v.who === 'user').map(v => v.page)].filter(Boolean)); },
+  // where the open page sits: {page, sec, nb} ids (null when no page is open)
+  here(){
+    const p = cur && getDoc(cur.id); if(!p) return null;
+    const s = docs.get(p.data.sec);
+    return {page: p.id, sec: p.data.sec || null, nb: s && s.data ? s.data.nb || null : null};
+  },
+  inScope(c, scope, h){
+    if(scope === 'all' || !h) return true;
+    for(const pid of this.chatPages(c)){
+      if(scope === 'page'){ if(pid === h.page) return true; continue; }
+      const p = docs.get(pid), sid = p && p.data ? p.data.sec : null;   // also pages in Recently deleted
+      if(scope === 'sec'){ if(sid && sid === h.sec) return true; continue; }
+      const s = sid && docs.get(sid), nid = s && s.data ? s.data.nb : null;
+      if(nid && nid === h.nb) return true;
+    }
+    return false;
+  },
   showHistory(){
     this.histOpen = true; $('askPanel').classList.add('hist');
-    const list = this.chats();
+    const all = this.chats(), h = this.here();
+    const scopes = [['page', 'Page'], ['sec', 'Section'], ['nb', 'Notebook'], ['all', 'All']];
+    let scope = ['page', 'sec', 'nb', 'all'].includes(prefs.askFilter) ? prefs.askFilter : 'all';
+    if(!h) scope = 'all';
+    const count = s => all.filter(c => this.inScope(c, s, h)).length;
+    const sec = h && getDoc(h.sec), nb = h && getDoc(h.nb), pg = h && getDoc(h.page);
+    const tip = {page: pg ? 'Chats from this page: ' + (pg.data.title || 'Untitled page') : '', sec: sec ? 'Chats from pages in the section ' + sec.data.name : '', nb: nb ? 'Chats from pages in the notebook ' + nb.data.name : '', all: 'All chats'};
+    const bar = `<div class="seg ah-filter" role="group" aria-label="Show chats from">` + scopes.map(([k, l]) => {
+      const off = k !== 'all' && !h;
+      return `<button data-af="${k}" class="${k === scope ? 'on' : ''}"${off ? ' disabled' : ''} title="${esc(off ? 'Open a page to filter by it' : tip[k])}">${l} <span class="ah-n">${off ? '' : count(k)}</span></button>`;
+    }).join('') + `</div>`;
+    const list = all.filter(c => this.inScope(c, scope, h));
+    const none = !all.length ? 'No saved chats yet. Every chat with Claude is kept here.'
+      : {page: 'No chats from this page yet.', sec: 'No chats from this section yet.', nb: 'No chats from this notebook yet.'}[scope] || 'No chats.';
     const day = ms => { const d = new Date(ms), now = new Date(); const same = d.toDateString() === now.toDateString(); return same ? d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : d.toLocaleDateString([], {day: 'numeric', month: 'short'}) + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : ''); };
-    $('askLog').innerHTML = `<div class="ah-head"><b>History</b><button class="btn ghost ah-back">Back to chat</button></div>` + (list.length ? list.map(c => {
+    $('askLog').innerHTML = `<div class="ah-head"><b>History</b><button class="btn ghost ah-back">Back to chat</button></div>` + (all.length ? bar : '') + (list.length ? list.map(c => {
       const pg = c.data.page && docs.get(c.data.page), n = (c.data.view || []).filter(v => v.who === 'user').length;
       return `<div class="ah-row ${c.id === this.chatId ? 'on' : ''}" data-chat="${c.id}"><button class="ah-open"><b>${esc(c.data.title || 'Chat')}</b><span>${esc(day(c.data.at || 0))}${pg && live(pg) ? ' · ' + esc(pg.data.title || 'Untitled page') : ''} · ${n} question${n === 1 ? '' : 's'} · ${c.data.mode === 'solve' ? 'Solve' : c.data.mode === 'practice' ? 'Practice' : 'Tutor'}</span></button><button class="ah-del" title="Delete this chat" aria-label="Delete chat"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button></div>`;
-    }).join('') : '<div class="ask-empty">No saved chats yet. Every chat with Claude is kept here.</div>');
+    }).join('') : `<div class="ask-empty">${esc(none)}</div>`);
   },
   showChat(){
     this.histOpen = false; $('askPanel').classList.remove('hist');
@@ -370,6 +403,8 @@ $('askNew').addEventListener('click', () => Ask.reset());
 $('askHist').addEventListener('click', () => { if(Ask.histOpen) Ask.showChat(); else Ask.showHistory(); });
 $('askLog').addEventListener('click', async e => {
   if(e.target.closest('.ah-back')){ Ask.showChat(); return; }
+  const af = e.target.closest('[data-af]');
+  if(af){ if(af.disabled) return; prefs.askFilter = af.dataset.af; savePrefs(); Ask.showHistory(); return; }
   const row = e.target.closest('.ah-row'); if(!row) return;
   const id = row.dataset.chat;
   if(e.target.closest('.ah-del')){

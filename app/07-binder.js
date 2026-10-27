@@ -41,6 +41,7 @@ async function openPage(id, opts = {}){
   clearSel(); updUndo(); renderRuler(); invalidate();
   markActivePage(); markBadgeSoon();
   if(width() === 'narrow') app.dataset.view = 'editor';
+  if(Ask.histOpen && !$('askPanel').hidden) Ask.showHistory();   // (1.68) the chat filter follows the open page
 }
 async function closeCurrent(){
   closeWheel();

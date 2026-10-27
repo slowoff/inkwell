@@ -455,12 +455,16 @@ function fmtCalc(v){
    Keyboard (hardware keyboard / PC)
    ===================================================================== */
 document.addEventListener('keydown', e => {
+  if(typeof e.key !== 'string') return;   // (1.67.3) some browsers send key events without a key (autofill)
   const ae = document.activeElement;
   // (1.60.2) the hidden paste catcher (focused for a moment after Ctrl/Cmd+V) is not a text field: a shortcut pressed
   // right after a paste (Ctrl+X, Ctrl+Z, Delete) was ignored while it held the focus
   if(ae && ae.id === 'pasteCatch' && !(e.key.toLowerCase() === 'v' && (e.metaKey || e.ctrlKey))) ae.blur();
   const typing = ae && ae.id !== 'pasteCatch' && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName));
   if(typing){ if(e.key === 'Escape' && editing) finishEditing(); return; }
+  // (1.67.3) with a window open (Settings, export, …) the page's shortcuts are off: Backspace deleted the selected
+  // things behind the window, a letter switched the tool, Ctrl+Z undid on the page
+  if(e.key !== 'Escape' && document.querySelector('.modal:not([hidden])')) return;
   if(e.key === ' '){ spaceDown = true; e.preventDefault(); return; }
   if(e.metaKey || e.ctrlKey){
     const k = e.key.toLowerCase();
@@ -483,3 +487,5 @@ document.addEventListener('keydown', e => {
   if(e.key === 'Escape'){ closeWheel(); clearSel(); closePops(); if(pick){ endPick(); toast('Cancelled'); } }
 });
 document.addEventListener('keyup', e => { if(e.key === ' ') spaceDown = false; });
+// (1.67.3) the Space key released while another window or app had the focus never sent keyup: the mouse kept panning
+addEventListener('blur', () => { spaceDown = false; });

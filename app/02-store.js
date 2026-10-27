@@ -101,6 +101,21 @@ const IDB = {
   },
   del(store, key){ if(this.mem){ this.mem[store].delete(key); return Promise.resolve(); } return this.req(store, 'readwrite', s => s.delete(key)); },
   all(store){ if(this.mem) return Promise.resolve([...this.mem[store].values()]); return this.req(store, 'readonly', s => s.getAll()); },
+  keys(store){ if(this.mem) return Promise.resolve([...this.mem[store].keys()]); return this.req(store, 'readonly', s => s.getAllKeys()); },
+  // (1.67.3) read and write one value in a single transaction (for stores with out-of-line keys, e.g. meta), so two
+  // changes at the same time cannot overwrite each other. Resolves to the new value.
+  update(store, key, fn){
+    if(this.mem){ const v = fn(structuredClone(this.mem[store].get(key))); this.mem[store].set(key, structuredClone(v)); return Promise.resolve(v); }
+    return new Promise((res, rej) => {
+      const t = this.db.transaction(store, 'readwrite'), s = t.objectStore(store);
+      let out;
+      const g = s.get(key);
+      g.onsuccess = () => { out = fn(g.result); s.put(out, key); };
+      t.oncomplete = () => res(out);
+      t.onerror = () => rej(t.error);
+      t.onabort = () => rej(t.error || new Error('Storage write aborted'));
+    });
+  },
   // (1.60.2) docs not uploaded yet, read through the 'dirty' index (before, every sync read the whole database twice)
   dirty(){
     if(this.mem) return Promise.resolve([...this.mem.docs.values()].filter(d => d.dirty).map(d => structuredClone(d)));
@@ -175,14 +190,32 @@ async function saveVersion(pid, data, why){
 
 /* Imported PDF pages and photos */
 const assetURLs = new Map();
+/* Pictures waiting to upload: meta 'pendingAssets' = [asset id, …].
+   (1.67.3) Changed only through pendAdd / pendDrop, each one read-and-write in a single transaction. Before, the
+   list was read, then written back in a second step: a picture saved while an upload finished (an import with many
+   pages, while sync uploads the first ones) could drop out of the list and never upload. That is how one page of a
+   121-page import stayed on the importing device only. */
+const pendList = p => Array.isArray(p) ? p : [];
+const pendAdd = ids => IDB.update('meta', 'pendingAssets', p => { const l = pendList(p); for(const id of ids) if(!l.includes(id)) l.push(id); return l; });
+const pendDrop = id => IDB.update('meta', 'pendingAssets', p => pendList(p).filter(x => x !== id));
 async function saveAsset(blob){
   const id = 'a-' + newId();
   await IDB.put('assets', {id, blob, type: blob.type || 'image/jpeg'});
-  const pend = (await IDB.get('meta', 'pendingAssets')) || [];
-  pend.push(id);
-  await IDB.put('meta', pend, 'pendingAssets');
+  await pendAdd([id]);
   Sync.soon();
   return id;
+}
+// asset ids a doc refers to: key "a" (pictures, chat scans) and (1.52) "as" (all scans of a Claude question)
+function assetRefs(v, out){
+  if(!v || typeof v !== 'object') return out;
+  if(Array.isArray(v)){ for(const x of v) assetRefs(x, out); return out; }
+  for(const k in v){
+    const x = v[k];
+    if(k === 'a' && typeof x === 'string') out.add(x);
+    else if(k === 'as' && Array.isArray(x)){ for(const s of x) if(typeof s === 'string') out.add(s); }
+    else if(x && typeof x === 'object') assetRefs(x, out);
+  }
+  return out;
 }
 async function assetURL(id){
   if(assetURLs.has(id)) return assetURLs.get(id);

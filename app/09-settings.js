@@ -197,14 +197,12 @@ async function cleanScan(){
     if(Sync.state !== 'synced') throw new Error('Sync first (' + (Sync.msg || 'not synced') + ')');
   }
   const used = new Set();
-  const walk = v => {
-    if(!v || typeof v !== 'object') return;
-    if(Array.isArray(v)){ for(const x of v) walk(x); return; }
-    for(const k in v){ const x = v[k]; if(k === 'a' && typeof x === 'string') used.add(x); else if(x && typeof x === 'object') walk(x); }
-  };
+  // (1.67.3) assetRefs also counts "as", the list of all scans of a Claude question (1.52). Before, only the first
+  // scan of such a question counted as used, so Free up space offered to delete the others from the chat history.
+  const walk = v => assetRefs(v, used);
   for(const d of await IDB.all('docs')) if(d.kind !== 'ptxt' && d.data) walk(d.data);
   if(cur){ for(const it of cur.items.values()) walk(it); walk(cur.undo); walk(cur.redo); }   // Undo can still bring a deleted picture back
-  walk(Ask.msgs);
+  walk(Ask.msgs); walk(Ask.view);
   for(const id of (await IDB.get('meta', 'pendingAssets')) || []) used.add(id);
   const local = (await IDB.all('assets')).filter(r => r && r.id && !used.has(r.id)).map(r => ({id: r.id, size: r.blob ? r.blob.size : 0}));
   const server = [];
@@ -634,6 +632,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.67.3', '2026-10-27', ['Fix: pictures saved while others were uploading (a big import) could stay on this device only and never reach your other devices. Once a day Inkwell now finds such pictures and uploads them', 'Fix: one picture that fails to upload no longer holds up all the others', 'Fix: Free up space no longer offers to delete the 2nd to 4th scan of a Claude question', 'Fix: a Claude question that fails (no connection) keeps its text and pictures so you can send it again', 'Fix: with a window open (Settings, export …) the keyboard no longer deletes or changes things on the page behind it', 'Fix: Restore backup shows the restored copy of the page that is open', 'Fix: the "Starting is taking too long" box goes away by itself once Inkwell has started']],
   ['1.67.2', '2026-10-27', ['Fix: tapping a fill-in box of an imported worksheet no longer turns the formatting bar into a tall column over the page']],
   ['1.67.1', '2026-10-27', ['Security: imported PDFs and Word files can no longer run code inside Inkwell']],
   ['1.67', '2026-10-26', ['Ask Claude: upload photos and pictures (the picture button next to scan: camera, Photos or Files; on the PC also paste or drop). Up to 4 per question, together with scans']],
@@ -868,21 +867,26 @@ $('restoreFile').addEventListener('change', async () => {
       }
     }
     if(!docsIn && !pics.length) throw new Error('Not an Inkwell backup');
-    let n = 0, p = 0;
+    let n = 0, p = 0, openHit = false;
+    if(cur) await flushSaves();
     for(const d of docsIn || []){
       const local = await IDB.get('docs', d.id);
       if(local && local.updated >= d.updated && !local.deleted) continue;
       await IDB.put('docs', {id: d.id, kind: d.kind, data: d.data, deleted: false, updated: Math.max(d.updated, local ? local.updated + 1 : 0), dirty: 1});
+      if(cur && d.id === 'c_' + cur.id) openHit = true;
       n++;
     }
-    const pend = (await IDB.get('meta', 'pendingAssets')) || [];
+    const pend = [];
     for(const a of pics){
       if(await IDB.get('assets', a.id)) continue;
       const blob = await a.get();
       await IDB.put('assets', {id: a.id, blob, type: a.type || blob.type || 'image/jpeg'}); pend.push(a.id); p++;
     }
-    await IDB.put('meta', pend, 'pendingAssets');
+    if(pend.length) await pendAdd(pend);   // (1.67.3) added in one step (the old read-then-write could lose pictures)
     await loadDocs(); ensureUi(); renderNav(); renderList(); Sync.soon();
+    // (1.67.3) the open page was restored too: show the restored copy (before, the old copy stayed on screen and the
+    // next stroke saved it over the restored one)
+    if(openHit && cur){ const id = cur.id, keep = {...cam}; cur = null; await openPage(id, {keepStack: true}); Object.assign(cam, keep); invalidate(); }
     toast(`Restored ${n} item${n === 1 ? '' : 's'} and ${p} picture${p === 1 ? '' : 's'}` + (docsIn ? '' : ' (choose part 1 too for the notes)'));
     hideModal('settingsDlg');
   } catch(e){ toast('Restore failed: ' + (e.message || e)); }

@@ -182,6 +182,7 @@ tHandle.addEventListener('pointermove', e => {
   invalidate(0, 0, 1);
 });
 tHandle.addEventListener('pointerup', () => { thDrag = null; saveContentSoon(); });
+tHandle.addEventListener('pointercancel', () => { if(thDrag){ thDrag = null; saveContentSoon(); } });   // (1.67.3) a cancelled drag kept the handle stuck
 
 /* text move grip (1.45): the box keeps being edited while it moves; finishEditing makes it one undo step */
 // (1.58.1) Moving a text box by its hand. On the iPad, touch events drive the drag (finger and Pencil both send them):

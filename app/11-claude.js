@@ -190,19 +190,26 @@ const Ask = {
     $('askSend').disabled = this.busy;
   },
   // Send button / Enter: typed text, plus the attached scan if there is one
-  submit(){
-    const t = $('askIn').value.trim(), p = this.pending;
+  async submit(){
+    const raw = $('askIn').value, t = raw.trim(), p = this.pending;
     if(!t && !p) return;
     if(this.busy) return;
     $('askIn').value = ''; autoGrow();
     this.pending = null; this.renderPending();
+    let r;
     if(p){
       const many = p.length > 1;
       const typed = many ? p.map((x, i) => x.typed ? 'Scan ' + (i + 1) + ':\n' + x.typed : '').filter(Boolean).join('\n\n') : p[0].typed;
       const box = (p.find(x => x.box) || {}).box || null, photos = p.filter(x => x.photo).length;
-      this.send(t || (this.mode === 'practice' ? (many ? 'Here are my answers.' : 'Here is my answer.') : prefs.askMode === 'solve' ? (many ? 'Solve these questions.' : 'Solve this question.') : (many ? 'Help me with these.' : 'Help me with this question.')), p.map(x => x.url), typed, box, photos ? {photos} : undefined);
+      r = await this.send(t || (this.mode === 'practice' ? (many ? 'Here are my answers.' : 'Here is my answer.') : prefs.askMode === 'solve' ? (many ? 'Solve these questions.' : 'Solve this question.') : (many ? 'Help me with these.' : 'Help me with this question.')), p.map(x => x.url), typed, box, photos ? {photos} : undefined);
     }
-    else this.send(t);
+    else r = await this.send(t);
+    // (1.67.3) the question did not go through (no connection, server error, not signed in): the typed text and the
+    // attached scans/pictures come back, so it can be sent again with one tap (before, they were gone)
+    if(r === 'failed' && !$('askIn').value.trim() && !this.pending){
+      $('askIn').value = raw; autoGrow();
+      if(p){ this.pending = p; this.renderPending(); }
+    }
   },
   // API form of the chat: scans stored as assets go back in as base64
   async apiMsgs(){
@@ -256,10 +263,10 @@ const Ask = {
     if(!text && !imgURL) return;
     opts = opts || {};
     if(this.histOpen) this.showChat();
-    if(!Sync.sb){ this.bubble('err', 'Claude works through your sync account. Sync is not set up on this device.'); return; }
+    if(!Sync.sb){ this.bubble('err', 'Claude works through your sync account. Sync is not set up on this device.'); return 'failed'; }
     const {data} = await Sync.sb.auth.getSession();
     const session = data && data.session;
-    if(!session){ this.bubble('err', 'Sign in first: Settings (gear, top left) → Sync.'); return; }
+    if(!session){ this.bubble('err', 'Sign in first: Settings (gear, top left) → Sync.'); return 'failed'; }
     const content = [];
     let assetId = null;
     const urls = Array.isArray(imgURL) ? imgURL : imgURL ? [imgURL] : [], assetIds = [];
@@ -286,7 +293,7 @@ const Ask = {
     this.bubble('user', urls.map((u, i) => `<img src="${u}" alt="Scanned question${urls.length > 1 ? ' ' + (i + 1) : ''}">`).join('') + esc(text).replace(/\n/g, '<br>'));
     const out = this.bubble('bot', '<span class="typing"></span>');
     this.busy = true; $('askSend').disabled = true;
-    let acc = '', last = 0;
+    let acc = '', last = 0, result = 'failed';
     const paint = force => { const now = performance.now(); if(!force && now - last < 120) return; last = now; out.innerHTML = renderMd(acc) || '<span class="typing"></span>'; const log = $('askLog'); if(log.scrollHeight - log.scrollTop - log.clientHeight < 140) log.scrollTop = log.scrollHeight; };
     try {
       this.ctrl = new AbortController();
@@ -310,12 +317,14 @@ const Ask = {
       this.msgs.push({role: 'assistant', content: [{type: 'text', text: acc}]});
       this.view.push({who: 'bot', text: acc, model: modelLine});
       this.saveChat().catch(e => console.warn('chat save', e));
+      result = 'ok';
     } catch(e){
       this.msgs.pop(); this.view.pop();   // let the question be asked again
-      if(e.name === 'AbortError'){ out.remove(); }
+      if(e.name === 'AbortError'){ out.remove(); result = 'aborted'; }
       else { out.className = 'am err'; out.textContent = /Failed to fetch|Load failed|NetworkError/i.test(e.message) ? 'No connection to the server. Check the internet and try again.' : e.message; }
     }
     this.busy = false; this.ctrl = null; $('askSend').disabled = false;
+    return result;
   }
 };
 // Small Markdown renderer for answers: paragraphs, lists, headings, bold/italic, code, and $math$ via KaTeX.

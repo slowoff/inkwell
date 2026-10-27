@@ -89,6 +89,7 @@ const Sync = {
       // or a picture had to be uploaded or downloaded, so on most starts the notes copy in Drive was not updated.
       Files.on().catch(() => {});
       DbSize.check().catch(() => {});   // (1.64) how full the notes server is (hourly)
+      this.repairAssets().catch(e => console.warn('picture check', e));   // (1.67.3) once a day
       this.state = 'synced'; this.msg = ''; this.lastOk = Date.now();
       if(this.refused){
         this.state = 'warn';
@@ -297,25 +298,53 @@ const Sync = {
     if(pend.length && !r2 && !(Files.info && Files.info.r2 === false)) return;
     // cloud full: new pictures stay on this device (nothing is lost) and uploads are retried every 30 minutes
     if(r2 && Files.full && Date.now() - Files.full.at < 1800000) return;
-    while(pend.length){
-      const id = pend[0];
+    // (1.67.3) one picture that keeps failing (e.g. a broken file Google refuses) no longer holds up all the others
+    // behind it: it is skipped for this run and the error is reported after the rest are uploaded
+    const skip = new Set();
+    let firstErr = null;
+    for(;;){
+      const id = pend.find(x => !skip.has(x));
+      if(!id) break;
       const a = await IDB.get('assets', id);
       if(a){
         if(r2){
           try { await Files.upload(id, a.blob); Files.full = null; }
           catch(e){
             if(e.code === 'cloud_full' || e.code === 'storage_full' || e.code === 'gdrive_full' || e.code === 'need_drive'){ Files.full = Object.assign({at: Date.now(), code: e.code}, e.j || {}); Files.localOnly = pend.length; Files.notice(); renderSyncInfo(); return; }
-            throw e;
+            if(e.code === 'offline' || e.code === 'not_signed_in' || e.code === 'g_none' || e.code === 'g_revoked') throw e;
+            console.warn('picture upload', id, e);
+            firstErr = firstErr || e; skip.add(id); continue;
           }
         } else {
           const {error} = await this.sb.storage.from('assets').upload(this.user.id + '/' + id, a.blob, {contentType: a.type || 'image/jpeg', upsert: true});
           if(error) throw error;
         }
       }
-      pend = ((await IDB.get('meta', 'pendingAssets')) || []).filter(x => x !== id);
-      await IDB.put('meta', pend, 'pendingAssets');
+      pend = await pendDrop(id);
       Files.localOnly = pend.length;
     }
+    if(firstErr) throw firstErr;
+  },
+  /* (1.67.3) Once a day: pictures that are on this device and used by a note, but neither on the server nor waiting to
+     upload, are put back in the upload list. Before 1.67.3 a picture could drop out of the list (see pendAdd) and then
+     never reached the other devices; this brings such pictures back as long as this device still has them. */
+  async repairAssets(){
+    if(!this.user || !Acct.mine()) return;
+    const k = 'inkwell.assetCheck', day = new Date().toDateString(), st = LSget(k, null) || {};
+    if(st.day === day && st.uid === this.user.id) return;
+    if(!(await Files.on())) return;
+    const local = (await IDB.keys('assets')).filter(id => typeof id === 'string' && /^a-[A-Za-z0-9_-]{1,64}$/.test(id));
+    if(!local.length){ LSset(k, {day, uid: this.user.id}); return; }
+    const used = new Set();
+    for(const d of await IDB.all('docs')) if(d.kind !== 'ptxt' && d.data) assetRefs(d.data, used);
+    const cand = local.filter(id => used.has(id));
+    if(!cand.length){ LSset(k, {day, uid: this.user.id}); return; }
+    const {files} = await Files.call('list');
+    const onServer = new Set((files || []).map(f => f && f.id));
+    const pend = new Set(pendList(await IDB.get('meta', 'pendingAssets')));
+    const lost = cand.filter(id => !onServer.has(id) && !pend.has(id));
+    LSset(k, {day, uid: this.user.id, found: lost.length});
+    if(lost.length){ console.warn('pictures not uploaded yet, queued again', lost.length); await pendAdd(lost); this.soon(); }
   },
   async fetchAsset(id){
     if(!this.sb || !this.user || !navigator.onLine) return null;

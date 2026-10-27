@@ -565,7 +565,9 @@ async function openDocx(file){
   document.body.appendChild(box);
   let sections;
   try {
-    await window.docx.renderAsync(await file.arrayBuffer(), box, box, {inWrapper: false, breakPages: true, ignoreLastRenderedPageBreak: false, ignoreWidth: false, ignoreHeight: false, renderHeaders: true, renderFooters: true, renderFootnotes: true, useBase64URL: true, experimental: true});
+    // (1.67.1, security) renderAltChunks off: Word files can carry raw web pages (altChunk) that docx-preview shows in an
+    // iframe without a sandbox, where their scripts would run inside Inkwell. They are left out of the import.
+    await window.docx.renderAsync(await file.arrayBuffer(), box, box, {inWrapper: false, breakPages: true, ignoreLastRenderedPageBreak: false, ignoreWidth: false, ignoreHeight: false, renderHeaders: true, renderFooters: true, renderFootnotes: true, useBase64URL: true, experimental: true, renderAltChunks: false});
     if(document.fonts && document.fonts.ready) await document.fonts.ready;
     await new Promise(r => setTimeout(r, 60));
     sections = [...box.querySelectorAll('section.docx')];

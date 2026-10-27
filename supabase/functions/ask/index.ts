@@ -180,29 +180,35 @@ Deno.serve(async (req) => {
     try { const j = await r.json(); msg = j?.error?.message || ""; } catch { /* ignore */ }
     return fail(req, 502, "anthropic_" + r.status, msg || `Claude API error ${r.status}`);
   }
-  // pass the stream through unchanged while reading the token counts, then log the cost
-  const usage: any = {};
-  let buf = "";
-  const dec = new TextDecoder();
-  const meter = new TransformStream({
-    transform(chunk, ctl) {
-      ctl.enqueue(chunk);
-      buf += dec.decode(chunk, { stream: true });
-      let i;
-      while ((i = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, i); buf = buf.slice(i + 1);
-        if (!line.startsWith("data:") || !line.includes("usage")) continue;
-        try {
-          const ev = JSON.parse(line.slice(5));
-          const u = ev?.message?.usage || ev?.usage;
-          if (u) for (const k of Object.keys(u)) if (typeof u[k] === "number") usage[k] = u[k];
-        } catch { /* partial or other event */ }
+  // the stream goes to the app unchanged; a second copy is read here to the end for the token counts and the cost is
+  // logged. (1.67.1, security) Before, the cost was logged only when the app read the whole answer, so closing the
+  // connection just before the end got answers that never counted towards the monthly limit.
+  const [toApp, toMeter] = r.body.tee();
+  const metered = (async () => {
+    const usage: any = {};
+    let buf = "";
+    const dec = new TextDecoder();
+    const rd = toMeter.getReader();
+    try {
+      for (;;) {
+        const { value, done } = await rd.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i); buf = buf.slice(i + 1);
+          if (!line.startsWith("data:") || !line.includes("usage")) continue;
+          try {
+            const ev = JSON.parse(line.slice(5));
+            const u = ev?.message?.usage || ev?.usage;
+            if (u) for (const k of Object.keys(u)) if (typeof u[k] === "number") usage[k] = u[k];
+          } catch { /* partial or other event */ }
+        }
       }
-    },
-    async flush() {
-      const usd = costOf(model, usage) + spent.usd;
-      if (usd > 0) { try { await admin.rpc("add_claude_usage", { p_user: user.id, p_usd: usd }); } catch (e) { console.error("usage log", e); } }
-    },
-  });
-  return new Response(r.body.pipeThrough(meter), { headers: { ...cors(req), "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-ask-model": model } });
+    } catch (e) { console.error("usage read", e); }
+    const usd = costOf(model, usage) + spent.usd;
+    if (usd > 0) { try { await admin.rpc("add_claude_usage", { p_user: user.id, p_usd: usd }); } catch (e) { console.error("usage log", e); } }
+  })();
+  try { (globalThis as any).EdgeRuntime?.waitUntil(metered); } catch { /* not on Supabase: the promise still runs */ }
+  return new Response(toApp, { headers: { ...cors(req), "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-ask-model": model } });
 });

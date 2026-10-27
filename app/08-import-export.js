@@ -8,6 +8,9 @@
    ===================================================================== */
 let imp = null;
 if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+// (1.67.1, security) every PDF is opened through this. isEvalSupported: false stops pdf.js 3.x from building font
+// drawing code with new Function(), which a crafted PDF could use to run its own code in Inkwell (CVE-2024-4367).
+function pdfOpen(bytes){ return pdfjsLib.getDocument({data: bytes, isEvalSupported: false, enableXfa: false}).promise; }
 $('insertBtn').addEventListener('click', () => {
   if(!cur){ toast('Open a page first'); return; }
   resetImport(); showModal('importDlg');
@@ -104,7 +107,7 @@ async function loadImport(f){
   const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
   if(isPdf){
     if(!window.pdfjsLib) throw new Error('PDF reader missing');
-    const pdf = await pdfjsLib.getDocument({data: new Uint8Array(await f.arrayBuffer())}).promise;
+    const pdf = await pdfOpen(new Uint8Array(await f.arrayBuffer()));
     imp = {kind: 'pdf', pdf, n: pdf.numPages, name: f.name.replace(/\.pdf$/i, '').trim()};
     $('impPagesWrap').hidden = false; $('impPages').value = '';
     $('impCount').textContent = `(${pdf.numPages} page${pdf.numPages === 1 ? '' : 's'})`;

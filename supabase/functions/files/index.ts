@@ -27,6 +27,9 @@
 //   glogin {code, verifier, redirect} (no Inkwell session needed) -> Google sign-in that also connects Drive:
 //     finds or makes the Inkwell account for the verified Google email, saves Drive access -> {token_hash, email}
 //     the app turns token_hash into a session with auth.verifyOtp({type: 'magiclink'})
+//   (1.67.1, security) a NEW account is only made for emails on SIGNUP_ALLOWED_EMAILS or ASK_ALLOWED_EMAILS
+//     (comma-separated secrets), or for anyone if SIGNUP_OPEN=1. Existing accounts always sign in. Before, any Google
+//     account could make an account and use up the shared database (500 MB on the free plan).
 //   put without working Drive access -> 409 need_drive (the picture waits on the device). The shared R2 storage only
 //   serves old pictures until they are moved to the person's Drive (gmove); nothing new goes there.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -136,7 +139,19 @@ Deno.serve(async (req) => {
       const g = await googleConnect(GID, GSECRET, body, null);
       if ("err" in g) return json(req, g.status as number, g.err);
       if (!g.email || !g.verified) return json(req, 400, { error: "g_email", message: "Google did not confirm an email address for this account." });
-      // the Inkwell account for this email: an existing one keeps all its notes; otherwise a new one
+      // the Inkwell account for this email: an existing one keeps all its notes; otherwise a new one, if allowed
+      const list = (k: string) => (Deno.env.get(k) || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const mayJoin = Deno.env.get("SIGNUP_OPEN") === "1" || list("SIGNUP_ALLOWED_EMAILS").includes(g.email) || list("ASK_ALLOWED_EMAILS").includes(g.email);
+      if (!mayJoin) {
+        let exists = false;
+        for (let page = 1; page <= 50 && !exists; page++) {
+          const { data: us, error: ue } = await admin0.auth.admin.listUsers({ page, perPage: 1000 });
+          if (ue) throw ue;
+          exists = us.users.some((u) => (u.email || "").toLowerCase() === g.email);
+          if (us.users.length < 1000) break;
+        }
+        if (!exists) return json(req, 403, { error: "g_not_invited", message: "This Inkwell is private. Ask its owner to add " + g.email + "." });
+      }
       const made = await admin0.auth.admin.createUser({ email: g.email, email_confirm: true });
       if (made.error && !/already|registered|exists/i.test(made.error.message)) throw made.error;
       const link = await admin0.auth.admin.generateLink({ type: "magiclink", email: g.email });

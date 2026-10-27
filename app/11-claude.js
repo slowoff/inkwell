@@ -494,7 +494,7 @@ const Prac = {
       this.busy = true; $('pracGo').disabled = true;
       try {
         if(file.type === 'application/pdf' || /\.pdf$/i.test(file.name)){
-          const pdf = await pdfjsLib.getDocument({data: new Uint8Array(await file.arrayBuffer())}).promise;
+          const pdf = await pdfOpen(new Uint8Array(await file.arrayBuffer()));
           const n = Math.min(pdf.numPages, 40), parts = [];
           for(let i = 1; i <= n; i++){
             $('pracInfo').textContent = `Reading ${file.name}: page ${i} of ${n}…`;

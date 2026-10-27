@@ -40,6 +40,7 @@ b) SQL Editor -> New query. Paste and Run, in this order:
      supabase/migrations/20261018_guard_fix.sql
      supabase/migrations/20261025_docs_put.sql
      supabase/migrations/20261026_db_size.sql
+     supabase/migrations/20261027_tighten_grants.sql
    Each should say "Success".
 c) Project Settings -> API Keys: copy the "publishable" key
    (starts with sb_publishable_). Project Settings -> Data API:
@@ -78,6 +79,9 @@ b) Edge Functions -> Secrets:
      ANTHROPIC_API_KEY      from console.anthropic.com
      ASK_ALLOWED_EMAILS     comma-separated emails allowed to use it
      ASK_MODEL / ASK_FAST_MODEL   optional model overrides
+   Who may make an Inkwell account with Google sign-in (existing accounts always work):
+     SIGNUP_ALLOWED_EMAILS  comma-separated emails (people on ASK_ALLOWED_EMAILS may too)
+     SIGNUP_OPEN            set to 1 to let any Google account make one
 
 ----------------------------------------------------------------
 4. HOSTING (GitHub Pages, free)

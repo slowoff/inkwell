@@ -481,6 +481,9 @@ select.pf-ls option:checked{background:#9fbbe8}
 #graphOpen{display:flex;align-items:center;justify-content:center}
 /* 1.69: Grid maker (button + rows/columns steppers) in the Shapes popover */
 .grid-maker{display:flex;flex-direction:column;gap:6px}
+.grid-panel{display:flex;flex-direction:column;gap:8px;padding:2px 0 4px}
+#gridOpen.on{background:var(--accent-soft);color:var(--accent)}
+#gridOpen.on .grid-n{color:inherit}
 #gridOpen{display:flex;align-items:center;justify-content:center}
 #gridOpen .grid-n{margin-left:8px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
 .grid-steps{display:grid;grid-template-columns:1fr 1fr;gap:8px}

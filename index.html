@@ -201,15 +201,18 @@
   </div>
   <button class="btn ghost" id="compassOpen" title="Compass: circles and arcs from a centre point"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="4" r="1.6"/><path d="M11.3 5.5 6 19M12.7 5.5 18 19M5 15.5c4 3.2 10 3.2 14 0"/></svg>&nbsp;Compass</button>
   <div class="grid-maker">
-    <button class="btn ghost" id="gridOpen" title="Grid: drag a box on the page, it is split into the rows and columns below"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="3.5" y="4.5" width="17" height="15" rx="1"/><path d="M3.5 9.5h17M3.5 14.5h17M9.2 4.5v15M14.8 4.5v15"/></svg>&nbsp;Grid<span class="grid-n" id="gridSize">3 × 4</span></button>
-    <div class="grid-steps" id="gridSteps">
-      <div class="gstep"><span>Rows</span><div class="stepper" data-k="r"><button data-d="-1" aria-label="Fewer rows">−</button><b id="gridR">3</b><button data-d="1" aria-label="More rows">+</button></div></div>
-      <div class="gstep"><span>Columns</span><div class="stepper" data-k="c"><button data-d="-1" aria-label="Fewer columns">−</button><b id="gridC">4</b><button data-d="1" aria-label="More columns">+</button></div></div>
+    <button class="btn ghost" id="gridOpen" title="Grid: choose rows and columns, then draw it on the page" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="3.5" y="4.5" width="17" height="15" rx="1"/><path d="M3.5 9.5h17M3.5 14.5h17M9.2 4.5v15M14.8 4.5v15"/></svg>&nbsp;Grid<span class="grid-n" id="gridSize">3 × 4</span></button>
+    <div class="grid-panel" id="gridPanel" hidden>
+      <div class="grid-steps" id="gridSteps">
+        <div class="gstep"><span>Rows</span><div class="stepper" data-k="r"><button data-d="-1" aria-label="Fewer rows">−</button><b id="gridR">3</b><button data-d="1" aria-label="More rows">+</button></div></div>
+        <div class="gstep"><span>Columns</span><div class="stepper" data-k="c"><button data-d="-1" aria-label="Fewer columns">−</button><b id="gridC">4</b><button data-d="1" aria-label="More columns">+</button></div></div>
+      </div>
+      <button class="btn primary" id="gridDraw">Draw grid</button>
     </div>
   </div>
   <button class="btn ghost" id="graphOpen"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3v18h16M5 3l-2 3M5 3l2 3M21 21l-3-2M21 21l-3 2"/><path d="M8 17c3-1 5-6 11-9"/></svg>&nbsp;Graph / axes</button>
   <button class="toggle shape-snap" id="snapShapes" title="Lines and arrows you draw, and shapes you turn with the rotate handle, click into 0°, 15°, 45°, 90° … when close to those angles"><span class="sw"></span><span>Snap to angles</span></button>
-  <p class="hint">Pick a shape, then drag on the page. Tap instead of dragging for a standard size. Compass: put the point on the centre, drag out to the radius, then go around for an arc. Grid: drag a box, it is split into the rows and columns you set.</p>
+  <p class="hint">Pick a shape, then drag on the page. Tap instead of dragging for a standard size. Compass: put the point on the centre, drag out to the radius, then go around for an arc. Grid: press Grid, set rows and columns, then Draw grid and drag a box.</p>
 </div>
 
 <div class="pop assist-pop" id="assistPop" hidden>

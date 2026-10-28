@@ -1,4 +1,5 @@
-# 1.69: Shapes -> Grid. Rows/columns steppers (prefs.grid, remembered), drag a box = grid split into r x c,
+# 1.69: Shapes -> Grid. (1.69.1) Rows/columns and Draw grid only show after pressing Grid; folded again on reopen.
+# Rows/columns steppers (prefs.grid, remembered), drag a box = grid split into r x c,
 # tap = standard cells of 56 x 36 screen px, one group, one undo step, saved, popover fits. Guest mode.
 import asyncio, os
 from playwright.async_api import async_playwright
@@ -41,6 +42,13 @@ async def main():
 
         # 1. popover: Grid button and steppers, default 3 x 4
         await page.click('#shapeBtn'); await page.wait_for_selector('#gridOpen', state='visible')
+        check(not await page.is_visible('#gridSteps') and not await page.is_visible('#gridDraw'), 'rows/columns hidden until Grid is pressed')
+        await page.click('#gridOpen'); await page.wait_for_timeout(100)
+        r = await page.evaluate("[document.getElementById('shapePop').hidden, document.getElementById('gridOpen').getAttribute('aria-expanded')]")
+        check(await page.is_visible('#gridSteps') and await page.is_visible('#gridDraw') and r == [False, 'true'], f'pressing Grid shows them, menu stays open ({r})')
+        await page.click('#gridOpen'); await page.wait_for_timeout(100)
+        check(not await page.is_visible('#gridSteps') and await page.is_visible('#shapePop'), 'pressing Grid again folds them')
+        await page.click('#gridOpen'); await page.wait_for_timeout(100)
         t = await page.evaluate("[gridSize.textContent, gridR.textContent, gridC.textContent]")
         check(t == ['3 × 4', '3', '4'], f'default 3 × 4 ({t})')
         lay = await page.evaluate("""(() => { const p = document.getElementById('shapePop').getBoundingClientRect(), g = document.getElementById('shapeGrid').getBoundingClientRect();
@@ -61,8 +69,8 @@ async def main():
         await tap_step(page, 'r', '1')
 
         # 3. drag a box 300 x 120 -> frame + 1 row line + 4 column lines, grouped, selected
-        await page.click('#gridOpen'); await page.wait_for_timeout(100)
-        check(not await page.is_visible('#shapePop'), 'popover closes when Grid is picked')
+        await page.click('#gridDraw'); await page.wait_for_timeout(100)
+        check(not await page.is_visible('#shapePop'), 'popover closes when Draw grid is pressed')
         x0, y0 = cx - 150, cy - 60
         await page.mouse.move(x0, y0); await page.mouse.down(); await page.mouse.move(x0 + 300, y0 + 120, steps=8); await page.mouse.up()
         await page.wait_for_timeout(250)
@@ -82,7 +90,7 @@ async def main():
 
         # 4. dragging up-left works the same
         await page.keyboard.press('Escape')
-        await page.click('#shapeBtn'); await page.click('#gridOpen')
+        await page.click('#shapeBtn'); await page.click('#gridOpen'); await page.click('#gridDraw')
         await page.mouse.move(cx + 200, cy + 250); await page.mouse.down(); await page.mouse.move(cx + 50, cy + 150, steps=6); await page.mouse.up()
         await page.wait_for_timeout(250)
         r = await page.evaluate(STROKES)
@@ -94,7 +102,7 @@ async def main():
         check(len(r['s']) == 6, f"one undo removes the whole grid ({len(r['s'])})")
 
         # 6. tap: standard cells 56 x 36 around the tap point (2 x 5 -> 280 x 72)
-        await page.click('#shapeBtn'); await page.click('#gridOpen')
+        await page.click('#shapeBtn'); await page.click('#gridOpen'); await page.click('#gridDraw')
         tx, ty = cx - 250, cy + 220
         await page.mouse.click(tx, ty); await page.wait_for_timeout(250)
         r = await page.evaluate(STROKES)
@@ -108,15 +116,17 @@ async def main():
 
         # 7. a 1 x 1 grid is just a rectangle
         await page.click('#shapeBtn')
-        await tap_step(page, 'r', '-1'); await tap_step(page, 'c', '-1', 4)
+        check(not await page.is_visible('#gridSteps'), 'folded again when the Shapes menu reopens')
         await page.click('#gridOpen')
+        await tap_step(page, 'r', '-1'); await tap_step(page, 'c', '-1', 4)
+        await page.click('#gridDraw')
         await page.mouse.move(cx + 250, cy - 250); await page.mouse.down(); await page.mouse.move(cx + 350, cy - 200, steps=4); await page.mouse.up()
         await page.wait_for_timeout(250)
         r = await page.evaluate(STROKES)
         check(len(r['s']) == 13, f"1 × 1 grid = one stroke ({len(r['s'])})")
 
         # 8. upper limit 30
-        await page.click('#shapeBtn')
+        await page.click('#shapeBtn'); await page.click('#gridOpen')
         await tap_step(page, 'c', '1', 29)
         t = await page.evaluate("[gridC.textContent, document.querySelector('.stepper[data-k=c] [data-d=\"1\"]').disabled]")
         check(t == ['30', True], f'columns stop at 30 ({t})')
@@ -145,7 +155,7 @@ async def main():
         await page.goto(URL); await page.wait_for_timeout(3000)
         await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
         await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(400)
-        await page.click('#shapeBtn'); await page.wait_for_selector('#gridOpen', state='visible')
+        await page.click('#shapeBtn'); await page.wait_for_selector('#gridOpen', state='visible'); await page.click('#gridOpen')
         lay = await page.evaluate("""(() => { const p = document.getElementById('shapePop').getBoundingClientRect();
           const bs = [...document.querySelectorAll('#gridSteps button')].map(e => e.getBoundingClientRect());
           return {min: Math.min(...bs.map(r => Math.min(r.width, r.height))), inside: bs.every(r => r.left >= p.left - 0.5 && r.right <= p.right + 0.5), bottom: p.bottom, vh: innerHeight}; })()""")

@@ -198,13 +198,22 @@ $('gridSteps').addEventListener('click', e => {
   prefs.grid = {r: k === 'r' ? clamp(r + d, 1, GRID_MAX) : r, c: k === 'c' ? clamp(c + d, 1, GRID_MAX) : c};
   savePrefs(); renderGrid();
 });
+// (1.69.1) the rows/columns only show after pressing Grid (Rafael: "make me press grid before the size option appear");
+// Draw grid then starts drawing. Folded again each time the Shapes menu opens.
+function showGridPanel(on){
+  $('gridPanel').hidden = !on; $('gridOpen').classList.toggle('on', on); $('gridOpen').setAttribute('aria-expanded', on ? 'true' : 'false');
+}
 $('gridOpen').addEventListener('click', () => {
+  showGridPanel($('gridPanel').hidden);
+  if(!$('shapePop').hidden) openPopAgain('shapePop', $('shapeBtn'));   // re-place: the menu got taller or shorter
+});
+$('gridDraw').addEventListener('click', () => {
   closePops();
   const [r, c] = gridRC();
   startPick({kind: 'shape', shape: 'grid'}, `Drag a box on the page for a grid of ${r} × ${c}. Tap for a standard size.`);
 });
 renderGrid();
-$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); renderGrid(); openPop('shapePop', e.currentTarget); });
+$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); renderGrid(); showGridPanel(false); openPop('shapePop', e.currentTarget); });
 $('shapeGrid').addEventListener('click', e => {
   const b = e.target.closest('button[data-shape]'); if(!b) return;
   closePops();

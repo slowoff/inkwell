@@ -943,30 +943,61 @@ function openWheel(x, y, pointerId){
 }
 // (1.69) holding the Pencil (or a finger) on a size: a ring fills up around it, then that size becomes the one on
 // the thickness slider (for the current tool), the menu shows the new size and stays open until the Pencil is lifted
-let wheelHold = null;   // {b, timer}
+let wheelHold = null;   // {b, timer, raf, el}
+// (1.69.2) the held size "charges up": the wedge fills from the inside out (after a short pause, so a quick pick shows
+// nothing); when full, it flashes, the dot grows or shrinks to the new size with a little bounce and the label says
+// "Thick: 15 → 23"
+const WHEEL_WAIT = 250;
+function wheelSegGeo(b){ const g = wheelGeo && wheelGeo.segs[+b.dataset.i]; return g ? {r0: g.ring ? WH_R1 + 3 : WH_R0, r1: g.ring ? WH_R2 : WH_R1, a0: g.a0 + 0.0175, a1: g.a1 - 0.0175} : null; }
+function wheelOverlay(b, cls){
+  const svg = $('wheel').querySelector('.wh-svg'), g = wheelSegGeo(b); if(!svg || !g) return null;
+  const el = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  el.setAttribute('class', cls); svg.appendChild(el); el._g = g;
+  return el;
+}
+function wheelHoldStop(){
+  if(!wheelHold) return;
+  clearTimeout(wheelHold.timer); cancelAnimationFrame(wheelHold.raf);
+  if(wheelHold.el) wheelHold.el.remove();
+  wheelHold = null;
+}
 function wheelHoldTrack(b){
   if(wheelHold && wheelHold.b === b) return;
-  if(wheelHold){ clearTimeout(wheelHold.timer); wheelHold = null; }
-  $('wheel').querySelectorAll('.wh-i.hold').forEach(x => x.classList.remove('hold'));
+  wheelHoldStop();
   if(!b || b.dataset.w !== 's' || !(wheelPress || wheelDrag)) return;
-  const ic = $('wheel').querySelector(`.wh-i[data-i="${b.dataset.i}"]`); if(ic) ic.classList.add('hold');
-  wheelHold = {b, timer: setTimeout(() => {
-    wheelHold = null;
+  const el = wheelOverlay(b, 'wh-charge'), t0 = performance.now() + WHEEL_WAIT, span = WHEEL_SAVE - WHEEL_WAIT;
+  const hold = wheelHold = {b, el, raf: 0, timer: 0};
+  const tick = () => {
+    if(wheelHold !== hold || !el) return;
+    const p = clamp((performance.now() - t0) / span, 0, 1), e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2, g = el._g;
+    if(p > 0) el.setAttribute('d', wedge(g.r0, g.r0 + Math.max(0.5, (g.r1 - g.r0) * e), g.a0, g.a1));
+    if(p < 1) hold.raf = requestAnimationFrame(tick);
+  };
+  hold.raf = requestAnimationFrame(tick);
+  hold.timer = setTimeout(() => {
+    if(wheelHold !== hold) return;
+    wheelHoldStop();
     const t = ['pen', 'hl', 'eraser', 'mark'].includes(prefs.tool) ? prefs.tool : 'pen', i = +b.dataset.slot, v = Math.round(prefs[t].s);
     if(!(i >= 0 && i < 3) || !(v >= 1)) return;
-    const list = wheelSizes(t); list[i] = v;
+    const list = wheelSizes(t), old = list[i]; list[i] = v;
     if(!prefs.wheelSizes || typeof prefs.wheelSizes !== 'object') prefs.wheelSizes = {};
     prefs.wheelSizes[t] = list; savePrefs();
     buildWheel();
     const nb = $('wheel').querySelector(`.wh-seg[data-w="s"][data-slot="${i}"]`);
-    if(nb){
-      if(wheelPress){ wheelPress.b = nb; wheelPress.saved = true; }   // lifting here picks it (the same size) and closes
-      wheelHold = {b: nb, timer: 0};      // no second save while it is still held
-      wheelHover(nb);
-      const ic2 = $('wheel').querySelector(`.wh-i[data-i="${nb.dataset.i}"]`); if(ic2) ic2.classList.add('saved');
-      const L = $('whLabel'); if(L){ L.textContent = (nb.getAttribute('aria-label') || 'Size') + ' is now ' + v; L.hidden = false; }
+    if(!nb) return;
+    if(wheelPress){ wheelPress.b = nb; wheelPress.saved = true; }   // lifting here picks it (the same size) and closes
+    wheelHold = {b: nb, timer: 0, raf: 0, el: null};                // no second save while it is still held
+    wheelHover(nb);
+    const fl = wheelOverlay(nb, 'wh-flash'); if(fl){ const g = fl._g; fl.setAttribute('d', wedge(g.r0, g.r1, g.a0, g.a1)); }
+    const ic = $('wheel').querySelector(`.wh-i[data-i="${nb.dataset.i}"]`), dot = ic && ic.querySelector('span');
+    if(ic) ic.classList.add('saved');
+    if(dot){
+      // grow or shrink from the old size to the new one
+      dot.style.transition = 'none'; dot.style.setProperty('--d', (4 + old / 7) + 'px'); void dot.offsetWidth;
+      dot.style.transition = ''; dot.style.setProperty('--d', (4 + v / 7) + 'px');
     }
-  }, WHEEL_SAVE)};
+    const L = $('whLabel'); if(L){ L.textContent = `${nb.getAttribute('aria-label') || 'Size'}: ${old} → ${v}`; L.hidden = false; }
+  }, WHEEL_SAVE);
 }
 // the option under the Pencil grows, fills in and is named above the menu
 function wheelHover(b){
@@ -982,7 +1013,7 @@ function wheelHover(b){
   L.innerHTML = (c ? `<span class="wh-dot" style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>` : '') + esc(b.getAttribute('aria-label') || '');
   L.hidden = false;
 }
-function closeWheel(){ if(wheelHold){ clearTimeout(wheelHold.timer); wheelHold = null; } const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; wheelGeo = null; }
+function closeWheel(){ wheelHoldStop(); const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; wheelGeo = null; }
 function wheelPick(b){
   const k = b.dataset.w, v = b.dataset.v;
   if(k === 'undo'){ undo(); closeWheel(); return; }

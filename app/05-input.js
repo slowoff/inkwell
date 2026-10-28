@@ -24,6 +24,16 @@ stage.addEventListener('pointercancel', onCancel);
 stage.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
 
+// (1.69.2) Rafael's iPad showed its Copy / Look Up / Translate / Search Web bar at the top left while he was writing:
+// iOS shows that bar for any text selection left on the screen (the page title, a hidden helper field, words in the
+// Claude panel). Touching the page to write or move now clears such a selection and leaves a focused field, so the bar
+// goes away (not while a text box on the page is being typed in).
+function dropStraySelection(){
+  const ae = document.activeElement;
+  if(ae && ae !== document.body && /^(INPUT|TEXTAREA)$/.test(ae.tagName) && !ae.closest('.modal') && !ae.closest('.pf')) ae.blur();
+  const s = window.getSelection && getSelection();
+  if(s && s.rangeCount && !s.isCollapsed) s.removeAllRanges();
+}
 function onDown(e){
   if(!cur) return;
   if(e.target.closest('.sel-menu,.fmt,.sel-rect,#tHandle,#tMove')) return;
@@ -31,6 +41,7 @@ function onDown(e){
   const editEl = editing && elMap.get(editing.id);
   const inEdit = !!(editEl && editEl.contains(e.target));
   const [sx, sy] = pt(e);
+  if(!editing) dropStraySelection();
   if(e.pointerType === 'touch'){
     if(inEdit || penDown) return;
     touches.set(e.pointerId, {x: sx, y: sy, sx, sy, t: performance.now(), target: e.target});

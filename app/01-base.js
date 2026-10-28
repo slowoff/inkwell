@@ -52,7 +52,8 @@ const DEFAULT_PREFS = {
   theme: 'auto',   // 'auto' follows the iPad, or 'light' / 'dark'
   snapHold: 550,   // ms the pen must rest before a stroke is straightened; 0 = off
   leftEdge: false, // true: the page stops at its left edge (endless only up, down and right)
-  zMax: 8,         // highest zoom (1 = 100 %); set from Settings with "Use current zoom"
+  zMax: 8,         // highest zoom (1 = 100 %); set from Settings with "Use current zoom" or (1.70) by holding the zoom %
+  zLock: false,    // (1.70) double-tap the zoom %: pinch, Ctrl+wheel, Fit and the 100 % tap stop changing the zoom
   askMode: 'tutor',
   askModel: 'auto', // 'auto' (cheap model decides), 'fast' (Haiku) or 'smart' (Sonnet)
   focus: false, open: {}

@@ -467,7 +467,7 @@ $('setLeft').addEventListener('click', e => {
 $('setZoom').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
   prefs.zMax = b.dataset.v === 'cur' ? clamp(Math.round(cam.z * 100) / 100, 0.5, Z_TOP) : Z_TOP;
-  savePrefs(); renderPrefSettings();
+  savePrefs(); renderPrefSettings(); renderZoomBtn();
   toast(b.dataset.v === 'cur' ? 'Max zoom set to ' + Math.round(zMax() * 100) + '%' : 'Max zoom back to 800%');
 });
 $('setModel').addEventListener('click', e => {
@@ -632,6 +632,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.70', '2026-10-28', ['Zoom % at the top right: hold it to lock the max zoom at the zoom you are at (hold again to unlock); double-tap it to lock the zoom completely, so pinching only moves the page (double-tap again to unlock). A single tap still goes back to 100%. The % turns blue with a small icon while a lock is on']],
   ['1.69.2', '2026-10-28', ['Fix: the iPad Copy / Look Up / Translate bar no longer pops up at the top left while you write', 'Pencil menu: holding a size now fills it up from the inside, then it flashes and the dot grows or shrinks to the new size; the label shows old → new']],
   ['1.69.1', '2026-10-28', ['Grid in Shapes: the rows and columns show only after you press Grid; then press Draw grid and drag a box']],
   ['1.69', '2026-10-28', ['Grid in Shapes: set the rows and columns, then drag a box on the page and it is split into that grid (tap for a standard size). It is ordinary ink, so you can move, recolour or erase single lines', 'Pencil menu: hold Thin, Medium or Thick for a moment and it becomes the size on your thickness slider (a ring fills up while you hold). Each tool keeps its own three sizes', 'Fix: Stick to text no longer paints a huge highlight when a picture or drawing is next to the text you mark', 'Fix: if the iPad loses the drawing of your ink while you move around the page, Inkwell notices and draws it again (your strokes were never deleted)', 'Fix: pages restored from Recently deleted on one device now reach your other devices (before, they were sent again every 20 seconds and refused)']],

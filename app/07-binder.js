@@ -654,7 +654,49 @@ $('rulerBtn').addEventListener('click', () => {
     : 'Drag the ruler with one finger, turn it with two. Draw along an edge for a straight line.');
 });
 $('fingerBtn').addEventListener('click', () => { prefs.finger = !prefs.finger; savePrefs(); $('fingerBtn').classList.toggle('on', prefs.finger); });
-$('zoomBtn').addEventListener('click', () => zoomAt(W / 2, H / 2, 1));
+/* (1.70) Zoom % button: tap = back to 100 %, hold = lock / unlock the max zoom at the current level,
+   double-tap = lock / unlock zooming altogether. A tap waits ZB_DBL ms to see whether a second one follows. */
+const ZB_HOLD = 550, ZB_DBL = 300;
+const ZB = {hold: null, held: false, tapT: null, x: 0, y: 0};
+function renderZoomBtn(){
+  const b = $('zoomBtn'), mx = zMax() < Z_TOP, lk = zLocked();
+  b.classList.toggle('z-max', mx); b.classList.toggle('z-lock', lk);
+  // SVG elements have no .hidden property, so the attribute is set directly
+  b.querySelector('.zb-max').toggleAttribute('hidden', !mx || lk); b.querySelector('.zb-lock').toggleAttribute('hidden', !lk);
+  b.title = (lk ? 'Zoom locked. ' : mx ? 'Max zoom ' + Math.round(zMax() * 100) + '%. ' : '') + 'Tap: 100%. Hold: lock/unlock max zoom. Double-tap: lock/unlock zoom';
+}
+function zoomMaxToggle(){
+  if(zMax() < Z_TOP){ prefs.zMax = Z_TOP; toast('Max zoom unlocked (up to 800%)'); }
+  else if(cam.z >= Z_TOP - 0.005) toast('Already at the highest zoom (800%)');
+  else { prefs.zMax = clamp(Math.round(cam.z * 100) / 100, 0.5, Z_TOP); toast('Max zoom locked at ' + Math.round(zMax() * 100) + '%. Hold the % again to unlock'); }
+  savePrefs(); renderZoomBtn();
+}
+function zoomLockToggle(){
+  prefs.zLock = !zLocked(); savePrefs(); renderZoomBtn();
+  toast(prefs.zLock ? 'Zoom locked at ' + Math.round(cam.z * 100) + '%. Double-tap the % to unlock' : 'Zoom unlocked');
+}
+{ const zb = $('zoomBtn');
+  const stopHold = () => { clearTimeout(ZB.hold); ZB.hold = null; };
+  zb.addEventListener('pointerdown', e => {
+    if(e.button > 0) return;
+    ZB.held = false; ZB.x = e.clientX; ZB.y = e.clientY; stopHold();
+    ZB.hold = setTimeout(() => {
+      ZB.hold = null; ZB.held = true;
+      if(ZB.tapT){ clearTimeout(ZB.tapT); ZB.tapT = null; }   // a hold right after a tap is a hold, not tap + 100 %
+      zb.classList.add('z-held'); setTimeout(() => zb.classList.remove('z-held'), 260);
+      zoomMaxToggle();
+    }, ZB_HOLD);
+  });
+  zb.addEventListener('pointermove', e => { if(ZB.hold && Math.hypot(e.clientX - ZB.x, e.clientY - ZB.y) > 12) stopHold(); });
+  for(const t of ['pointerup', 'pointercancel', 'pointerleave']) zb.addEventListener(t, stopHold);
+  zb.addEventListener('contextmenu', e => e.preventDefault());
+  zb.addEventListener('click', () => {
+    if(ZB.held){ ZB.held = false; return; }
+    if(ZB.tapT){ clearTimeout(ZB.tapT); ZB.tapT = null; zoomLockToggle(); return; }
+    ZB.tapT = setTimeout(() => { ZB.tapT = null; if(zLocked()) zLockSay(); else zoomAt(W / 2, H / 2, 1); }, ZB_DBL);
+  });
+  renderZoomBtn();
+}
 $('undo').addEventListener('click', undo);
 $('redo').addEventListener('click', redo);
 
@@ -1108,7 +1150,8 @@ $('mDelete').addEventListener('click', () => {
 });
 $('mSnap').addEventListener('click', () => { prefs.snapLines = !prefs.snapLines; savePrefs(); $('mSnap').classList.toggle('on', prefs.snapLines); toast(prefs.snapLines ? 'Typed text snaps to answer lines' : 'Text snapping off'); });
 $('mFit').addEventListener('click', () => {
-  closePops(); const b = contentBox();
+  closePops(); if(zLocked()){ zLockSay(); return; }   // (1.70)
+  const b = contentBox();
   if(!b){ zoomAt(W / 2, H / 2, 1); return; }
   const z = clamp(Math.min((W - 48) / (b[2] - b[0]), (H - 48) / (b[3] - b[1])), Z_MIN, Math.min(2, zMax()));   // (1.67.4) respects Max zoom
   cam.z = z; cam.ox = (W - (b[2] - b[0]) * z) / 2 - b[0] * z; cam.oy = 24 - b[1] * z;

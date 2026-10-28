@@ -168,7 +168,7 @@ function frame(){
   // rasterises a big scaled layer at 1x and then stretches it, so text went blurry when zoomed in.
   worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
   if(cam.z !== frontZ){ frontZ = cam.z; for(const el of worldFront.children) frontXf(el); }
-  $('zoomBtn').textContent = Math.round(cam.z * 100) + '%';
+  $('zoomPct').textContent = Math.round(cam.z * 100) + '%';
   // (1.69) each step on its own: before, one step that threw left the rest undone on every later frame too (the
   // ink was cleared but never drawn again until the app was restarted)
   const n = need; need = {bg: 0, ink: 0, over: 0};

@@ -173,10 +173,17 @@ function pinchMove(){
   const [a, b] = [...touches.values()];
   if(!b) return;
   const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
-  const z = clamp(gesture.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0, Z_MIN, zMax());
+  const want = gesture.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0;
+  // (1.70) zoom locked: two fingers still move the page, the zoom stays
+  if(zLocked() && Math.abs(Math.log(want / gesture.z0)) > 0.25) zLockSay();
+  const z = zLocked() ? gesture.z0 : clamp(want, Z_MIN, zMax());
   cam.z = z; cam.ox = cx - gesture.wc[0] * z; cam.oy = cy - gesture.wc[1] * z;
   invalidate();
 }
+/* (1.70) Zoom lock (double-tap the zoom %): no zooming by pinch, Ctrl+wheel, trackpad, Fit or the 100 % tap */
+const zLocked = () => prefs.zLock === true;
+let zLockToastAt = 0;
+function zLockSay(){ const t = Date.now(); if(t - zLockToastAt > 2500){ zLockToastAt = t; toast('Zoom is locked. Double-tap the % to unlock it'); } }
 function zoomAt(sx, sy, z){
   z = clamp(z, Z_MIN, zMax());
   const [wx, wy] = toWorld(sx, sy);
@@ -195,6 +202,7 @@ stage.addEventListener('wheel', e => {
   // trackpad drivers and mice that send sideways scrolling as Shift + wheel
   if(e.shiftKey && !dx){ dx = dy; dy = 0; }
   if(e.ctrlKey || e.metaKey){
+    if(zLocked()){ zLockSay(); return; }
     // a mouse wheel click (about 100 px or a few lines) zooms a small fixed step;
     // trackpad pinches send many tiny deltas and keep the smooth curve
     const raw = Math.abs(e.deltaY), notch = e.deltaMode !== 0 || raw >= 50;
@@ -207,7 +215,7 @@ stage.addEventListener('wheel', e => {
 }, {passive: false});
 let gz0 = 1;
 stage.addEventListener('gesturestart', e => { gz0 = cam.z; e.preventDefault(); });
-stage.addEventListener('gesturechange', e => { e.preventDefault(); if(touches.size || !cur) return; const [sx, sy] = pt(e); zoomAt(sx, sy, gz0 * e.scale); });
+stage.addEventListener('gesturechange', e => { e.preventDefault(); if(touches.size || !cur || zLocked()) return; const [sx, sy] = pt(e); zoomAt(sx, sy, gz0 * e.scale); });
 const saveCamSoon = debounce(() => { if(cur) LSset('inkwell.cam.' + cur.id, {ox: cam.ox, oy: cam.oy, z: cam.z}); }, 600);
 
 /* ---------- tools ---------- */

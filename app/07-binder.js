@@ -595,14 +595,27 @@ function renderOpts(){
   }
 }
 // the tool bar scrolls sideways when it doesn't fit; fade the edge that has more behind it
+// (1.70.2) before falling back to scrolling, tighten the bar step by step: t1 = switches show an icon instead of
+// their label and a shorter thickness slider; t2 = smaller gaps; t3 = 40 px buttons. Only as much as needed.
+function barFit(){
+  const b = $('toolbar');
+  if(!b.clientWidth) return;
+  b.classList.remove('t1', 't2', 't3');
+  for(let k = 1; k <= 3 && b.scrollWidth > b.clientWidth + 1; k++) b.classList.add('t' + k);
+}
 function barFade(){
+  barFit();
   const b = $('toolbar'), more = b.scrollWidth - b.clientWidth;
   b.classList.toggle('fade-l', more > 2 && b.scrollLeft > 2);
   b.classList.toggle('fade-r', more > 2 && b.scrollLeft < more - 2);
 }
-$('toolbar').addEventListener('scroll', barFade, {passive: true});
-addEventListener('resize', barFade);
-if(window.ResizeObserver) new ResizeObserver(barFade).observe($('toolbar'));
+// scrolling only changes the fades; a size change refits the bar one frame later (barFit changes layout, which inside
+// a ResizeObserver callback raises "ResizeObserver loop" errors)
+$('toolbar').addEventListener('scroll', () => { const b = $('toolbar'), more = b.scrollWidth - b.clientWidth; b.classList.toggle('fade-l', more > 2 && b.scrollLeft > 2); b.classList.toggle('fade-r', more > 2 && b.scrollLeft < more - 2); }, {passive: true});
+let barRaf = 0;
+const barSoon = () => { if(!barRaf) barRaf = requestAnimationFrame(() => { barRaf = 0; barFade(); }); };
+addEventListener('resize', barSoon);
+if(window.ResizeObserver) new ResizeObserver(barSoon).observe($('toolbar'));
 // iOS only shows :active (pressed) styles when the page listens for touches
 document.addEventListener('touchstart', () => {}, {passive: true});
 $('lassoMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.lassoMode = b.dataset.m; savePrefs(); renderOpts(); });

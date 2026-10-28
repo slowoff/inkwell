@@ -138,6 +138,21 @@ html,body{background:var(--paper)}
 .bar1{position:sticky;top:0;z-index:3}
 @media (display-mode: standalone){html,body{background:var(--panel)}}
 .bar2::-webkit-scrollbar{display:none}
+/* 1.70.2: the tool bar tightens itself step by step (classes t1..t3, set by barFit) before it would need side scrolling */
+.toggle .tg-ico{display:none;width:20px;height:20px;flex:none;color:var(--fg)}
+.bar2.t1 .toggle .tg-lbl{display:none}
+.bar2.t1 .toggle .tg-ico{display:block}
+.bar2.t1 .toggle{gap:6px;padding:0 6px}
+.bar2.t1 .size input{width:84px}
+.bar2.t2{gap:2px;padding-left:6px;padding-right:6px}
+.bar2.t2 .tools,.bar2.t2 .swatches{gap:0}
+.bar2.t2 .sep{margin:0 2px}
+.bar2.t2 .fmt .tg-lbl{display:none}
+.bar2.t2 .size{gap:4px;padding:0 4px}
+.bar2.t2 .zoom{min-width:46px}
+.bar2.t3 .tool,.bar2.t3 .swatch{width:40px}
+.bar2.t3 .tb{min-width:40px;padding:0 6px}
+.bar2.t3 .size input{width:70px}
 .title-in{flex:1;min-width:60px;height:38px;border:0;background:transparent;font-family:var(--f-display);font-weight:700;font-size:19px;padding:0 8px;border-radius:8px;outline:none;text-overflow:ellipsis}
 .title-in:focus{background:var(--paper)}
 .title-in::placeholder{color:var(--faint)}

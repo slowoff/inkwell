@@ -840,6 +840,13 @@ async function applyRemote(row){
       return true;
     }
     if(!base && local.updated >= row.updated_at) return false;
+  } else if(mk && local && local.dirty && !local.deleted && local.data && row.deleted && local.updated >= row.updated_at){
+    // (1.69) a page, section or notebook that is in Recently deleted on the server but was restored (or changed) on
+    // this device after that: the newer copy here wins. Its upload was refused before (it expected no server copy, or
+    // an older one), and the refused upload was retried three times on every sync, every 20 s, for good; the restore
+    // never reached the other devices. Now the deleted server copy becomes the base, so the next upload replaces it.
+    await baseSet(row.id, row.data ?? null, row.server_ts);
+    return false;
   } else if(local && local.updated >= row.updated_at) return false;
   const rec = {id: row.id, kind: row.kind, data: row.data ?? null, deleted: !!row.deleted, updated: row.updated_at, dirty: 0};
   await IDB.put('docs', rec);

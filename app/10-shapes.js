@@ -111,6 +111,18 @@ function shapePolys(shape, b, w){
     for(let i = 0; i < (full ? n : n + 1); i++){ const t = a0 + sw * i / n; V.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); }
     return [[V, full]];
   }
+  if(shape === 'grid'){
+    // (1.69) outer frame + inner row and column lines; a tap makes cells of 56 × 36 screen px around the tap
+    const [nr, nc] = gridRC();
+    let L, T, R, B;
+    if(b.tap){ const cw = 56 / cam.z, ch = 36 / cam.z; L = b.x0 - cw * nc / 2; T = b.y0 - ch * nr / 2; R = L + cw * nc; B = T + ch * nr; }
+    else { L = Math.min(b.x0, b.x1); T = Math.min(b.y0, b.y1); R = Math.max(b.x0, b.x1); B = Math.max(b.y0, b.y1); }
+    if((R - L) * cam.z < 4 || (B - T) * cam.z < 4) return [];
+    const out = [[[[L, T], [R, T], [R, B], [L, B]], true]];
+    for(let i = 1; i < nr; i++){ const y = T + (B - T) * i / nr; out.push([[[L, y], [R, y]], false]); }
+    for(let j = 1; j < nc; j++){ const x = L + (R - L) * j / nc; out.push([[[x, T], [x, B]], false]); }
+    return out;
+  }
   let {x0, y0, x1, y1} = b;
   const line = LINE_SHAPES.includes(shape);
   if(b.tap){
@@ -165,7 +177,34 @@ function insertShape(shape, b){
   addItems(items);
   setTool('lasso'); selectIds(items.map(it => it.id));
 }
-$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); openPop('shapePop', e.currentTarget); });
+// (1.69) Grid maker: rows × columns remembered per device in prefs.grid = {r, c} (1–30 each, default 3 × 4)
+const GRID_MAX = 30;
+function gridRC(){
+  const g = prefs.grid && typeof prefs.grid === 'object' ? prefs.grid : {};
+  const f = (v, d) => { v = Math.round(+v); return v >= 1 && v <= GRID_MAX ? v : d; };
+  return [f(g.r, 3), f(g.c, 4)];
+}
+function renderGrid(){
+  const [r, c] = gridRC();
+  $('gridR').textContent = r; $('gridC').textContent = c; $('gridSize').textContent = r + ' × ' + c;
+  for(const st of $('gridSteps').querySelectorAll('.stepper')){
+    const v = st.dataset.k === 'r' ? r : c;
+    st.querySelector('[data-d="-1"]').disabled = v <= 1; st.querySelector('[data-d="1"]').disabled = v >= GRID_MAX;
+  }
+}
+$('gridSteps').addEventListener('click', e => {
+  const bt = e.target.closest('button[data-d]'); if(!bt || bt.disabled) return;
+  const [r, c] = gridRC(), k = bt.closest('.stepper').dataset.k, d = +bt.dataset.d;
+  prefs.grid = {r: k === 'r' ? clamp(r + d, 1, GRID_MAX) : r, c: k === 'c' ? clamp(c + d, 1, GRID_MAX) : c};
+  savePrefs(); renderGrid();
+});
+$('gridOpen').addEventListener('click', () => {
+  closePops();
+  const [r, c] = gridRC();
+  startPick({kind: 'shape', shape: 'grid'}, `Drag a box on the page for a grid of ${r} × ${c}. Tap for a standard size.`);
+});
+renderGrid();
+$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); renderGrid(); openPop('shapePop', e.currentTarget); });
 $('shapeGrid').addEventListener('click', e => {
   const b = e.target.closest('button[data-shape]'); if(!b) return;
   closePops();

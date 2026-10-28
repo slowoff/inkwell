@@ -479,6 +479,19 @@ select.pf-ls option:checked{background:#9fbbe8}
 @media (hover:hover){.shape-grid button:hover{background:var(--accent-soft);color:var(--accent)}}
 .shape-grid svg{width:22px;height:22px}
 #graphOpen{display:flex;align-items:center;justify-content:center}
+/* 1.69: Grid maker (button + rows/columns steppers) in the Shapes popover */
+.grid-maker{display:flex;flex-direction:column;gap:6px}
+#gridOpen{display:flex;align-items:center;justify-content:center}
+#gridOpen .grid-n{margin-left:8px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
+.grid-steps{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.gstep{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--muted);min-width:0}
+.stepper{display:flex;align-items:center;justify-content:space-between;background:var(--well);border-radius:9px}
+.stepper button{width:32px;height:32px;border-radius:9px;font-size:18px;line-height:1;color:var(--fg);display:flex;align-items:center;justify-content:center}
+.stepper button:disabled{opacity:.3}
+.stepper button:not(:disabled):active{background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.stepper b{min-width:22px;text-align:center;color:var(--fg);font-variant-numeric:tabular-nums}
+@media (hover:hover){.stepper button:not(:disabled):hover{background:var(--accent-soft);color:var(--accent)}}
+@media (any-pointer:coarse){ .stepper button{width:44px;height:44px} }
 .g-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .g-grid .text-in{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%}
 #gFn{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%;font-family:var(--f-mono)}
@@ -596,6 +609,12 @@ body.scanning .toast{bottom:calc(76px + var(--sab))}
 .wh-col.on span{box-shadow:0 0 0 2px var(--raise),0 0 0 4px var(--accent)}
 .wh-col.hl span{border-radius:5px;height:14px;width:24px;opacity:.75}
 .wh-size span{width:var(--d);height:var(--d);border-radius:50%;background:currentColor}
+/* 1.69: hold a size to put the slider's size there: a ring fills up around it (after a short pause, so a quick pick shows nothing) */
+@property --whp{syntax:'<percentage>';inherits:false;initial-value:0%}
+.wh-i.hold::before,.wh-i.saved::before{content:"";position:absolute;inset:-5px;border-radius:50%;background:conic-gradient(currentColor var(--whp),color-mix(in srgb,currentColor 25%,transparent) 0);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 3.5px),#000 calc(100% - 3px));mask:radial-gradient(farthest-side,transparent calc(100% - 3.5px),#000 calc(100% - 3px))}
+.wh-i.hold::before{animation:whHold 1.2s linear .3s forwards}
+.wh-i.saved::before{--whp:100%}
+@keyframes whHold{to{--whp:100%}}
 .wh-em{width:54px;margin-left:-27px;font-size:11px;font-weight:600}
 .wh-tip{position:absolute;left:-4px;top:-4px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--raise)}
 .wh-label{position:absolute;transform:translate(-50%,-50%);white-space:nowrap;padding:6px 12px;border-radius:999px;background:var(--fg);color:var(--raise);font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px;box-shadow:var(--shadow);pointer-events:none}

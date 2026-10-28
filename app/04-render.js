@@ -73,14 +73,16 @@ function inkColor(c, print, onPaper){
 /* =====================================================================
    Stage, camera, rendering
    ===================================================================== */
-const stage = $('stage'), bgCv = $('bg'), inkCv = $('ink'), liveCv = $('live');
+const stage = $('stage'), bgCv = $('bg'), liveCv = $('live');
+let inkCv = $('ink');   // (1.69) let: replaced by a fresh canvas when the iPad loses its drawing (InkCheck)
 const worldBack = $('worldBack'), worldFront = $('worldFront');
-const bgCtx = bgCv.getContext('2d'), inkCtx = inkCv.getContext('2d'), liveCtx = liveCv.getContext('2d');
+const bgCtx = bgCv.getContext('2d'), liveCtx = liveCv.getContext('2d');
+let inkCtx = inkCv.getContext('2d');
 // (1.62) highlighter layer under the ink: blended with "multiply" (CSS), so dark text and lines of imported pages
 // stay as dark as they are and only the light paper takes the colour, like a real highlighter. On white the colour is
 // exactly as before (40 % on white). Highlights over a filled shape (graph background) or, in dark mode, on the dark
 // page background stay on the ink layer as before (multiply would hide them there).
-const hlmCv = $('hlm'), hlmCtx = hlmCv.getContext('2d');
+let hlmCv = $('hlm'), hlmCtx = hlmCv.getContext('2d');
 let hlmUsed = false;
 let W = 0, H = 0, dpr = 1, SR = {left: 0, top: 0};
 const cam = {ox: 40, oy: 24, z: 1};
@@ -167,11 +169,21 @@ function frame(){
   worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
   if(cam.z !== frontZ){ frontZ = cam.z; for(const el of worldFront.children) frontXf(el); }
   $('zoomBtn').textContent = Math.round(cam.z * 100) + '%';
-  if(need.bg) drawBg();
-  if(need.ink) drawInk();
-  if(need.over){ positionOverlays(); imgSoon(); renderSlider(); }
-  need = {bg: 0, ink: 0, over: 0};
-  if(act || WA.linger()) drawLive();   // the reference line follows the page while it is still showing
+  // (1.69) each step on its own: before, one step that threw left the rest undone on every later frame too (the
+  // ink was cleared but never drawn again until the app was restarted)
+  const n = need; need = {bg: 0, ink: 0, over: 0};
+  const step = (f, what) => { try { f(); } catch(e){ frameError(e, what); } };
+  if(n.bg) step(drawBg, 'bg');
+  if(n.ink) step(drawInk, 'ink');
+  if(n.over) step(() => { positionOverlays(); imgSoon(); renderSlider(); }, 'over');
+  if(act || WA.linger()) step(drawLive, 'live');   // the reference line follows the page while it is still showing
+}
+let frameErrs = 0;
+function frameError(e, what){
+  if(frameErrs++ < 20){
+    console.error('frame ' + what, e);
+    try { (window.__inkwellErrors = window.__inkwellErrors || []).push('frame ' + what + ': ' + (e && e.message || e)); } catch(_){}
+  }
 }
 function drawBg(){
   bgCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -201,6 +213,60 @@ function drawBg(){
   if(bg.type === 'grid') for(let x = x0; x <= v[2]; x += stepX){ const X = Math.round(x * cam.z + cam.ox) + 0.5; bgCtx.moveTo(X, 0); bgCtx.lineTo(X, H); }
   bgCtx.stroke();
 }
+/* (1.69) Ink self-check. Rafael's iPad sometimes showed none of his ink after moving around the page while every
+   stroke was still saved: the ink layer had lost its picture (iPad Safari can drop a canvas's drawing, for example
+   when it runs short of memory for canvases, and then draws nothing on it). After the page stops moving, a few
+   points on the centre line of pen strokes that were just drawn are read back from the ink layer; if none of them
+   has any ink, the ink and highlighter layers are replaced by fresh canvases and drawn again. A wrong alarm only costs
+   one extra redraw (at most every 3 s). */
+const InkCheck = {
+  probes: [], timer: 0, last: 0, heals: 0,
+  // remember where a fully visible pen stroke must have ink (device pixels on the ink layer)
+  note(it){
+    if(this.probes.length >= 8 || it.fl || it.c === 'paper' || opOf(it) < 1 || it.w * cam.z * dpr < 3) return;
+    const p = it.p, m = p.length / 3; if(m < 1) return;
+    const k = Math.floor(m / 2) * 3, x = Math.round((p[k] * cam.z + cam.ox) * dpr), y = Math.round((p[k + 1] * cam.z + cam.oy) * dpr);
+    if(x >= 1 && y >= 1 && x < inkCv.width - 1 && y < inkCv.height - 1) this.probes.push([x, y]);
+  },
+  soon(){ clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 450); },
+  lost(){
+    try {
+      if(typeof inkCtx.isContextLost === 'function' && inkCtx.isContextLost()) return true;
+      for(const [x, y] of this.probes){
+        const d = inkCtx.getImageData(x - 1, y - 1, 3, 3).data;
+        for(let i = 3; i < d.length; i += 4) if(d[i] > 0) return false;
+      }
+      return true;
+    } catch(e){ return false; }   // could not read it back: no proof that anything is wrong
+  },
+  run(){
+    this.timer = 0;
+    if(act || !cur || !this.probes.length) return;
+    if(!this.lost()) return;
+    if(Date.now() - this.last < 3000) return;
+    this.last = Date.now(); this.heals++;
+    try { (window.__inkwellErrors = window.__inkwellErrors || []).push('ink layer was empty, drawn again on a fresh canvas'); } catch(_){}
+    inkCv = freshCanvas(inkCv); inkCtx = inkCv.getContext('2d');
+    hlmCv = freshCanvas(hlmCv); hlmCtx = hlmCv.getContext('2d'); hlmUsed = false;
+    invalidate(0, 1, 0);
+  }
+};
+// a new canvas in place of an old one (same id, size and look); the old one gives back its memory
+function freshCanvas(old){
+  const c = document.createElement('canvas');
+  c.id = old.id; c.className = old.className; c.style.cssText = old.style.cssText;
+  c.width = old.width; c.height = old.height;
+  watchCanvas(c);
+  old.replaceWith(c);
+  old.width = old.height = 1;
+  return c;
+}
+// a canvas whose drawing the browser threw away and gives back later: draw everything again
+function watchCanvas(c){
+  c.addEventListener('contextlost', e => e.preventDefault());
+  c.addEventListener('contextrestored', () => invalidate());
+}
+for(const c of [bgCv, hlmCv, inkCv, liveCv]) watchCanvas(c);
 // (1.62) does this highlight blend into the page (multiply)? fills = boxes of filled shapes on the page
 const hlMultiply = (paper, b, fills) => (paper || !isDark()) && !fills.some(f => f[0] < b[2] && f[2] > b[0] && f[1] < b[3] && f[3] > b[1]);
 function drawInk(){
@@ -211,20 +277,26 @@ function drawInk(){
   inkCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
   hlmCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
   const v = viewRect(), pages = paperRects(), fills = [];
+  InkCheck.probes = [];
   for(const pass of [2, 1, 0]){
     for(const it of cur.items.values()){
       if(it.t !== 's' || inkPass(it) !== pass) continue;
-      const g = geoOf(it);
-      if(pass === 2) fills.push(g.b);
-      if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
-      const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
-      const ctx = pass === 1 && hlMultiply(paper, g.b, fills) ? hlmCtx : inkCtx;
-      if(ctx === hlmCtx) hlmUsed = true;
-      ctx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
-      ctx.fillStyle = inkColor(it.c, false, paper);
-      ctx.fill(g.path);
+      // (1.69) one broken stroke is skipped instead of stopping the drawing of all the others
+      try {
+        const g = geoOf(it);
+        if(pass === 2) fills.push(g.b);
+        if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
+        const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
+        const ctx = pass === 1 && hlMultiply(paper, g.b, fills) ? hlmCtx : inkCtx;
+        if(ctx === hlmCtx) hlmUsed = true;
+        ctx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
+        ctx.fillStyle = inkColor(it.c, false, paper);
+        ctx.fill(g.path);
+        if(pass === 0) InkCheck.note(it);
+      } catch(e){ frameError(e, 'stroke ' + it.id); }
     }
   }
+  if(InkCheck.probes.length) InkCheck.soon();
   inkCtx.globalAlpha = 1; hlmCtx.globalAlpha = 1;
   // one small bookmark at the top right of every marked spot
   inkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);

@@ -856,6 +856,13 @@ $('laterList').addEventListener('click', async ev => {
    ===================================================================== */
 const WHEEL_HOLD = 480;
 const WHEEL_SIZES = [15, 40, 75];
+// (1.69) each tool keeps its own three sizes (prefs.wheelSizes = {pen: [a, b, c], hl: …}); holding a size in the menu
+// for WHEEL_SAVE ms puts the size set on the thickness slider into that place
+const WHEEL_SAVE = 1500;
+function wheelSizes(t){
+  const w = prefs.wheelSizes && prefs.wheelSizes[t];
+  return WHEEL_SIZES.map((d, i) => { const v = Math.round(+(w && w[i])); return v >= 1 && v <= 100 ? v : d; });
+}
 let wheelDrag = null, wheelPress = null;
 function wheelIcon(tool){ const s = document.querySelector(`.tool[data-tool="${tool}"] svg`); return s ? s.outerHTML : ''; }
 // Half-moon menu (like a game weapon wheel) centred on the Pencil tip, opening away from the hand.
@@ -872,8 +879,8 @@ function wheelItems(){
     .concat(['pen', 'hl', 'eraser', 'lasso'].map(v => ({w: 'tool', v, label: names[v], icon: wheelIcon(v), on: v === t, cls: 'wh-tool'})));
   const outer = favs.map(c => ({w: 'c', v: c, label: inkT === 'hl' ? 'Highlighter colour' : 'Pen colour', cls: 'wh-col' + (inkT === 'hl' ? ' hl' : ''),
     icon: `<span style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>`, on: (t === 'pen' || t === 'hl') && prefs[inkT].c === c}));
-  const sv = prefs[sizeT].s, best = WHEEL_SIZES.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);
-  WHEEL_SIZES.forEach((v, i) => outer.push({w: 's', v, label: ['Thin', 'Medium', 'Thick'][i], cls: 'wh-size', icon: `<span style="--d:${4 + v / 7}px"></span>`, on: best === v}));
+  const sizes = wheelSizes(sizeT), sv = prefs[sizeT].s, best = sizes.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);
+  sizes.forEach((v, i) => outer.push({w: 's', v, slot: i, label: ['Thin', 'Medium', 'Thick'][i], cls: 'wh-size', icon: `<span style="--d:${4 + v / 7}px"></span>`, on: best === v}));
   if(t === 'eraser'){ const area = prefs.eraser.mode === 'area'; outer.push({w: 'em', label: 'Eraser: switch to ' + (area ? 'Stroke' : 'Partial'), cls: 'wh-em', icon: area ? 'Partial' : 'Stroke'}); }
   return [inner, outer];
 }
@@ -893,7 +900,7 @@ function buildWheel(){
     const step = WH_SPAN / list.length;
     list.forEach((o, i) => {
       const a0 = A0 + i * step, a1 = a0 + step, m = (a0 + a1) / 2, rm = (r0 + r1) / 2, k = segs.length;
-      const data = `data-w="${o.w}"${o.v !== undefined ? ` data-v="${esc(String(o.v))}"` : ''} data-i="${k}" aria-label="${esc(o.label)}"`;
+      const data = `data-w="${o.w}"${o.v !== undefined ? ` data-v="${esc(String(o.v))}"` : ''}${o.slot !== undefined ? ` data-slot="${o.slot}"` : ''} data-i="${k}" aria-label="${esc(o.label)}"`;
       svg += `<path class="wh-b wh-seg ${o.on ? 'on' : ''}" ${data} d="${wedge(r0, r1, a0 + gap / 2, a1 - gap / 2)}"/>`;
       icons += `<span class="wh-i ${o.cls} ${o.on ? 'on' : ''}" data-i="${k}" style="left:${(rm * Math.cos(m)).toFixed(1)}px;top:${(rm * Math.sin(m)).toFixed(1)}px">${o.icon}</span>`;
       segs.push({ring, a0, a1});
@@ -934,8 +941,36 @@ function openWheel(x, y, pointerId){
   w.hidden = false; w.classList.remove('in'); void w.offsetWidth; w.classList.add('in');
   wheelDrag = pointerId != null ? {id: pointerId, x, y, far: false} : null;
 }
+// (1.69) holding the Pencil (or a finger) on a size: a ring fills up around it, then that size becomes the one on
+// the thickness slider (for the current tool), the menu shows the new size and stays open until the Pencil is lifted
+let wheelHold = null;   // {b, timer}
+function wheelHoldTrack(b){
+  if(wheelHold && wheelHold.b === b) return;
+  if(wheelHold){ clearTimeout(wheelHold.timer); wheelHold = null; }
+  $('wheel').querySelectorAll('.wh-i.hold').forEach(x => x.classList.remove('hold'));
+  if(!b || b.dataset.w !== 's' || !(wheelPress || wheelDrag)) return;
+  const ic = $('wheel').querySelector(`.wh-i[data-i="${b.dataset.i}"]`); if(ic) ic.classList.add('hold');
+  wheelHold = {b, timer: setTimeout(() => {
+    wheelHold = null;
+    const t = ['pen', 'hl', 'eraser', 'mark'].includes(prefs.tool) ? prefs.tool : 'pen', i = +b.dataset.slot, v = Math.round(prefs[t].s);
+    if(!(i >= 0 && i < 3) || !(v >= 1)) return;
+    const list = wheelSizes(t); list[i] = v;
+    if(!prefs.wheelSizes || typeof prefs.wheelSizes !== 'object') prefs.wheelSizes = {};
+    prefs.wheelSizes[t] = list; savePrefs();
+    buildWheel();
+    const nb = $('wheel').querySelector(`.wh-seg[data-w="s"][data-slot="${i}"]`);
+    if(nb){
+      if(wheelPress){ wheelPress.b = nb; wheelPress.saved = true; }   // lifting here picks it (the same size) and closes
+      wheelHold = {b: nb, timer: 0};      // no second save while it is still held
+      wheelHover(nb);
+      const ic2 = $('wheel').querySelector(`.wh-i[data-i="${nb.dataset.i}"]`); if(ic2) ic2.classList.add('saved');
+      const L = $('whLabel'); if(L){ L.textContent = (nb.getAttribute('aria-label') || 'Size') + ' is now ' + v; L.hidden = false; }
+    }
+  }, WHEEL_SAVE)};
+}
 // the option under the Pencil grows, fills in and is named above the menu
 function wheelHover(b){
+  wheelHoldTrack(b);
   const w = $('wheel');
   w.querySelectorAll('.wh-b.hover').forEach(x => { if(x !== b) x.classList.remove('hover'); });
   const L = $('whLabel'); if(!L) return;
@@ -947,7 +982,7 @@ function wheelHover(b){
   L.innerHTML = (c ? `<span class="wh-dot" style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>` : '') + esc(b.getAttribute('aria-label') || '');
   L.hidden = false;
 }
-function closeWheel(){ const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; wheelGeo = null; }
+function closeWheel(){ if(wheelHold){ clearTimeout(wheelHold.timer); wheelHold = null; } const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; wheelGeo = null; }
 function wheelPick(b){
   const k = b.dataset.w, v = b.dataset.v;
   if(k === 'undo'){ undo(); closeWheel(); return; }
@@ -982,11 +1017,12 @@ $('wheel').addEventListener('pointermove', e => {
 });
 $('wheel').addEventListener('pointerup', e => {
   if(!wheelPress || wheelPress.id !== e.pointerId) return;
-  const start = wheelPress.b; wheelPress = null;
+  const start = wheelPress.b, saved = wheelPress.saved; wheelPress = null;
   const b = wheelAt(e.clientX, e.clientY);
   wheelHover(null);
-  // slid from one option to another: choose where the Pencil was lifted (a plain tap is handled by click)
-  if(b && b !== start) wheelPick(b);
+  // slid from one option to another: choose where the Pencil was lifted (a plain tap is handled by click);
+  // (1.69) after a size was saved by holding, the menu was redrawn under the finger, so no click follows: pick here
+  if(b && (b !== start || saved)) wheelPick(b);
 });
 $('wheel').addEventListener('pointercancel', () => { wheelPress = null; wheelHover(null); });
 // slide the Pencil onto an option and lift it to choose without tapping again

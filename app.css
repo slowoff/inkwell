@@ -479,6 +479,19 @@ select.pf-ls option:checked{background:#9fbbe8}
 @media (hover:hover){.shape-grid button:hover{background:var(--accent-soft);color:var(--accent)}}
 .shape-grid svg{width:22px;height:22px}
 #graphOpen{display:flex;align-items:center;justify-content:center}
+/* 1.69: Grid maker (button + rows/columns steppers) in the Shapes popover */
+.grid-maker{display:flex;flex-direction:column;gap:6px}
+#gridOpen{display:flex;align-items:center;justify-content:center}
+#gridOpen .grid-n{margin-left:8px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
+.grid-steps{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.gstep{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--muted);min-width:0}
+.stepper{display:flex;align-items:center;justify-content:space-between;background:var(--well);border-radius:9px}
+.stepper button{width:32px;height:32px;border-radius:9px;font-size:18px;line-height:1;color:var(--fg);display:flex;align-items:center;justify-content:center}
+.stepper button:disabled{opacity:.3}
+.stepper button:not(:disabled):active{background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.stepper b{min-width:22px;text-align:center;color:var(--fg);font-variant-numeric:tabular-nums}
+@media (hover:hover){.stepper button:not(:disabled):hover{background:var(--accent-soft);color:var(--accent)}}
+@media (any-pointer:coarse){ .stepper button{width:44px;height:44px} }
 .g-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .g-grid .text-in{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%}
 #gFn{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%;font-family:var(--f-mono)}

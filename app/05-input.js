@@ -292,14 +292,14 @@ function toolMove(e){
    height; anything else (a circle, a tick) stays as drawn. The result is ordinary highlighter strokes (no new data). */
 const HLS = {
   // lines of text near the stroke: {b: [x0, y0, x1, y1] world, segs: [[x0, x1], ...] words (pictures only) or null}
-  lines(b, ym){
+  lines(b, ym, cols){
     const out = [];
     for(const it of cur.items.values()){
       if(it.t === 'i' && it.a){
         if(it.x > b[2] || it.x + it.w < b[0] || it.y > b[3] || it.y + it.h < b[1]) continue;
         // (1.60.1) measure the letters in the page picture itself; the read-out page text only knows roughly where
         // a line is (Claude-read pages and older imports have no line ends and only a guessed height)
-        const px = this.picLines(it, b);
+        const px = this.picLines(it, b, cols);
         if(px){ out.push(...px); continue; }
         const d = ptxtOf(it.a); if(!d || !Array.isArray(d.l)) continue;
         const L = d.l.filter(l => l && l[0] >= 0 && typeof l[1] === 'string').slice().sort((p, q) => p[0] - q[0]);
@@ -321,7 +321,10 @@ const HLS = {
   },
   // (1.60.1) text rows and words of a page picture inside box b (world), found from its dark pixels.
   // null when the picture is not loaded (then the page text is used).
-  picLines(it, b){
+  // (1.69) cols = [x0, x1] world: rows are found only from the ink in these columns (where the stroke went). Before,
+  // the whole search area counted, so a drawing or picture beside the text (ink in every row) joined all the lines
+  // around it into one giant "line" and the highlight covered half the page.
+  picLines(it, b, cols){
     const el = elMap.get(it.id), img = el && el._img;
     if(!img || !img.complete || !img.naturalWidth) return null;
     const X0 = clamp(b[0], it.x, it.x + it.w), X1 = clamp(b[2], it.x, it.x + it.w);
@@ -348,8 +351,10 @@ const HLS = {
     let bg = 255; for(let v = 255; v >= 0; v--){ cnt += hist[v]; if(cnt >= tot * 0.3){ bg = v; break; } }
     const thr = bg - Math.max(45, bg * 0.25);
     const rows = new Uint32Array(ch);
-    for(let y = 0; y < ch; y++){ let n = 0; const o = y * cw; for(let x = 0; x < cw; x++) if(lum[o + x] < thr) n++; rows[y] = n; }
-    const minRow = Math.max(1, cw * 0.002);
+    let c0 = 0, c1 = cw;
+    if(cols){ c0 = clamp(Math.floor((cols[0] - X0) * s), 0, cw - 1); c1 = clamp(Math.ceil((cols[1] - X0) * s), c0 + 1, cw); }
+    for(let y = 0; y < ch; y++){ let n = 0; const o = y * cw; for(let x = c0; x < c1; x++) if(lum[o + x] < thr) n++; rows[y] = n; }
+    const minRow = Math.max(1, (c1 - c0) * 0.002);
     let groups = [];
     for(let y = 0; y < ch; y++){
       if(rows[y] < minRow) continue;
@@ -440,12 +445,17 @@ const HLS = {
     const r = w / 2;
     // look around the stroke; a bigger area if a line of text runs past its edge (big headings)
     let all = [];
+    const cols = [bx0 - r, bx1 + r];
     for(let R = Math.max(3 * w, 50), k = 0; k < 4; k++, R *= 2){
-      all = this.lines([bx0 - R, Math.min(by0, ym) - R, bx1 + R, Math.max(by1, ym) + R], ym)
+      all = this.lines([bx0 - R, Math.min(by0, ym) - R, bx1 + R, Math.max(by1, ym) + R], ym, cols)
         .filter(l => Math.min(l.b[2], bx1) - Math.max(l.b[0], bx0) > 1);
       if(!all.some(l => l.cut && l.b[1] - 2 <= ym && l.b[3] + 2 >= ym)) break;
     }
     all = all.filter(l => !l.cut || (l.b[1] <= ym && l.b[3] >= ym));
+    // (1.69) a "line" much taller than the stroke itself is not a line of text (a drawing, a photo, a table border):
+    // leave it alone rather than paint a huge band over everything
+    const sh = by1 - by0 + w;
+    all = all.filter(l => l.b[3] - l.b[1] <= Math.max(4 * sh, 3 * w));
     let pick = [];
     if(all.length){
       const near = all.filter(l => l.b[1] - Math.max(r, 2) <= by1 && l.b[3] + Math.max(r, 2) >= by0);
@@ -479,7 +489,7 @@ const HLS = {
 function endTool(e){
   const a = act; act = null;
   clearTimeout(a.hold); clearTimeout(a.wheelT);
-  clearLive();
+  clearLive(); Live.free();
   if(a.kind === 'stroke'){
     Scribe.release();
     if(a.pts.length < 3) return;
@@ -537,6 +547,8 @@ const Live = {
   bake: null, bctx: null, upto: 0, key: '',
   // outline of samples s0..s1 of a strokeShape result, with round ends only where asked
   part(sh, s0, s1, capA, capB){ return inkOutline(sh.xs, sh.ys, sh.rs, sh.n, s0, s1, capA, capB, false); },
+  // (1.69) give back the full-screen buffer once the stroke is done (canvas memory is limited on the iPad)
+  free(){ this.upto = 0; this.key = ''; if(this.bake){ this.bake.width = this.bake.height = 1; } },
   reset(){ this.upto = 0; this.key = ''; if(this.bctx){ this.bctx.setTransform(1, 0, 0, 1, 0, 0); this.bctx.clearRect(0, 0, this.bake.width, this.bake.height); } },
   // shape of recorded points from..to (inclusive), with enough neighbours that the middle comes out exactly as in the whole stroke
   win(a, from, to, extra){

@@ -547,6 +547,8 @@ body.scanning .toast{bottom:calc(76px + var(--sab))}
 .am.bot p{margin:0 0 .6em}.am.bot p:last-child{margin-bottom:0}
 .am.bot ul,.am.bot ol{margin:0 0 .6em;padding-left:1.3em}
 .am.bot h4{margin:.4em 0 .3em;font-size:15px}
+.am.bot blockquote{margin:0 0 .6em;padding:2px 0 2px 12px;border-left:3px solid var(--accent)}
+.am.bot blockquote:last-child{margin-bottom:0}
 .am.bot code{font-family:var(--f-mono);font-size:13px;background:var(--desk);padding:1px 4px;border-radius:4px}
 .am.bot .katex-display{margin:.4em 0;overflow-x:auto;overflow-y:hidden}
 .am.err{color:var(--danger);font-size:14px}

@@ -632,6 +632,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.70.1', '2026-10-28', ['Fix: quotes in Claude answers (lines starting with >) now show as a quote block instead of a stray > sign; Put on page leaves the > out']],
   ['1.70', '2026-10-28', ['Zoom % at the top right: hold it to lock the max zoom at the zoom you are at (hold again to unlock); double-tap it to lock the zoom completely, so pinching only moves the page (double-tap again to unlock). A single tap still goes back to 100%. The % turns blue with a small icon while a lock is on']],
   ['1.69.2', '2026-10-28', ['Fix: the iPad Copy / Look Up / Translate bar no longer pops up at the top left while you write', 'Pencil menu: holding a size now fills it up from the inside, then it flashes and the dot grows or shrinks to the new size; the label shows old → new']],
   ['1.69.1', '2026-10-28', ['Grid in Shapes: the rows and columns show only after you press Grid; then press Draw grid and drag a box']],

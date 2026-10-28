@@ -371,12 +371,16 @@ function renderMd(src){
     .replace(/(^|[^\\$])\$([^\s$](?:[^$\n]*?[^\s$])?)\$(?!\d)/g, (_, pre, t) => pre + keep(t, false));
   s = esc(s);
   const inline = t => t.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>');
-  const out = []; let list = null, para = [];
+  const out = []; let list = null, para = [], quote = [];
   const flushP = () => { if(para.length){ out.push('<p>' + inline(para.join('<br>')) + '</p>'); para = []; } };
   const flushL = () => { if(list){ out.push(`<${list.t}>` + list.items.map(i => '<li>' + inline(i) + '</li>').join('') + `</${list.t}>`); list = null; } };
+  // (1.69.3) "> text" quote lines: one block, a blank "> " line starts a new paragraph inside it
+  const flushQ = () => { if(quote.length){ const ps = quote.join('\n').split(/\n\s*\n/).map(t => t.trim()).filter(Boolean); out.push('<blockquote>' + ps.map(t => '<p>' + inline(t.replace(/\n/g, '<br>')) + '</p>').join('') + '</blockquote>'); quote = []; } };
   for(const raw of s.split('\n')){
     const line = raw.trimEnd();
     let m;
+    if((m = /^\s*(?:&gt;\s?)+(.*)$/.exec(line))){ flushP(); flushL(); quote.push(m[1]); continue; }
+    flushQ();
     if(!line.trim()){ flushP(); flushL(); continue; }
     if((m = /^\s*#{1,6}\s+(.*)$/.exec(line))){ flushP(); flushL(); out.push('<h4>' + inline(m[1]) + '</h4>'); continue; }
     if((m = /^\s*[-*•]\s+(.*)$/.exec(line))){ flushP(); if(!list || list.t !== 'ul'){ flushL(); list = {t: 'ul', items: []}; } list.items.push(m[1]); continue; }
@@ -384,7 +388,7 @@ function renderMd(src){
     if(list && /^\s{2,}/.test(raw)){ list.items[list.items.length - 1] += '<br>' + line.trim(); continue; }
     flushL(); para.push(line);
   }
-  flushP(); flushL();
+  flushP(); flushL(); flushQ();
   return out.join('').replace(/\u0000(\d+)\u0000/g, (_, i) => {
     const [tex, display] = math[+i];
     try { return window.katex ? katex.renderToString(tex, {displayMode: display, throwOnError: false}) : esc(tex); } catch { return esc(tex); }
@@ -683,6 +687,8 @@ function mdInline(t){
 function answerBlocks(md){
   const blocks = [];
   let s = String(md || '').replace(/\r/g, '');
+  // (1.69.3) quote markers ("> ") are dropped on the page: the quoted text becomes a normal paragraph
+  s = s.replace(/^[ \t]*(?:>[ \t]?)+/gm, '');
   // display maths becomes its own block
   s = s.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g, (_, a, b) => '\n\n\u0001' + (a || b).trim().replace(/\n/g, ' ') + '\u0001\n\n');
   for(const part of s.split(/\n{2,}/)){

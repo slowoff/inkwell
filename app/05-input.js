@@ -21,6 +21,16 @@ stage.addEventListener('pointerdown', onDown);
 stage.addEventListener('pointermove', onMove);
 stage.addEventListener('pointerup', onUp);
 stage.addEventListener('pointercancel', onCancel);
+// (1.71.1) safety net for lost "lifted" events: when the last real finger leaves the screen (the touch list says so),
+// forget every finger still listed. Runs after the pointer events of that touch (setTimeout).
+for(const t of ['touchend', 'touchcancel']) document.addEventListener(t, e => {
+  if(e.touches.length) return;
+  setTimeout(() => {
+    if(!touches.size || (act && act.touch)) return;
+    touches.clear();
+    if(gesture && /^(pan|pinch|pending)$/.test(gesture.kind)){ gesture = null; stage.classList.remove('panning'); saveCamSoon(); }
+  }, 0);
+}, {passive: true, capture: true});
 stage.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
 
@@ -44,6 +54,10 @@ function onDown(e){
   if(!editing) dropStraySelection();
   if(e.pointerType === 'touch'){
     if(inEdit || penDown) return;
+    // (1.71.1) a first finger (isPrimary) means no other finger is on the screen: anything still listed is a ghost
+    // whose "lifted" event iPadOS never sent. Left in, every later pinch paired a real finger with the ghost, so the
+    // zoom resisted and the page jumped until Inkwell was restarted.
+    if(e.isPrimary && touches.size){ touches.clear(); if(gesture && !(act && act.touch)) gesture = null; stage.classList.remove('panning'); }
     touches.set(e.pointerId, {x: sx, y: sy, sx, sy, t: performance.now(), target: e.target});
     try { stage.setPointerCapture(e.pointerId); } catch {}
     if(touches.size === 1){
@@ -51,10 +65,10 @@ function onDown(e){
       if(prefs.ruler.on && onRuler(sx, sy)){ gesture = startRulerGesture(); return; }
       if(prefs.finger){ startTool(e, sx, sy, 0.55); if(act) act.touch = true; return; }
       gesture = {kind: 'pending', start: {...cam}};
-    } else if(touches.size === 2){
+    } else if(touches.size >= 2){
       if(act && act.touch) cancelAct();
       if(gesture && gesture.kind === 'ruler'){ gesture = startRulerGesture(); return; }
-      gesture = startPinch();
+      gesture = startPinch();   // (1.71.1) also with a 3rd finger: the pinch follows the two newest fingers
     }
     return;
   }
@@ -126,6 +140,8 @@ function onUp(e){
     } else if(touches.size === 1 && gesture.kind === 'pinch'){
       const o = [...touches.values()][0];
       gesture = {kind: 'pan', lx: o.x, ly: o.y};
+    } else if(touches.size >= 2 && gesture.kind === 'pinch'){
+      gesture = startPinch();   // (1.71.1) one of 3+ fingers lifted: carry on with the two left, without a jump
     } else if(touches.size >= 1 && gesture.kind === 'ruler'){
       gesture = startRulerGesture();
     }
@@ -145,6 +161,7 @@ function onCancel(e){
   if(e.pointerType === 'touch'){
     touches.delete(e.pointerId);
     if(!touches.size){ gesture = null; stage.classList.remove('panning'); }
+    else if(gesture && gesture.kind === 'pinch'){ if(touches.size >= 2) gesture = startPinch(); else { const o = [...touches.values()][0]; gesture = {kind: 'pan', lx: o.x, ly: o.y}; } }
   }
   if(e.pointerType === 'pen'){ penDown = false; penAt = performance.now(); }
   if(act && act.id === e.pointerId){
@@ -164,13 +181,15 @@ function cancelAct(){
   act = null; clearLive();
 }
 
+// (1.71.1) the two newest fingers (Map keeps the order they touched down): an older stale entry is never used
+const pinchPair = () => [...touches.values()].slice(-2);
 function startPinch(){
-  const [a, b] = [...touches.values()];
+  const [a, b] = pinchPair();
   const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
   return {kind: 'pinch', d0: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), z0: cam.z, wc: toWorld(cx, cy), start: gesture && gesture.start ? gesture.start : {...cam}};
 }
 function pinchMove(){
-  const [a, b] = [...touches.values()];
+  const [a, b] = pinchPair();
   if(!b) return;
   const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
   const want = gesture.z0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0;

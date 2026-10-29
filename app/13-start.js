@@ -658,8 +658,14 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
     if(Date.now() < quietUntil && idle()){ w.postMessage('skipWaiting'); return; }
     toast('A new version of Inkwell is ready', 'Reload', () => w.postMessage('skipWaiting'));
   };
-  navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).then(reg => {
-    swReg = reg;
+  // (1.70.3) a failed registration (no network for a moment at start, iPad hiccup) used to be swallowed, leaving
+  // Check for update stuck on "Updates only work in the installed app" until the app was closed. Now it is retried
+  // when the app comes back to the front, comes online, or Check for update is tapped (swEnsure in 09-settings.js).
+  let swWired = false;
+  swRegister = () => navigator.serviceWorker.register('sw.js', {updateViaCache: 'none'}).then(reg => {
+    swReg = reg; swErr = '';
+    if(swWired) return reg;
+    swWired = true;
     // an update that finished downloading while the app was in the background
     if(reg.waiting) offerUpdate(reg.waiting);
     reg.addEventListener('updatefound', () => {
@@ -680,7 +686,12 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
       if(Date.now() - lastCheck > 30000) check(); else if(reg.waiting) offerUpdate(reg.waiting);
     });
     setInterval(() => { if(document.visibilityState === 'visible') check(); }, 15 * 60000);
-  }).catch(() => {});
+    return reg;
+  }).catch(e => { swErr = (e && e.message) || String(e || 'unknown error'); console.warn('sw register', e); return null; });
+  swRegister();
+  const swRetry = () => { if(!swReg && navigator.onLine && document.visibilityState === 'visible') swRegister(); };
+  document.addEventListener('visibilitychange', swRetry);
+  addEventListener('online', swRetry);
   let reloaded = false;
   // (1.48.1) never reload in the middle of a stroke or right after one: wait until writing has paused
   navigator.serviceWorker.addEventListener('controllerchange', () => {

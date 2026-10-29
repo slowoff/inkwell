@@ -614,7 +614,15 @@ $('trashEmpty').addEventListener('click', async () => {
 });
 
 /* Version and updates */
-let swReg = null;
+let swReg = null, swErr = '', swRegister = null;
+// (1.70.3) get the service worker registration even if the one at start failed
+async function swEnsure(){
+  if(swReg) return swReg;
+  if(!('serviceWorker' in navigator)) return null;
+  try { const r = await navigator.serviceWorker.getRegistration(); if(r){ swReg = r; return r; } } catch {}
+  if(swRegister){ await swRegister(); }
+  return swReg;
+}
 async function appVersion(){
   const c = navigator.serviceWorker && navigator.serviceWorker.controller;
   if(!c) return '';
@@ -632,6 +640,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.70.3', '2026-10-29', ['Fix: Check for update no longer says "Updates only work in the installed app" when the update helper failed to start (for example without internet for a moment). It tries again when you tap it or come back to the app, and otherwise says why and offers Reload']],
   ['1.70.2', '2026-10-28', ['Fix: the tool bar fits on the screen again (iPad in landscape, notebook list closed): when space is short, Finger draws and Stick to text show an icon instead of their name and the gaps get smaller, so you no longer have to drag it sideways']],
   ['1.70.1', '2026-10-28', ['Fix: quotes in Claude answers (lines starting with >) now show as a quote block instead of a stray > sign; Put on page leaves the > out']],
   ['1.70', '2026-10-28', ['Zoom % at the top right: hold it to lock the max zoom at the zoom you are at (hold again to unlock); double-tap it to lock the zoom completely, so pinching only moves the page (double-tap again to unlock). A single tap still goes back to 100%. The % turns blue with a small icon while a lock is on']],
@@ -759,9 +768,14 @@ $('logBtn').addEventListener('click', () => {
 $('updBtn').addEventListener('click', async () => {
   const b = $('updBtn');
   if(b.dataset.ready && swReg && swReg.waiting){ b.textContent = 'Updating'; b.disabled = true; swReg.waiting.postMessage('skipWaiting'); return; }
-  if(!swReg){ toast('Updates only work in the installed app'); return; }
   if(!navigator.onLine){ toast('You are offline'); return; }
   b.disabled = true; b.textContent = 'Checking';
+  if(!(await swEnsure())){
+    b.disabled = false; b.textContent = 'Check for update';
+    // no offline helper: a plain reload still loads the newest version from the internet
+    toast('Could not check for updates' + (swErr ? ' (' + swErr + ')' : '') + '. Reloading gets the newest version.', 'Reload', () => flushSaves().then(() => location.reload()));
+    return;
+  }
   try {
     await swReg.update();
     if(swReg.installing) await new Promise(res => { const w = swReg.installing; w.addEventListener('statechange', () => { if(w.state !== 'installing') res(); }); setTimeout(res, 20000); });

@@ -61,6 +61,20 @@ async def main():
             s = await pg.evaluate(STATE)
             check(s['over'] <= 1 and s['cls'].split() == ['bar2'], f"[1366px] {t}: fits with the full labels ({s['cls']})")
         check(await pg.evaluate("document.querySelector('#fingerBtn .tg-lbl').offsetWidth > 0"), '[1366px] "Finger draws" label shown')
+        # 1.70.4: content inside the bar gets wider while the bar keeps its size (fonts/zoom text on the iPad):
+        # it must refit on its own, without a resize
+        await pg.evaluate("__inkwell.setTool('pen')"); await pg.wait_for_timeout(200)
+        slack = await pg.evaluate("[...document.querySelectorAll('#toolbar .spacer')].filter(e => e.offsetWidth).reduce((a, e) => a + e.offsetWidth - 6, 0)")
+        await pg.evaluate(f"document.getElementById('zoomBtn').style.minWidth = '{52 + slack + 30}px'"); await pg.wait_for_timeout(400)
+        s = await pg.evaluate(STATE)
+        check('t1' in s['cls'] and s['over'] <= 1 and s['zoomIn'], f'[1366px] content grew: bar tightened by itself, zoom % on screen ({s}, slack {slack})')
+        await pg.evaluate("document.getElementById('zoomBtn').style.minWidth = ''"); await pg.wait_for_timeout(400)
+        s = await pg.evaluate(STATE)
+        check(s['cls'].split() == ['bar2'], f'[1366px] content shrank back: full labels again ({s})')
+        # the bar running past the screen edge (scrollWidth sees no overflow) still counts as too wide
+        await pg.evaluate("document.querySelector('.main').style.marginRight = '-60px'"); await pg.evaluate("dispatchEvent(new Event('resize'))"); await pg.wait_for_timeout(400)
+        cls = await pg.evaluate("document.getElementById('toolbar').className")
+        check('t1' in cls, f'[1366px] bar past the screen edge: tightened ({cls})')
         await ctx.close()
         await b.close()
     print('PASS' if not fails else f'{len(fails)} FAILED')

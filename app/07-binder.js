@@ -597,11 +597,22 @@ function renderOpts(){
 // the tool bar scrolls sideways when it doesn't fit; fade the edge that has more behind it
 // (1.70.2) before falling back to scrolling, tighten the bar step by step: t1 = switches show an icon instead of
 // their label and a shorter thickness slider; t2 = smaller gaps; t3 = 40 px buttons. Only as much as needed.
+// (1.70.4) how far the bar's content reaches past what is visible. Measured from the last visible item's edge
+// (plus the end padding) instead of scrollWidth alone: Safari can leave the end padding out of scrollWidth, and the
+// bar can also run past the screen edge, so the zoom % ended up off screen on the iPad with no tightening done.
+function barOver(b){
+  const r = b.getBoundingClientRect(), cs = getComputedStyle(b);
+  let end = 0;
+  for(const c of b.children) if(c.offsetWidth && !c.hidden) end = Math.max(end, c.getBoundingClientRect().right);
+  const need = end + b.scrollLeft + (parseFloat(cs.paddingRight) || 0) - r.left;
+  const room = Math.min(r.right, document.documentElement.clientWidth || innerWidth) - r.left - (parseFloat(cs.borderRightWidth) || 0);
+  return Math.max(need - room, b.scrollWidth - b.clientWidth);
+}
 function barFit(){
   const b = $('toolbar');
   if(!b.clientWidth) return;
   b.classList.remove('t1', 't2', 't3');
-  for(let k = 1; k <= 3 && b.scrollWidth > b.clientWidth + 1; k++) b.classList.add('t' + k);
+  for(let k = 1; k <= 3 && barOver(b) > 0.5; k++) b.classList.add('t' + k);
 }
 function barFade(){
   barFit();
@@ -615,7 +626,11 @@ $('toolbar').addEventListener('scroll', () => { const b = $('toolbar'), more = b
 let barRaf = 0;
 const barSoon = () => { if(!barRaf) barRaf = requestAnimationFrame(() => { barRaf = 0; barFade(); }); };
 addEventListener('resize', barSoon);
-if(window.ResizeObserver) new ResizeObserver(barSoon).observe($('toolbar'));
+// (1.70.4) also refit when what is inside the bar changes width (tool switch, zoom % text, fonts arriving late):
+// the bar's own box keeps its size then, so watching only the bar missed it
+if(window.ResizeObserver){ const ro = new ResizeObserver(barSoon); ro.observe($('toolbar')); for(const c of $('toolbar').children) ro.observe(c); }
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(barSoon);
+addEventListener('pageshow', barSoon);
 // iOS only shows :active (pressed) styles when the page listens for touches
 document.addEventListener('touchstart', () => {}, {passive: true});
 $('lassoMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.lassoMode = b.dataset.m; savePrefs(); renderOpts(); });

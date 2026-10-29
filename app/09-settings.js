@@ -657,6 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.72.1', '2026-10-29', ['Finger draws: new icon, a finger pointing down and drawing a wavy line']],
   ['1.72', '2026-10-29', [
     'Every switch and setting now says what it did in a short message at the bottom (for example "Finger draws on", "Stick to text off", "Theme: Dark"). It sits just above a message with a button, so Undo and Reload stay reachable',
     'Finger draws has a new icon (a finger drawing a line) and shows that same icon at every screen size; before it was sometimes the icon and sometimes the name',

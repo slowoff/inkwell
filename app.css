@@ -204,6 +204,11 @@ html,body{background:var(--paper)}
 #hlm,#live.hl-mul{mix-blend-mode:multiply}
 .world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
 #worldFront > *{transform-origin:0 0}
+/* (1.71.2) while the page moved, iPad Safari sometimes drew ink and highlights that lie on a picture UNDER the picture:
+   the picture layer gets its own GPU layer while it moves, and the ink canvas (painted with the page) ended up below it.
+   Every drawing layer above the pictures gets its own GPU layer, so their order stays as written above (the picture
+   layer itself is left alone: pinned for good, a long imported script would use a lot of memory). */
+#hlm,#ink,#worldFront,#live{will-change:transform}
 .it{position:absolute}
 .it-img{display:block;border-radius:2px;box-shadow:0 0 0 1px var(--line),0 2px 8px rgba(0,0,0,.08);background:#fff}
 .it-img.doc img{transition:filter .2s}

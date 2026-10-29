@@ -41,7 +41,7 @@ async def main():
                 # the compact finger switch still works and shows its icon
                 await pg.evaluate("__inkwell.setTool('pen')"); await pg.wait_for_timeout(120)
                 fin = await pg.evaluate("(() => { const f = document.getElementById('fingerBtn'); return {ico: f.querySelector('.tg-ico').getBoundingClientRect().width, lbl: f.querySelector('.tg-lbl').offsetWidth, on: f.classList.contains('on')}; })()")
-                if touch: check(fin['ico'] > 0 and fin['lbl'] == 0, f'{tag} finger switch shows the hand icon instead of the label ({fin})')
+                check(fin['ico'] > 0 and fin['lbl'] == 0, f'{tag} finger switch shows its icon, not the label ({fin})')
                 await pg.click('#fingerBtn'); await pg.wait_for_timeout(150)
                 check(await pg.evaluate("document.getElementById('fingerBtn').classList.contains('on')") != fin['on'], f'{tag} finger switch still toggles')
                 await pg.click('#fingerBtn')
@@ -60,7 +60,9 @@ async def main():
             await pg.evaluate(f"__inkwell.setTool('{t}')"); await pg.wait_for_timeout(120)
             s = await pg.evaluate(STATE)
             check(s['over'] <= 1 and s['cls'].split() == ['bar2'], f"[1366px] {t}: fits with the full labels ({s['cls']})")
-        check(await pg.evaluate("document.querySelector('#fingerBtn .tg-lbl').offsetWidth > 0"), '[1366px] "Finger draws" label shown')
+        # (1.72) Rafael: the switch showed its name at some widths and the icon at others; now always the icon
+        fin = await pg.evaluate("(() => { const f = document.getElementById('fingerBtn'); return {ico: f.querySelector('.tg-ico').getBoundingClientRect().width, lbl: f.querySelector('.tg-lbl').offsetWidth}; })()")
+        check(fin['ico'] > 0 and fin['lbl'] == 0, f'[1366px] "Finger draws" shows the same icon as on narrower screens ({fin})')
         # 1.70.4: content inside the bar gets wider while the bar keeps its size (fonts/zoom text on the iPad):
         # it must refit on its own, without a resize
         await pg.evaluate("__inkwell.setTool('pen')"); await pg.wait_for_timeout(200)

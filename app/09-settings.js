@@ -8,8 +8,8 @@
    ===================================================================== */
 $('status').addEventListener('click', openSettings);
 $('settingsBtn').addEventListener('click', openSettings);
-function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(); showModal('settingsDlg'); updTrashInfo(true); DbSize.render(); DbSize.get().then(() => DbSize.render()).catch(() => {}); }
-async function renderSettings(){
+function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(true); showModal('settingsDlg'); updTrashInfo(true); DbSize.render(); DbSize.get().then(() => DbSize.render()).catch(() => {}); }
+async function renderSettings(fresh){
   renderPrefSettings(); updTrashInfo(); renderVersion();
   const ready = !!Sync.sb;
   $('setNoConfig').hidden = ready;
@@ -30,7 +30,10 @@ async function renderSettings(){
   if(Sync.user){
     $('whoami').textContent = Sync.user.email || 'your account';
     renderSyncInfo();
-    Files.on(true).then(() => { renderSyncInfo(); renderCloud(); }).catch(() => {});
+    // (1.72) fresh storage info only when Settings opens; while it stays open, the cached info (10 min) is shown.
+    // Before, every sync (every 20 s, also with Settings closed) asked the server for it again: about 70 % of all the
+    // requests Inkwell made to the server (7 database queries each), all day long.
+    if(fresh || !$('settingsDlg').hidden) Files.on(!!fresh).then(() => { renderSyncInfo(); renderCloud(); }).catch(() => {});
   }
   try {
     const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
@@ -103,7 +106,7 @@ const DbSize = {
     const day = new Date().toDateString();
     if(LSget('inkwell.dbWarn', '') === day) return;
     LSset('inkwell.dbWarn', day);
-    toast(`The notes server is ${Math.round(sh * 100)} % full (${fmtMB(mb)} of ${fmtMB(DB_CAP_MB)}). Page history can be trimmed to free space.`);
+    toast(`The notes server is ${Math.round(sh * 100)} % full (${fmtMB(mb)} of ${fmtMB(DB_CAP_MB)}). Emptying Recently deleted (Settings) frees some space.`);
   }
 };
 function renderCloud(){
@@ -139,7 +142,7 @@ async function openCleanup(){
     for(const a of await IDB.all('assets')) if(a && a.id && a.blob) sizes.set(a.id, a.blob.size);
     if(await Files.on()){ const {files} = await Files.call('list'); for(const f of files || []) sizes.set(f.id, +f.bytes || sizes.get(f.id) || 0); }
     const rows = [];
-    for(const d of await IDB.all('docs')){
+    for(const d of await IDB.prefix('c_')){
       if(d.kind !== 'content' || d.deleted || !d.data) continue;
       const page = getDoc(d.id.slice(2)); if(!page) continue;
       const ids = new Set();
@@ -456,27 +459,37 @@ function renderPrefSettings(){
   $('setModelHint').textContent = {auto: 'A quick check picks the cheap model for easy questions and the smart one for worksheets, handwriting and calculations.', fast: 'Always Haiku: cheapest and fastest, weaker at handwriting and long calculations.', smart: 'Always Sonnet: best answers, about 20 times the price of Haiku.'}[prefs.askModel || 'auto'];
   $('setHoldHint').textContent = hold ? `Hold the pen still for ${(hold / 1000).toFixed(2).replace(/0$/, '')} s at the end of a stroke to turn it into a straight line or shape.` : 'Strokes are never straightened.';
 }
+// (1.72) every change in Settings says what it did, in a short message at the bottom
+const segNote = (b, what) => note(what + ': ' + b.textContent.trim());
 $('setTheme').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
+  const was = prefs.theme || 'auto';
   prefs.theme = b.dataset.v; savePrefs(); setThemeAttr(); themeChanged(); renderPrefSettings();
+  if(was !== prefs.theme) note('Theme: ' + (prefs.theme === 'auto' ? 'Auto (follows the iPad)' : b.textContent.trim()));
 });
 $('setLeft').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
+  const was = !!prefs.leftEdge;
   prefs.leftEdge = b.dataset.v === '1'; savePrefs(); renderPrefSettings(); invalidate();
+  if(was !== prefs.leftEdge) note(prefs.leftEdge ? 'Left side: fixed edge' : 'Left side: endless');
 });
 $('setZoom').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
   prefs.zMax = b.dataset.v === 'cur' ? clamp(Math.round(cam.z * 100) / 100, 0.5, Z_TOP) : Z_TOP;
   savePrefs(); renderPrefSettings(); renderZoomBtn();
-  toast(b.dataset.v === 'cur' ? 'Max zoom set to ' + Math.round(zMax() * 100) + '%' : 'Max zoom back to 800%');
+  note(b.dataset.v === 'cur' ? 'Max zoom: ' + Math.round(zMax() * 100) + '%' : 'Max zoom: no limit (800%)');
 });
 $('setModel').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
+  const was = prefs.askModel || 'auto';
   prefs.askModel = b.dataset.v; savePrefs(); renderPrefSettings();
+  if(was !== prefs.askModel) segNote(b, 'Claude model');
 });
 $('setHw').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
+  const was = hwMode();
   prefs.hwSearch = b.dataset.v === 'docs' ? 'docs' : b.dataset.v === 'on'; savePrefs();
+  if(was !== hwMode()) segNote(b, 'Read handwriting & scans');
   HW.state = ''; PT.state = '';
   if(!HW.on()){ HW.queue.length = 0; clearTimeout(HW.timer); }
   if(!PT.on()){ PT.queue.length = 0; clearTimeout(PT.timer); }
@@ -485,11 +498,15 @@ $('setHw').addEventListener('click', e => {
 });
 $('setWheel').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
+  const was = prefs.wheel || 'right';
   prefs.wheel = b.dataset.v; savePrefs(); renderPrefSettings();
+  if(was !== prefs.wheel) note(prefs.wheel === 'off' ? 'Pencil menu off' : 'Pencil menu: ' + b.textContent.trim().toLowerCase());
 });
 $('setHold').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
+  const was = +prefs.snapHold || 0;
   prefs.snapHold = +b.dataset.v; savePrefs(); renderPrefSettings();
+  if(was !== prefs.snapHold) segNote(b, 'Straighten shapes');
 });
 // (1.50) Shapes popover switch "Snap lines to angles" (prefs angleSnap; missing = on): the line tools of the
 // Shapes menu (line, arrows, spring, dashed) click into 15° steps when drawn close to them; off = any angle.
@@ -502,7 +519,7 @@ if(!prefs.v150){
 function renderSnapShapes(){ $('snapShapes').classList.toggle('on', prefs.angleSnap !== false); }
 $('snapShapes').addEventListener('click', () => {
   prefs.angleSnap = prefs.angleSnap === false; savePrefs(); renderSnapShapes();
-  toast(prefs.angleSnap ? 'Lines and turning snap to 0°, 15°, 45°, 90° …' : 'Angle snapping off: lines and turning go exactly where you drag');
+  note(prefs.angleSnap ? 'Snap to angles on · 0°, 15°, 45°, 90°' : 'Snap to angles off · any angle');
 });
 renderSnapShapes();
 
@@ -640,6 +657,17 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.72', '2026-10-29', [
+    'Every switch and setting now says what it did in a short message at the bottom (for example "Finger draws on", "Stick to text off", "Theme: Dark"). It sits just above a message with a button, so Undo and Reload stay reachable',
+    'Finger draws has a new icon (a finger drawing a line) and shows that same icon at every screen size; before it was sometimes the icon and sometimes the name',
+    'Fix: a change from another device that arrived while you were leaving a page was dropped on this iPad (it kept the old copy of that page until the page changed again)',
+    'Fix: Redo right after tapping into a text box undid itself (the box\'s old text came back over it)',
+    'Fix: at high zoom, small sharp zigzags could make Inkwell think the ink layer was lost and redraw everything for nothing',
+    'Fix: a picture that failed to load was asked for again on every scroll instead of waiting a moment',
+    'Faster and lighter: the storage info is fetched only when Settings opens (it was fetched after every sync, every 20 s, which was most of the app\'s server traffic); the daily Google Drive picture check runs once instead of 4-5 times at once; the Drive copy of your notes, search and the Later marks no longer read your whole page history each time',
+    'Escape on a keyboard closes the window on top (Settings, What\'s new, export …)',
+    'Server: the security fixes from 1.67.1 are now all live on the server too (tighter database permissions, every Claude answer counts towards the monthly limit), and the database size check runs with your own rights'
+  ]],
   ['1.71.2', '2026-10-29', ['Fix: while moving the page, writing on top of a picture could slip under the picture for a moment. The drawing layers above pictures now keep their place']],
   ['1.71.1', '2026-10-29', ['Fix: pinch-zoom sometimes fought back and made the page jump until the app was restarted. A finger the iPad never reported as lifted stayed counted and got paired with your real fingers; such leftover fingers are now dropped, and a pinch always follows your two newest fingers']],
   ['1.71', '2026-10-29', ['Later: marks on the page you have open are listed first under "On this page" (top to bottom, as they sit on the page), then "Other pages"']],

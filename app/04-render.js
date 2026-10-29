@@ -134,7 +134,7 @@ new ResizeObserver(resize).observe(stage);
 addEventListener('resize', fitScreen);
 addEventListener('scroll', () => { SR = stage.getBoundingClientRect(); }, true);
 
-let rafId = 0, need = {bg: 0, ink: 0, over: 0}, frontZ = 1;
+let rafId = 0, need = {bg: 0, ink: 0, over: 0}, frontZ = 1, frameZoomTxt = '';
 let backZ = 1, backTimer = 0;
 // place an element of the back layer (imported page, picture) at the settled zoom backZ
 function backXf(el, it){
@@ -168,7 +168,8 @@ function frame(){
   // rasterises a big scaled layer at 1x and then stretches it, so text went blurry when zoomed in.
   worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
   if(cam.z !== frontZ){ frontZ = cam.z; for(const el of worldFront.children) frontXf(el); }
-  $('zoomPct').textContent = Math.round(cam.z * 100) + '%';
+  const zt = Math.round(cam.z * 100) + '%';
+  if(zt !== frameZoomTxt){ frameZoomTxt = zt; $('zoomPct').textContent = zt; }   // (1.72) only when it changes
   // (1.69) each step on its own: before, one step that threw left the rest undone on every later frame too (the
   // ink was cleared but never drawn again until the app was restarted)
   const n = need; need = {bg: 0, ink: 0, over: 0};
@@ -225,7 +226,9 @@ const InkCheck = {
   note(it){
     if(this.probes.length >= 8 || it.fl || it.c === 'paper' || opOf(it) < 1 || it.w * cam.z * dpr < 3) return;
     const p = it.p, m = p.length / 3; if(m < 1) return;
-    const k = Math.floor(m / 2) * 3, x = Math.round((p[k] * cam.z + cam.ox) * dpr), y = Math.round((p[k + 1] * cam.z + cam.oy) * dpr);
+    // (1.72) the point on the drawn centre line: the raw recorded point can lie beside the ink on sharp little
+    // zigzags (the drawing smooths them), which at high zoom made a false "ink lost" and replaced the layers for nothing
+    const [px, py] = shapePoint(p, Math.floor(m / 2)), x = Math.round((px * cam.z + cam.ox) * dpr), y = Math.round((py * cam.z + cam.oy) * dpr);
     if(x >= 1 && y >= 1 && x < inkCv.width - 1 && y < inkCv.height - 1) this.probes.push([x, y]);
   },
   soon(){ clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 450); },
@@ -245,7 +248,7 @@ const InkCheck = {
     if(!this.lost()) return;
     if(Date.now() - this.last < 3000) return;
     this.last = Date.now(); this.heals++;
-    try { (window.__inkwellErrors = window.__inkwellErrors || []).push('ink layer was empty, drawn again on a fresh canvas'); } catch(_){}
+    try { const E = window.__inkwellErrors = window.__inkwellErrors || []; if(E.length < 50) E.push('ink layer was empty, drawn again on a fresh canvas'); } catch(_){}
     inkCv = freshCanvas(inkCv); inkCtx = inkCv.getContext('2d');
     hlmCv = freshCanvas(hlmCv); hlmCtx = hlmCv.getContext('2d'); hlmUsed = false;
     invalidate(0, 1, 0);
@@ -351,7 +354,7 @@ function loadImg(el){
     if(el._msg) el._msg.hidden = true;
     el.classList.remove('missing');
     if(!lineReady.has(a)) setTimeout(() => { if(el._loaded) pageLines(a); }, 400);
-  }, () => { el._loading = false; });
+  }, () => { el._loading = false; el._failAt = Date.now(); if(el._msg) el._msg.textContent = 'Not downloaded yet'; });   // (1.72) a failed read waits too
 }
 function unloadImg(el, visible){
   if(el._img){ el._img.removeAttribute('src'); el._img.remove(); el._img = null; }
@@ -646,6 +649,7 @@ function undo(){
 }
 function redo(){
   if(!cur) return;
+  if(editing) finishEditing();   // (1.72) like undo: the box being typed in is finished first (else its old text came back over the redo)
   const op = cur.redo.pop(); if(!op) return;
   setItems(op.a); cur.undo.push(op); clearSel(); updUndo();
 }

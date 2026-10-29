@@ -33,6 +33,16 @@ const ser = it => it.t === 's' ? Object.assign({}, it, {p: encPts(it.p)}) : it;
 const opOf = it => it && it.o > 0 && it.o < 1 ? it.o : 1;
 const deser = it => it && it.t === 's' ? Object.assign({}, it, {p: decPts(it.p)}) : it;
 const r1 = v => Math.round(v * 10) / 10;
+// where recorded point i of a stroke really lies on the drawn centre line (after the light 1-2-1 smoothing below);
+// the smooth curve passes exactly through it. (1.72) also used by the ink self-check, which looked at the raw point
+function shapePoint(p, i){
+  const m = p.length / 3;
+  if(!(i > 0 && i < m - 1)) return [p[i*3], p[i*3+1]];
+  const d = (Math.hypot(p[i*3] - p[i*3-3], p[i*3+1] - p[i*3-2]) + Math.hypot(p[i*3+3] - p[i*3], p[i*3+4] - p[i*3+1])) / 2;
+  const f = d <= 3 ? 1 : d >= 8 ? 0 : (8 - d) / 5;
+  if(!f) return [p[i*3], p[i*3+1]];
+  return [p[i*3] + f * ((p[i*3-3] + 2*p[i*3] + p[i*3+3]) / 4 - p[i*3]), p[i*3+1] + f * ((p[i*3-2] + 2*p[i*3+1] + p[i*3+4]) / 4 - p[i*3+1])];
+}
 function strokeShape(it){
   const p = it.p, m = p.length / 3, base = it.w / 2;
   // light smoothing of the recorded points (1-2-1) against jitter, ends kept where the pen touched down and lifted.
@@ -41,10 +51,7 @@ function strokeShape(it){
   const X = new Array(m), Y = new Array(m), Rr = new Array(m);
   for(let i = 0; i < m; i++){
     const mid = i > 0 && i < m - 1;
-    let f = 0;
-    if(mid){ const d = (Math.hypot(p[i*3] - p[i*3-3], p[i*3+1] - p[i*3-2]) + Math.hypot(p[i*3+3] - p[i*3], p[i*3+4] - p[i*3+1])) / 2; f = d <= 3 ? 1 : d >= 8 ? 0 : (8 - d) / 5; }
-    X[i] = f ? p[i*3] + f * ((p[i*3-3] + 2*p[i*3] + p[i*3+3]) / 4 - p[i*3]) : p[i*3];
-    Y[i] = f ? p[i*3+1] + f * ((p[i*3-2] + 2*p[i*3+1] + p[i*3+4]) / 4 - p[i*3+1]) : p[i*3+1];
+    [X[i], Y[i]] = shapePoint(p, i);
     const pr = mid ? (p[i*3-1] + 2*p[i*3+2] + p[i*3+5]) / 4 : p[i*3+2];
     Rr[i] = it.hl ? base : Math.max(0.3, base * (0.3 + pr));
   }
@@ -186,5 +193,5 @@ function strokeBox(it){
   return [x0 - m, y0 - m, x1 + m, y1 + m];
 }
 
-return {encPts, decPts, ser, opOf, deser, r1, strokeShape, fillPath, inkPass, strokePath, inkOutline, inkPieces, strokeBox};
+return {encPts, decPts, ser, opOf, deser, r1, shapePoint, strokeShape, fillPath, inkPass, strokePath, inkOutline, inkPieces, strokeBox};
 });

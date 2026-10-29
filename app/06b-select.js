@@ -261,7 +261,7 @@ function renderAssist(){
   renderOpts();
 }
 $('assistBtn').addEventListener('click', e => { renderAssist(); renderScribe(); openPop('assistPop', e.currentTarget); });
-$('waRef').addEventListener('click', () => { prefs.refLine = !prefs.refLine; savePrefs(); if(cur) cur.wa = null; WA.last = null; drawLiveSoon(); renderAssist(); });
+$('waRef').addEventListener('click', () => { prefs.refLine = !prefs.refLine; savePrefs(); if(cur) cur.wa = null; WA.last = null; drawLiveSoon(); renderAssist(); note(onOff('Reference line', prefs.refLine)); });
 // Fade (1.40): sets the optional o field on everything selected; dragging the slider is one undo step
 const withFade = (it, v) => { const o = Object.assign({}, it); if(v >= 0.995) delete o.o; else o.o = Math.round(v * 100) / 100; return o; };
 let fadeOrig = null;
@@ -323,12 +323,12 @@ $('selGroup').addEventListener('click', () => {
   if(!sel) return;
   const g = 'g' + newId();
   replaceItems(sel.ids.map(id => cur.items.get(id)).filter(Boolean).map(it => Object.assign({}, it, {g})));
-  selectIds(sel.ids); toast('Grouped: it now moves as one piece');
+  selectIds(sel.ids); note('Grouped · moves as one piece');
 });
 $('selUngroup').addEventListener('click', () => {
   if(!sel) return;
   replaceItems(sel.ids.map(id => cur.items.get(id)).filter(it => it && it.g).map(it => { const o = Object.assign({}, it); delete o.g; return o; }));
-  const ids = sel.ids; sel = null; selectIds(ids); toast('Ungrouped: tap a part to select it alone');
+  const ids = sel.ids; sel = null; selectIds(ids); note('Ungrouped · tap a part to select it alone');
 });
 $('selDup').addEventListener('click', () => {
   if(!sel) return;

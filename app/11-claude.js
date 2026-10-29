@@ -428,8 +428,10 @@ $('askModeSel').addEventListener('change', () => {
     Ask.renderMode();   // switches to Practice only when a practice actually starts
     return;
   }
+  const was = Ask.mode === 'practice' ? 'practice' : prefs.askMode;
   prefs.askMode = v; savePrefs();
   if(Ask.mode === 'practice') Ask.reset(); else Ask.renderMode();
+  if(was !== v) note(v === 'solve' ? 'Solve · full worked solutions' : 'Tutor · hints, you solve it');
 });
 $('askSend').addEventListener('click', () => Ask.submit());
 $('askAttX').addEventListener('click', () => { Ask.pending = null; Ask.renderPending(); });
@@ -1325,8 +1327,9 @@ $('scribeBtn').addEventListener('click', () => {
   prefs.autoText = !prefs.autoText; savePrefs(); renderScribe();
   if(prefs.autoText){
     Scribe.warned = false;
-    toast(Sync.user ? 'Write to text is on: what you write with the pen becomes typed text when you pause. Undo brings the ink back.' : 'Write to text needs sync sign-in and internet (Claude reads the handwriting).');
-  } else { Scribe.pending = []; clearTimeout(Scribe.timer); }
+    if(Sync.user) note('Write to text on · pause and your writing turns into text');
+    else toast('Write to text is on, but it needs sync sign-in and internet (Claude reads the handwriting).');
+  } else { Scribe.pending = []; clearTimeout(Scribe.timer); note('Write to text off'); }
 });
 
 /* =====================================================================

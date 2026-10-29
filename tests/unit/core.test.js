@@ -67,6 +67,19 @@ test('stroke shape: ends stay where the pen touched, every recorded point is fou
   assert.ok(sh.n > 30);   // smooth curve between points
 });
 
+test('shapePoint (1.72): recorded point i lies exactly where the drawn centre line passes it', () => {
+  for(const p of [line(30, i => [i * 2, 100 + (i % 2 ? 2.5 : -2.5)]), line(40, i => [i * 7, 50 + 20 * Math.sin(i / 3)]), line(3, i => [i, i])]){
+    const sh = G.strokeShape({w: 1, hl: 0, p});
+    for(let i = 0; i < p.length / 3; i++){
+      const [x, y] = G.shapePoint(p, i), k = sh.at[i];
+      assert.ok(Math.abs(x - sh.xs[k]) < 1e-9 && Math.abs(y - sh.ys[k]) < 1e-9, `point ${i}`);
+    }
+  }
+  // a sharp little zigzag: the drawn line runs well inside the raw points (the ink check used to look at the raw one)
+  const z = line(21, i => [i * 2, (i % 2 ? 2.5 : -2.5)]);
+  assert.ok(Math.abs(G.shapePoint(z, 10)[1]) < 1.5);
+});
+
 test('stroke shape is local: a part computed alone equals the same part of the whole stroke', () => {
   const p = line(200, i => [i * 2 + 10 * Math.cos(i / 4), 100 + 15 * Math.sin(i / 2.7)]);
   const full = G.strokeShape({w: 2.4, hl: 0, p});

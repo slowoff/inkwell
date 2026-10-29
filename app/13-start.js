@@ -586,7 +586,7 @@ async function boot(){
   await loadDocs();
   if(!docs.size){ await seed(); await loadDocs(); if(!ui.page){ ui.nb = 'nb-school'; ui.sec = 'sec-general'; ui.page = 'pg-welcome'; } }
   ensureUi();
-  $('fingerBtn').classList.toggle('on', prefs.finger); renderScribe();
+  renderFinger(); renderScribe();
   $('mSnap').classList.toggle('on', prefs.snapLines);
   if(prefs.focus && width() !== 'narrow') app.classList.add('focus');
   if(prefs.calc) Calc.open();

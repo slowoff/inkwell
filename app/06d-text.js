@@ -676,7 +676,7 @@ const Spell = {
     if(!Spell.on()) Spell.clear();
     Spell.render(); Spell.renderPop();
   },
-  toggle(){ Spell.setOn(!Spell.on()); toast(Spell.on() ? 'Spell check on: misspelled words are underlined while you type' : 'Spell check off'); },
+  toggle(){ Spell.setOn(!Spell.on()); note(onOff('Spell check', Spell.on())); },
   // picking a language: for the box being typed in, and for new boxes from now on
   setLang(l){
     if(!SPELL_LANGS.some(x => x[0] === l)) return;
@@ -706,9 +706,9 @@ $('spellPop').addEventListener('pointerdown', e => { if(e.target.closest('button
 $('spellPop').addEventListener('mousedown', e => { if(e.target.closest('button')) e.preventDefault(); });
 $('spellPop').addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
-  if(b.dataset.spell) Spell.setOn(b.dataset.spell === 'on');
-  else if(b.dataset.lang) Spell.setLang(b.dataset.lang);
-  else if(b.id === 'spellForget'){ prefs.spellWords = []; savePrefs(); Spell.check(); Spell.renderPop(); toast('Added words forgotten'); }
+  if(b.dataset.spell){ const on = b.dataset.spell === 'on', was = Spell.on(); Spell.setOn(on); if(was !== on) note(onOff('Spell check', on)); }
+  else if(b.dataset.lang){ const was = prefs.spellLang; Spell.setLang(b.dataset.lang); if(was !== prefs.spellLang || editing) note('Spelling: ' + Spell.langName(b.dataset.lang)); }
+  else if(b.id === 'spellForget'){ prefs.spellWords = []; savePrefs(); Spell.check(); Spell.renderPop(); note('Added words forgotten'); }
 });
 $('spellBar').addEventListener('pointerdown', e => e.preventDefault());
 $('spellBar').addEventListener('mousedown', e => e.preventDefault());

@@ -636,19 +636,23 @@ const GD = {
   /* (1.33) A full copy of all notes in the Drive folder as "Inkwell notes.json" (same format as the backup's notes.json,
      so Settings → Restore backup reads it). Updated a few minutes after changes and when the app goes to the background.
      Sync itself still runs through Inkwell's server; this copy is so everything is also in the person's own Drive. */
-  notesBusy: false,
+  notesBusy: false, notesStamp: -1,
   notesState(){ return LSget('inkwell.gdNotes', null) || {}; },
   async saveNotes(force){
     const g = Files.info && Files.info.gdrive;
     if(!g || g.broken || this.notesBusy || !navigator.onLine || !Sync.user || !Acct.mine()) return;
+    // (1.72) nothing written to the notes since the last look: done, without reading every note (this runs every minute,
+    // and reading all notes, page history included, took a moment on the iPad each time)
+    if(!force && this.notesStamp === IDB.stamp && !saveContentSoon.pending() && !saveTitleSoon.pending()) return;
     const st = this.notesState();
     if(st.fail && Date.now() - st.fail < 60000) return;          // after a failure, wait a minute
     this.notesBusy = true;
     try {
       await flushSaves();
+      const seen = IDB.stamp;
       const docsAll = (await IDB.all('docs')).filter(d => !d.deleted && d.data).map(d => ({id: d.id, kind: d.kind, data: d.data, updated: d.updated}));
       const sig = docsAll.length + ':' + docsAll.reduce((m, d) => Math.max(m, d.updated || 0), 0) + ':' + Sync.user.id;
-      if(sig === st.sig && st.id) return;                         // nothing changed since the last copy
+      if(sig === st.sig && st.id){ this.notesStamp = seen; return; }   // nothing changed since the last copy
       if(!force && st.saved && Date.now() - st.saved < 3 * 60000) return;   // while writing: at most every 3 minutes
       const body = JSON.stringify({app: 'Inkwell', version: 2, exported: new Date().toISOString(), parts: 1, docs: docsAll});
       let id = st.uid === Sync.user.id ? st.id : null, remade = false;
@@ -675,6 +679,7 @@ const GD = {
         const j = await r.json().catch(() => ({}));
         if(!r.ok || !j.id) throw new Error('Google Drive (' + r.status + ')');
         LSset('inkwell.gdNotes', {id: j.id, uid: Sync.user.id, sig, saved: Date.now()});
+        this.notesStamp = seen;
         if(!$('settingsDlg').hidden) renderGD();
         return;
       }
@@ -682,7 +687,14 @@ const GD = {
     finally { this.notesBusy = false; }
   },
   // (1.35) once a day: are all Drive pictures still in the folder? (deleted or in Drive's bin -> they would vanish from pages)
-  async check(force){
+  // (1.72) one check at a time: at the start of each day the server logs showed 4-5 of them within 2 seconds (several
+  // storage refreshes each started one before the first had stored its date), and each lists every picture in Drive
+  check(force){
+    if(this.checking) return this.checking;
+    this.checking = this.checkNow(force).finally(() => { this.checking = null; });
+    return this.checking;
+  },
+  async checkNow(force){
     const i = Files.info, g = i && i.gdrive;
     if(!g || g.broken || this.moving || !navigator.onLine || !Sync.user) return null;
     const day = new Date().toDateString(), st = LSget('inkwell.gdCheck', null) || {};
@@ -771,7 +783,10 @@ async function mergeCurrent(row, base){
   // (1.48.1) the backup copy is saved first; the page is read and merged only after that, with no waiting in
   // between, so a stroke finished while the backup was being written is part of the merge (it used to be lost)
   if(isBusy()) await saveVersion(c.id, snap(), 'merge').catch(e => console.warn('version', e));
-  if(cur !== c) return false;
+  // (1.72) the page was left while the backup was saved: handle the row like any page that is not open. Before, it
+  // returned here, the pull counted the row as seen, and this device kept the old copy of that page (no merge, no
+  // newer strokes from the other device) until the page changed again somewhere
+  if(cur !== c) return applyRemote(row);
   // (1.59.1) an incoming copy that lacks strokes written here a moment ago is an older copy that won a crossing
   // upload: merge (which keeps them) and upload again, instead of taking it as it is
   const rIds = new Set(((row.data && row.data.items) || []).map(it => it && it.id));

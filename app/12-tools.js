@@ -431,7 +431,7 @@ function fmtCalc(v){
     Calc.toks.push('#' + x.v);
     Calc.render(false);
   });
-  $('calcDeg').addEventListener('click', () => { prefs.calcDeg = prefs.calcDeg === false; savePrefs(); Calc.render(false); });
+  $('calcDeg').addEventListener('click', () => { prefs.calcDeg = prefs.calcDeg === false; savePrefs(); Calc.render(false); note(prefs.calcDeg === false ? 'Angles in radians' : 'Angles in degrees'); });
   $('calcClose').addEventListener('click', () => Calc.close());
   $('calcClear').addEventListener('click', () => { Calc.hist = []; Calc.save(); Calc.render(); });
   $('calcBtn').addEventListener('click', () => { if($('calc').hidden) Calc.open(); else Calc.close(); });
@@ -461,6 +461,12 @@ document.addEventListener('keydown', e => {
   // right after a paste (Ctrl+X, Ctrl+Z, Delete) was ignored while it held the focus
   if(ae && ae.id === 'pasteCatch' && !(e.key.toLowerCase() === 'v' && (e.metaKey || e.ctrlKey))) ae.blur();
   const typing = ae && ae.id !== 'pasteCatch' && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName));
+  // (1.72) Escape closes the window on top (Settings, export, …), also while typing in one of its fields (the link
+  // window of a text box being typed in: back to typing in the box)
+  if(e.key === 'Escape' && !e.isComposing){
+    const open = [...document.querySelectorAll('.modal:not([hidden])')];
+    if(open.length){ e.preventDefault(); hideModal(open[open.length - 1].id); return; }
+  }
   if(typing){ if(e.key === 'Escape' && editing) finishEditing(); return; }
   // (1.67.3) with a window open (Settings, export, …) the page's shortcuts are off: Backspace deleted the selected
   // things behind the window, a letter switched the tool, Ctrl+Z undid on the page

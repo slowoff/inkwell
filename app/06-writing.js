@@ -429,7 +429,7 @@ for(const h of ['rulerGrip', 'rulerTurnL', 'rulerTurnR']){
     const d = down; down = null;
     if(d.far || touches.size > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12 || performance.now() - d.t > 700) return;
     const r = prefs.ruler; r.snap = r.snap === false; savePrefs(); renderRuler();
-    toast(r.snap ? 'Ruler snaps to 0°, 15°, 45°, 90° …' : 'Ruler snap off: it turns to any angle');
+    note(r.snap ? 'Ruler snap on · clicks into 0°, 15°, 45°, 90°' : 'Ruler snap off · turns to any angle');
   }, true);
   addEventListener('pointercancel', e => { if(down && down.id === e.pointerId) down = null; }, true);
   el.addEventListener('click', e => e.stopPropagation());

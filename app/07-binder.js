@@ -230,7 +230,7 @@ function refreshPageItem(id){
 function markActivePage(){ $('pageList').querySelectorAll('.page-item').forEach(el => el.classList.toggle('on', !!cur && el.dataset.page === cur.id)); }
 async function buildSearch(){
   if(searchCache) return searchCache;
-  const all = await IDB.all('docs'), map = new Map();
+  const all = await IDB.prefix('c_'), map = new Map();   // (1.72) page contents only (was every note, page history included)
   for(const d of all){
     if(d.kind !== 'content' || d.deleted || !d.data) continue;
     let txt = '';
@@ -577,7 +577,7 @@ function renderOpts(){
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   $('assistBtn').hidden = t !== 'pen';
-  $('hlSnap').hidden = t !== 'hl'; $('hlSnap').classList.toggle('on', !!prefs.hlSnap);
+  $('hlSnap').hidden = t !== 'hl'; $('hlSnap').classList.toggle('on', !!prefs.hlSnap); $('hlSnap').setAttribute('aria-pressed', prefs.hlSnap ? 'true' : 'false');
   $('assistBtn').classList.toggle('on', !!(prefs.refLine || prefs.autoText));
   if(t === 'eraser') $('eraseMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.eraser.mode === 'area' ? 'area' : 'stroke')));
   if(ink){
@@ -633,12 +633,21 @@ if(document.fonts && document.fonts.ready) document.fonts.ready.then(barSoon);
 addEventListener('pageshow', barSoon);
 // iOS only shows :active (pressed) styles when the page listens for touches
 document.addEventListener('touchstart', () => {}, {passive: true});
-$('lassoMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.lassoMode = b.dataset.m; savePrefs(); renderOpts(); });
+const LASSO_NAMES = {free: 'Select: draw a loop', box: 'Select: drag a box', tap: 'Select: tap things'};
+$('lassoMode').addEventListener('click', e => {
+  const b = e.target.closest('[data-m]'); if(!b) return;
+  const was = prefs.lassoMode; prefs.lassoMode = b.dataset.m; savePrefs(); renderOpts();
+  if(was !== prefs.lassoMode) note(LASSO_NAMES[prefs.lassoMode] || 'Select');
+});
 $('hlSnap').addEventListener('click', () => {
   prefs.hlSnap = !prefs.hlSnap; savePrefs(); renderOpts();
-  toast(prefs.hlSnap ? 'Stick to text is on: highlights snap onto the line of text under them' : 'Stick to text is off: the highlighter draws freely');
+  note(onOff('Stick to text', prefs.hlSnap));
 });
-$('eraseMode').addEventListener('click', e => { const b = e.target.closest('[data-m]'); if(!b) return; prefs.eraser.mode = b.dataset.m; savePrefs(); renderOpts(); });
+$('eraseMode').addEventListener('click', e => {
+  const b = e.target.closest('[data-m]'); if(!b) return;
+  const was = prefs.eraser.mode; prefs.eraser.mode = b.dataset.m; savePrefs(); renderOpts();
+  if(was !== prefs.eraser.mode) note(prefs.eraser.mode === 'area' ? 'Eraser: Partial (rubs out only what it touches)' : 'Eraser: Stroke (removes whole strokes)');
+});
 document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if(b) setTool(b.dataset.tool); });
 $('size').addEventListener('input', () => { const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
 let lp = null;
@@ -677,11 +686,14 @@ $('rulerBtn').addEventListener('click', () => {
   prefs.ruler.on = !prefs.ruler.on;
   if(prefs.ruler.on) centerRuler(true);   // always appears in the middle of the screen, straight
   savePrefs(); renderRuler();
-  if(prefs.ruler.on) toast(matchMedia('(hover:hover) and (pointer:fine)').matches
-    ? 'Drag the hand to move the ruler, the round arrows to turn it. Draw along an edge for a straight line.'
-    : 'Drag the ruler with one finger, turn it with two. Draw along an edge for a straight line.');
+  note(!prefs.ruler.on ? 'Ruler off' : matchMedia('(hover:hover) and (pointer:fine)').matches
+    ? 'Ruler on · drag the hand to move it, the arrows to turn it' : 'Ruler on · one finger moves it, two fingers turn it');
 });
-$('fingerBtn').addEventListener('click', () => { prefs.finger = !prefs.finger; savePrefs(); $('fingerBtn').classList.toggle('on', prefs.finger); });
+$('fingerBtn').addEventListener('click', () => {
+  prefs.finger = !prefs.finger; savePrefs(); renderFinger();
+  note(prefs.finger ? 'Finger draws on · fingers write like the Pencil' : 'Finger draws off · fingers move and zoom the page');
+});
+function renderFinger(){ const b = $('fingerBtn'); b.classList.toggle('on', !!prefs.finger); b.setAttribute('aria-pressed', prefs.finger ? 'true' : 'false'); }
 /* (1.70) Zoom % button: tap = back to 100 %, hold = lock / unlock the max zoom at the current level,
    double-tap = lock / unlock zooming altogether. A tap waits ZB_DBL ms to see whether a second one follows. */
 const ZB_HOLD = 550, ZB_DBL = 300;
@@ -694,14 +706,14 @@ function renderZoomBtn(){
   b.title = (lk ? 'Zoom locked. ' : mx ? 'Max zoom ' + Math.round(zMax() * 100) + '%. ' : '') + 'Tap: 100%. Hold: lock/unlock max zoom. Double-tap: lock/unlock zoom';
 }
 function zoomMaxToggle(){
-  if(zMax() < Z_TOP){ prefs.zMax = Z_TOP; toast('Max zoom unlocked (up to 800%)'); }
-  else if(cam.z >= Z_TOP - 0.005) toast('Already at the highest zoom (800%)');
-  else { prefs.zMax = clamp(Math.round(cam.z * 100) / 100, 0.5, Z_TOP); toast('Max zoom locked at ' + Math.round(zMax() * 100) + '%. Hold the % again to unlock'); }
+  if(zMax() < Z_TOP){ prefs.zMax = Z_TOP; note('Max zoom unlocked (up to 800%)'); }
+  else if(cam.z >= Z_TOP - 0.005) note('Already at the highest zoom (800%)');
+  else { prefs.zMax = clamp(Math.round(cam.z * 100) / 100, 0.5, Z_TOP); note('Max zoom locked at ' + Math.round(zMax() * 100) + '% · hold the % to unlock'); }
   savePrefs(); renderZoomBtn();
 }
 function zoomLockToggle(){
   prefs.zLock = !zLocked(); savePrefs(); renderZoomBtn();
-  toast(prefs.zLock ? 'Zoom locked at ' + Math.round(cam.z * 100) + '%. Double-tap the % to unlock' : 'Zoom unlocked');
+  note(prefs.zLock ? 'Zoom locked at ' + Math.round(cam.z * 100) + '% · double-tap the % to unlock' : 'Zoom unlocked');
 }
 { const zb = $('zoomBtn');
   const stopHold = () => { clearTimeout(ZB.hold); ZB.hold = null; };
@@ -759,7 +771,9 @@ const markBadgeSoon = debounce(() => {
 // every marked spot on every page (the open page from memory, the others from the local database)
 async function scanMarks(){
   const out = [];
-  const all = await IDB.all('docs');
+  // (1.72) page contents only: this runs after every change that comes in from another device, and reading every
+  // note (page history and page text included, most of the local database) each time was slow on the iPad
+  const all = await IDB.prefix('c_');
   markCounts.clear();
   for(const d of all){
     if(d.kind !== 'content' || d.deleted || !d.data) continue;
@@ -1112,6 +1126,7 @@ function wheelPick(b){
     prefs[prefs.tool].s = +v; savePrefs(); renderOpts();
   } else if(k === 'em'){
     prefs.eraser.mode = prefs.eraser.mode === 'area' ? 'stroke' : 'area'; savePrefs(); renderOpts();
+    note(prefs.eraser.mode === 'area' ? 'Eraser: Partial' : 'Eraser: Stroke');
     buildWheel(); return;   // stay open to see the change
   }
   closeWheel();
@@ -1175,11 +1190,11 @@ function renderPaper(){
 }
 function setBg(patch){ cur.bg = Object.assign({}, cur.bg, patch); renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
 $('paperBtn').addEventListener('click', e => { if(!cur) return; renderPaper(); openPop('paperPop', e.currentTarget); });
-$('paperType').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur) setBg({type: b.dataset.v}); });
+$('paperType').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(!b || !cur) return; const was = cur.bg.type; setBg({type: b.dataset.v}); if(was !== b.dataset.v) note('Paper: ' + (b.textContent.trim() || b.dataset.v)); });
 $('fx').addEventListener('input', () => { const v = +$('fx').value * MM; setBg($('linkXY').checked ? {sx: v, sy: v} : {sx: v}); });
 $('fy').addEventListener('input', () => { const v = +$('fy').value * MM; setBg($('linkXY').checked && cur.bg.type !== 'lined' ? {sx: v, sy: v} : {sy: v}); });
-$('linkXY').addEventListener('change', () => { if($('linkXY').checked) setBg({sy: cur.bg.sx}); });
-$('paperDefault').addEventListener('click', () => { if(!cur) return; prefs.bg = Object.assign({}, cur.bg); savePrefs(); closePops(); toast('New pages will use this paper'); });
+$('linkXY').addEventListener('change', () => { if(!cur) return; if($('linkXY').checked) setBg({sy: cur.bg.sx}); note(onOff('Square cells', $('linkXY').checked)); });
+$('paperDefault').addEventListener('click', () => { if(!cur) return; prefs.bg = Object.assign({}, cur.bg); savePrefs(); closePops(); note('New pages will use this paper'); });
 
 /* more menu */
 $('moreBtn').addEventListener('click', e => { if(!cur) return; const d = $('mDelete'); d.classList.remove('armed'); d.textContent = 'Delete page'; openPop('morePop', e.currentTarget); });
@@ -1188,7 +1203,7 @@ $('mDelete').addEventListener('click', () => {
   if(!d.classList.contains('armed')){ d.classList.add('armed'); d.textContent = 'Tap again to delete this page'; return; }
   closePops(); if(cur) deletePage(cur.id);
 });
-$('mSnap').addEventListener('click', () => { prefs.snapLines = !prefs.snapLines; savePrefs(); $('mSnap').classList.toggle('on', prefs.snapLines); toast(prefs.snapLines ? 'Typed text snaps to answer lines' : 'Text snapping off'); });
+$('mSnap').addEventListener('click', () => { prefs.snapLines = !prefs.snapLines; savePrefs(); $('mSnap').classList.toggle('on', prefs.snapLines); note(onOff('Snap text to lines', prefs.snapLines)); });
 $('mFit').addEventListener('click', () => {
   closePops(); if(zLocked()){ zLockSay(); return; }   // (1.70)
   const b = contentBox();

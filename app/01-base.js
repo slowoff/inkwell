@@ -7,7 +7,7 @@
 // (1.61.3) pure code with no dependencies on the page lives in core/*.js (loaded before app.js; also run by the
 // fast tests in tests/unit with Node). Same names as before, so the rest of app.js is unchanged.
 const {newId, esc, clamp, MM, A4W, A4H, pad2, tsMs, tsKey, tsEq, hhmm, fmtDate, debounce} = InkUtil;
-const {ser, opOf, deser, r1, strokeShape, inkPass, strokePath, inkOutline, strokeBox} = InkGeo;
+const {ser, opOf, deser, r1, shapePoint, strokeShape, inkPass, strokePath, inkOutline, strokeBox} = InkGeo;
 const {stable, mergeKeys, mergeContent} = InkMerge;
 const {calcEval, parseFn, texPlain} = InkText;
 
@@ -27,10 +27,31 @@ function toast(msg, btnLabel, onBtn){
   $('toastText').textContent = msg;
   if(btnLabel){ b.hidden = false; b.textContent = btnLabel; b.onclick = () => { t.hidden = true; onBtn(); }; }
   else b.hidden = true;
+  const was = !t.hidden;
   t.hidden = false;
+  if(was){ t.classList.remove('pop-in'); void t.offsetWidth; }   // a new message pops in again
+  t.classList.add('pop-in');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.hidden = true, btnLabel ? 9000 : 3800);
+  noteHide();   // the bigger message is the one to read now
 }
+/* (1.72) A short, small message at the bottom when a switch or setting is changed ("Finger draws on"). Its own
+   element, so it never pushes away a message with a button (Undo, Reload, Stop); it sits just above such a message. */
+let noteTimer;
+function note(msg){
+  const n = $('note'); if(!n) return;
+  const t = $('toast'), up = t && !t.hidden ? t.offsetHeight + 8 : 0;
+  n.style.setProperty('--up', up + 'px');
+  n.textContent = msg;
+  const was = !n.hidden;
+  n.hidden = false;
+  if(was){ n.classList.remove('pop-in'); void n.offsetWidth; }
+  n.classList.add('pop-in');
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(noteHide, 1800);
+}
+function noteHide(){ clearTimeout(noteTimer); const n = $('note'); if(n) n.hidden = true; }
+const onOff = (name, on) => name + (on ? ' on' : ' off');
 
 /* =====================================================================
    Preferences and UI state (per device)

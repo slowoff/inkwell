@@ -202,7 +202,7 @@ function pinchMove(){
 /* (1.70) Zoom lock (double-tap the zoom %): no zooming by pinch, Ctrl+wheel, trackpad, Fit or the 100 % tap */
 const zLocked = () => prefs.zLock === true;
 let zLockToastAt = 0;
-function zLockSay(){ const t = Date.now(); if(t - zLockToastAt > 2500){ zLockToastAt = t; toast('Zoom is locked. Double-tap the % to unlock it'); } }
+function zLockSay(){ const t = Date.now(); if(t - zLockToastAt > 2500){ zLockToastAt = t; note('Zoom is locked · double-tap the % to unlock'); } }
 function zoomAt(sx, sy, z){
   z = clamp(z, Z_MIN, zMax());
   const [wx, wy] = toWorld(sx, sy);

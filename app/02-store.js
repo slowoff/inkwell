@@ -43,6 +43,7 @@ const Acct = {
 };
 const IDB = {
   db: null, mem: null,
+  stamp: 0,   // (1.72) goes up with every change to the docs store, so a reader can tell that nothing changed since it last looked
   async open(){
     try {
       this.db = await new Promise((res, rej) => {
@@ -96,15 +97,17 @@ const IDB = {
   },
   get(store, key){ if(this.mem) return Promise.resolve(this.mem[store].get(key)); return this.req(store, 'readonly', s => s.get(key)); },
   put(store, val, key){
+    if(store === 'docs') this.stamp++;
     if(this.mem){ this.mem[store].set(key !== undefined ? key : val.id, structuredClone(val)); return Promise.resolve(); }
     return this.req(store, 'readwrite', s => key !== undefined ? s.put(val, key) : s.put(val));
   },
-  del(store, key){ if(this.mem){ this.mem[store].delete(key); return Promise.resolve(); } return this.req(store, 'readwrite', s => s.delete(key)); },
+  del(store, key){ if(store === 'docs') this.stamp++; if(this.mem){ this.mem[store].delete(key); return Promise.resolve(); } return this.req(store, 'readwrite', s => s.delete(key)); },
   all(store){ if(this.mem) return Promise.resolve([...this.mem[store].values()]); return this.req(store, 'readonly', s => s.getAll()); },
   keys(store){ if(this.mem) return Promise.resolve([...this.mem[store].keys()]); return this.req(store, 'readonly', s => s.getAllKeys()); },
   // (1.67.3) read and write one value in a single transaction (for stores with out-of-line keys, e.g. meta), so two
   // changes at the same time cannot overwrite each other. Resolves to the new value.
   update(store, key, fn){
+    if(store === 'docs') this.stamp++;
     if(this.mem){ const v = fn(structuredClone(this.mem[store].get(key))); this.mem[store].set(key, structuredClone(v)); return Promise.resolve(v); }
     return new Promise((res, rej) => {
       const t = this.db.transaction(store, 'readwrite'), s = t.objectStore(store);

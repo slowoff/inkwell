@@ -799,13 +799,25 @@ async function renderLater(){
     list.innerHTML = '<div class="later-empty">Nothing marked yet. Pick the bookmark pen and mark anything you want to come back to; it shows up here.</div>';
     return;
   }
-  list.innerHTML = laterEntries.map((e, i) => {
+  // (1.71) "On this page" group on top: the open page's marks, top to bottom as they sit on the page; then the rest
+  const here = cur ? laterEntries.filter(e => e.pid === cur.id).sort((a, b) => (a.g.b[1] - b.g.b[1]) || (a.g.b[0] - b.g.b[0])) : [];
+  const rest = laterEntries.filter(e => !cur || e.pid !== cur.id);
+  laterEntries = here.concat(rest);
+  const row = (e, i) => {
     const near = e.items.filter(it => it.t === 'x' && boxGap(itemBoxRaw(it), e.g.b) < 60).map(it => htmlText(it.html)).join(' ').slice(0, 90);
     return `<div class="later-row" data-i="${i}">
       <button class="later-go" data-go="${i}"><canvas class="later-pv" width="208" height="120"></canvas><span class="later-txt"><b>${esc(e.page.data.title || 'Untitled page')}</b><span>${esc(pathOf(e.page))}${e.g.at ? ' · ' + esc(agoText(e.g.at)) : ''}</span>${near ? `<i>${esc(near)}</i>` : ''}</span></button>
       <button class="later-done" data-done="${i}" title="Done: remove this mark" aria-label="Done, remove mark"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></button>
     </div>`;
-  }).join('');
+  };
+  let html = '';
+  if(cur){
+    html += `<div class="later-head" id="laterHere">On this page${here.length ? ` <span>${here.length}</span>` : ''}</div>`;
+    html += here.length ? here.map((e, i) => row(e, i)).join('') : '<div class="later-empty later-none">Nothing marked on this page.</div>';
+    if(rest.length) html += `<div class="later-head">Other pages <span>${rest.length}</span></div>`;
+  }
+  html += rest.map((e, i) => row(e, here.length + i)).join('');
+  list.innerHTML = html;
   const jobs = [];
   list.querySelectorAll('.later-row').forEach(row => jobs.push(() => drawMarkPreview(row.querySelector('canvas'), laterEntries[+row.dataset.i])));
   // previews one after another: each imported page picture is decoded alone, then let go

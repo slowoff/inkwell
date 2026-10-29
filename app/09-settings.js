@@ -640,6 +640,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.71', '2026-10-29', ['Later: marks on the page you have open are listed first under "On this page" (top to bottom, as they sit on the page), then "Other pages"']],
   ['1.70.4', '2026-10-29', ['Fix: in pen mode the zoom % was still off screen on the iPad and the bar had to be dragged sideways. The bar now checks its real width on the screen and refits whenever what is in it changes, so it tightens and the zoom % stays visible']],
   ['1.70.3', '2026-10-29', ['Fix: Check for update no longer says "Updates only work in the installed app" when the update helper failed to start (for example without internet for a moment). It tries again when you tap it or come back to the app, and otherwise says why and offers Reload']],
   ['1.70.2', '2026-10-28', ['Fix: the tool bar fits on the screen again (iPad in landscape, notebook list closed): when space is short, Finger draws and Stick to text show an icon instead of their name and the gaps get smaller, so you no longer have to drag it sideways']],

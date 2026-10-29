@@ -11,7 +11,8 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # (1.72) fixed to Ubuntu 24.04: ubuntu-latest is moving to Ubuntu 26, where installing this Playwright's Chromium failed
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

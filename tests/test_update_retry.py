@@ -10,6 +10,14 @@ def check(ok, what):
     print(('ok   ' if ok else 'FAIL ') + what)
     if not ok: fails.append(what)
 
+# (1.72) the failed registration is made in the page (register() rejects while window.__swBlock is set), not by
+# blocking sw.js: the Playwright on GitHub (1.56) did not route a service worker's script, so it registered
+# there and the test failed only on GitHub
+BLOCK = """(() => { const real = ServiceWorkerContainer.prototype.register; window.__swBlock = true;
+  ServiceWorkerContainer.prototype.register = function(...a){
+    if(window.__swBlock) return Promise.reject(new TypeError('Failed to register a ServiceWorker: An unknown error occurred when fetching the script.'));
+    return real.apply(this, a); }; })()"""
+
 TOASTS = "(() => { const t = document.getElementById('toast'); return t && !t.hidden ? t.textContent : ''; })()"
 
 async def open_settings(pg):
@@ -24,11 +32,7 @@ async def main():
         b = await p.chromium.launch()
         ctx = await b.new_context(viewport={'width': 1180, 'height': 820})
         await ctx.route('**/*.supabase.co/**', lambda r: r.abort())
-        block = {'on': True}
-        async def sw(route):
-            if block['on']: await route.abort()
-            else: await route.continue_()
-        await ctx.route('**/sw.js', sw)
+        await ctx.add_init_script(BLOCK)
         pg = await ctx.new_page(); errs = []
         pg.on('pageerror', lambda e: errs.append(str(e) + ' @ ' + (e.stack or '')[:300]))
         await pg.goto(URL); await pg.wait_for_timeout(3000)
@@ -43,8 +47,7 @@ async def main():
         check(await pg.evaluate("document.getElementById('updBtn').textContent") == 'Check for update' and not await pg.evaluate("document.getElementById('updBtn').disabled"), 'button usable again')
 
         # network back: the next tap registers and checks
-        block['on'] = False
-        await pg.evaluate("document.getElementById('toast').hidden = true; window.__mark = 1")
+        await pg.evaluate("window.__swBlock = false; document.getElementById('toast').hidden = true; window.__mark = 1")
         await pg.click('#updBtn'); await pg.wait_for_timeout(5000)
         st = await pg.evaluate("navigator.serviceWorker.getRegistration().then(r => !!r)")
         t = await pg.evaluate(TOASTS)
@@ -56,13 +59,11 @@ async def main():
         # retry on coming back to the front (no tap needed)
         ctx = await b.new_context(viewport={'width': 1180, 'height': 820})
         await ctx.route('**/*.supabase.co/**', lambda r: r.abort())
-        block['on'] = True
-        await ctx.route('**/sw.js', sw)
+        await ctx.add_init_script(BLOCK)
         pg = await ctx.new_page()
         pg.on('pageerror', lambda e: errs.append(str(e) + ' @ ' + (e.stack or '')[:300]))
         await pg.goto(URL); await pg.wait_for_timeout(3000)
-        block['on'] = False
-        await pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))"); await pg.wait_for_timeout(2500)
+        await pg.evaluate("window.__swBlock = false; document.dispatchEvent(new Event('visibilitychange'))"); await pg.wait_for_timeout(2500)
         st = await pg.evaluate("navigator.serviceWorker.getRegistration().then(r => !!r)")
         check(st, 'coming back to the app retries the registration')
         await ctx.close()

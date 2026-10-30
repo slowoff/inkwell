@@ -9,7 +9,7 @@
 const navStack = [];
 function normBg(bg){
   const b = Object.assign({}, prefs.bg, bg || {});
-  if(!['blank', 'lined', 'grid', 'dots'].includes(b.type)) b.type = 'grid';
+  if(!['blank', 'lined', 'grid', 'dots', 'hex'].includes(b.type)) b.type = 'grid';
   b.sx = clamp(+b.sx || 5 * MM, 2 * MM, 30 * MM); b.sy = clamp(+b.sy || 5 * MM, 2 * MM, 30 * MM);
   return b;
 }
@@ -1180,10 +1180,11 @@ function renderPaper(){
   if(!cur) return;
   const bg = cur.bg;
   document.querySelectorAll('#paperType button').forEach(b => b.classList.toggle('on', b.dataset.v === bg.type));
-  $('fxWrap').hidden = bg.type === 'blank' || bg.type === 'lined';
+  const oneSize = bg.type === 'blank' || bg.type === 'lined' || bg.type === 'hex';
+  $('fxWrap').hidden = oneSize;
   $('fyWrap').hidden = bg.type === 'blank';
-  $('linkXY').parentElement.hidden = bg.type === 'blank' || bg.type === 'lined';
-  $('fyLbl').firstChild.textContent = bg.type === 'lined' ? 'Line height ' : 'Height ';
+  $('linkXY').parentElement.hidden = oneSize;
+  $('fyLbl').firstChild.textContent = bg.type === 'lined' ? 'Line height ' : bg.type === 'hex' ? 'Bond length ' : 'Height ';
   $('fx').value = (bg.sx / MM).toFixed(1); $('fy').value = (bg.sy / MM).toFixed(1);
   $('fxVal').textContent = (bg.sx / MM).toFixed(1) + ' mm'; $('fyVal').textContent = (bg.sy / MM).toFixed(1) + ' mm';
   $('linkXY').checked = Math.abs(bg.sx - bg.sy) < 0.01;
@@ -1192,7 +1193,7 @@ function setBg(patch){ cur.bg = Object.assign({}, cur.bg, patch); renderPaper();
 $('paperBtn').addEventListener('click', e => { if(!cur) return; renderPaper(); openPop('paperPop', e.currentTarget); });
 $('paperType').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(!b || !cur) return; const was = cur.bg.type; setBg({type: b.dataset.v}); if(was !== b.dataset.v) note('Paper: ' + (b.textContent.trim() || b.dataset.v)); });
 $('fx').addEventListener('input', () => { const v = +$('fx').value * MM; setBg($('linkXY').checked ? {sx: v, sy: v} : {sx: v}); });
-$('fy').addEventListener('input', () => { const v = +$('fy').value * MM; setBg($('linkXY').checked && cur.bg.type !== 'lined' ? {sx: v, sy: v} : {sy: v}); });
+$('fy').addEventListener('input', () => { const v = +$('fy').value * MM; setBg($('linkXY').checked && cur.bg.type !== 'lined' && cur.bg.type !== 'hex' ? {sx: v, sy: v} : {sy: v}); });
 $('linkXY').addEventListener('change', () => { if(!cur) return; if($('linkXY').checked) setBg({sy: cur.bg.sx}); note(onOff('Square cells', $('linkXY').checked)); });
 $('paperDefault').addEventListener('click', () => { if(!cur) return; prefs.bg = Object.assign({}, cur.bg); savePrefs(); closePops(); note('New pages will use this paper'); });
 

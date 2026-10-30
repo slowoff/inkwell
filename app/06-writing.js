@@ -258,12 +258,29 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 function trySnap(a){
   const p = a.pts; if(p.length < 15) return;
   const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i+1]]);
-  const s = recognize(P);
+  const s = recognize(holdTrim(P));
   if(!s) return;
   a.snapped = s.kind;
-  if(s.kind === 'line') a.lineStart = s.pts[0];
+  if(s.kind === 'line'){ a.lineStart = s.pts[0]; s.pts[1] = dragLineEnd(s.pts[0], s.pts[1]); }
   a.pts = densify(s.pts, s.closed);
   drawLive();
+}
+// (1.73) While the Pencil rests at the end of a stroke the hand still shakes a little, which left a tiny scribble at
+// the end. That scribble made the path look much longer than the line, so a straight line was not recognised.
+// Drop the points of the rest (within HOLD_STILL px of where the Pencil stopped) and the same at the start (the
+// Pencil touching down); keep where it stopped as the end point.
+function holdTrim(P){
+  if(P.length < 4) return P;
+  const r = HOLD_STILL / cam.z, last = P[P.length - 1], start = P[0];
+  let j = P.length - 1;
+  while(j > 1 && dist(P[j - 1], last) <= r) j--;
+  // the end is the middle of the shaking, not wherever the last wobble happened to be
+  let ex = 0, ey = 0; for(let k = j; k < P.length; k++){ ex += P[k][0]; ey += P[k][1]; }
+  const end = [ex / (P.length - j), ey / (P.length - j)];
+  let i = 0;
+  while(i < j - 1 && dist(P[i + 1], start) <= r * 0.6) i++;
+  const out = [start].concat(P.slice(i + 1, j), [end]);
+  return out.length >= 2 ? out : P;
 }
 function densify(V, closed){
   const step = 2 / cam.z, out = [];
@@ -303,7 +320,7 @@ function recognize(P){
   if(L < 24 / cam.z) return null;
   const a = P[0], b = P[n - 1], chord = dist(a, b);
   let maxDev = 0; for(const q of P) maxDev = Math.max(maxDev, Math.sqrt(segDist2(q[0], q[1], a[0], a[1], b[0], b[1])));
-  if(chord > 0.85 * L && maxDev < Math.max(6 / cam.z, chord * 0.06)) return {kind: 'line', pts: [a, b]};
+  if(chord > 0.8 * L && maxDev < Math.max(8 / cam.z, chord * 0.075)) return {kind: 'line', pts: [a, b]};   // (1.73) was 0.85 / 6 px / 6 %
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for(const q of P){ x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
   const bw = x1 - x0, bh = y1 - y0, diag = Math.hypot(bw, bh);

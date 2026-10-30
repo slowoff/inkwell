@@ -355,6 +355,13 @@ function fieldParts(it, ox, oy){
 function paperPath(bg, ya, yb, xa, xb){
   if(!bg || bg.type === 'blank') return '';
   let d = '';
+  if(bg.type === 'hex'){
+    hexEdges(bg.sy, xa, ya, xb, yb, (x1, y1, x2, y2) => {
+      if(Math.max(x1, x2) < xa || Math.min(x1, x2) > xb || Math.max(y1, y2) < ya || Math.min(y1, y2) > yb) return;
+      d += `M${r1(x1)} ${r1(y1)}L${r1(x2)} ${r1(y2)}`;
+    });
+    return d;
+  }
   const gx0 = Math.floor(xa / bg.sx) * bg.sx, gy0 = Math.floor(ya / bg.sy) * bg.sy;
   if(bg.type === 'dots'){
     for(let y = gy0; y <= yb; y += bg.sy) for(let x = gx0; x <= xb; x += bg.sx) d += `M${r1(x - .8)} ${r1(y)}h1.6`;

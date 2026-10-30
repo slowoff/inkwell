@@ -7,7 +7,7 @@
 // (1.61.3) pure code with no dependencies on the page lives in core/*.js (loaded before app.js; also run by the
 // fast tests in tests/unit with Node). Same names as before, so the rest of app.js is unchanged.
 const {newId, esc, clamp, MM, A4W, A4H, pad2, tsMs, tsKey, tsEq, hhmm, fmtDate, debounce} = InkUtil;
-const {ser, opOf, deser, r1, shapePoint, strokeShape, inkPass, strokePath, inkOutline, strokeBox} = InkGeo;
+const {hexEdges, ser, opOf, deser, r1, shapePoint, strokeShape, inkPass, strokePath, inkOutline, strokeBox} = InkGeo;
 const {stable, mergeKeys, mergeContent} = InkMerge;
 const {calcEval, parseFn, texPlain} = InkText;
 

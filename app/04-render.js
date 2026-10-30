@@ -199,6 +199,17 @@ function drawBg(){
   const stepX = bg.sx * kx, stepY = bg.sy * ky;
   const v = viewRect();
   const x0 = Math.floor(v[0] / stepX) * stepX, y0 = Math.floor(v[1] / stepY) * stepY;
+  if(bg.type === 'hex'){
+    // (1.73) chemistry hexagons; zoomed far out the cells double in size so the lines never turn into a grey wash
+    let s = bg.sy;
+    while(s * cam.z < 6) s *= 2;
+    bgCtx.strokeStyle = tokens.rule; bgCtx.lineWidth = 1;
+    bgCtx.beginPath();
+    const z = cam.z, ox = cam.ox, oy = cam.oy;
+    hexEdges(s, v[0], v[1], v[2], v[3], (x1, y1, x2, y2) => { bgCtx.moveTo(x1 * z + ox, y1 * z + oy); bgCtx.lineTo(x2 * z + ox, y2 * z + oy); });
+    bgCtx.stroke();
+    return;
+  }
   if(bg.type === 'dots'){
     bgCtx.fillStyle = tokens.ruleStrong;
     const r = clamp(cam.z * 1.1, 0.8, 1.8);

@@ -193,5 +193,23 @@ function strokeBox(it){
   return [x0 - m, y0 - m, x1 + m, y1 + m];
 }
 
-return {encPts, decPts, ser, opOf, deser, r1, shapePoint, strokeShape, fillPath, inkPass, strokePath, inkOutline, inkPieces, strokeBox};
+// (1.73) Chemistry paper: a honeycomb of pointy-top hexagons with side s (one bond), anchored at world 0,0, so zig-zag
+// chains run sideways and rings sit upright. Calls seg(x1, y1, x2, y2) once per edge (no edge twice) for every hexagon
+// that touches the rectangle xa..xb, ya..yb (world units). Each hexagon draws its upper-left, upper-right and left edge;
+// its neighbours draw the rest.
+function hexEdges(s, xa, ya, xb, yb, seg){
+  if(!(s > 0)) return;
+  const w = Math.sqrt(3) * s, h = w / 2, dy = 1.5 * s;
+  for(let r = Math.floor(ya / dy) - 1, r1 = Math.ceil(yb / dy) + 1; r <= r1; r++){
+    const cy = r * dy, off = (r & 1) ? h : 0;
+    for(let c = Math.floor((xa - off) / w) - 1, c1 = Math.ceil((xb - off) / w) + 1; c <= c1; c++){
+      const cx = c * w + off;
+      seg(cx - h, cy - s / 2, cx, cy - s);
+      seg(cx, cy - s, cx + h, cy - s / 2);
+      seg(cx - h, cy - s / 2, cx - h, cy + s / 2);
+    }
+  }
+}
+
+return {hexEdges, encPts, decPts, ser, opOf, deser, r1, shapePoint, strokeShape, fillPath, inkPass, strokePath, inkOutline, inkPieces, strokeBox};
 });

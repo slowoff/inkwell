@@ -279,6 +279,15 @@ function startTool(e, sx, sy, pr){
   }
   drawLive();
 }
+const HOLD_STILL = 9;   // screen px
+// (1.73) Once a held stroke has turned into a straight line, keep holding and drag: the line's start stays put and its
+// end follows the Pencil, like the Line tool, clicking into 15° steps (0, 45, 90 ...) when close (Snap to angles).
+function dragLineEnd(a, b){
+  let len = Math.hypot(b[0] - a[0], b[1] - a[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+  const sn = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
+  if(prefs.angleSnap !== false && Math.abs(sn - ang) < 0.06) ang = sn;
+  return [a[0] + len * Math.cos(ang), a[1] + len * Math.sin(ang)];
+}
 function armHold(){
   clearTimeout(act.hold);
   const a = act;
@@ -302,7 +311,7 @@ function toolMove(e){
     if(st >= 1.5){ act.trav = (act.trav || 0) + st; act.lp = [sx, sy]; if(act.trav > 8) clearTimeout(act.wheelT); }
     if(act.kind === 'stroke'){
       if(act.snapped){
-        if(act.snapped === 'line'){ act.pts = densify([act.lineStart, toWorld(sx, sy)], false); }
+        if(act.snapped === 'line'){ act.pts = densify([act.lineStart, dragLineEnd(act.lineStart, toWorld(sx, sy))], false); }
         continue;
       }
       let X = sx, Y = sy;
@@ -311,7 +320,11 @@ function toolMove(e){
       act.last = [X, Y];
       act.pts.push(...toWorld(X, Y), pr);
       act.lastEv = [ev, sx, sy];
-      if(Math.hypot(sx - act.anchor[0], sy - act.anchor[1]) > 3){ act.anchor = [sx, sy]; armHold(); }
+      // (1.73) "holding still" allows normal hand tremor: the wait only starts over once the Pencil leaves a circle of
+      // HOLD_STILL px around where it stopped (was 3 px, so lines only straightened when the hand was perfectly still)
+      // The circle's centre follows the average of the points inside it, so it settles in the middle of the shaking.
+      if(Math.hypot(sx - act.anchor[0], sy - act.anchor[1]) > HOLD_STILL){ act.anchor = [sx, sy]; act.ancN = 1; armHold(); }
+      else { const k = 1 / Math.min(++act.ancN || (act.ancN = 2), 24); act.anchor = [act.anchor[0] + (sx - act.anchor[0]) * k, act.anchor[1] + (sy - act.anchor[1]) * k]; }
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
     else if(act.kind === 'space'){ moveSpace(toWorld(sx, sy)[1] - act.y0); }
     else if(act.kind === 'lasso'){ if(act.box){ act.poly = boxPoly(act.sx, act.sy, sx, sy); act.b1 = [sx, sy]; } else act.poly.push(sx, sy); }

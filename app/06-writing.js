@@ -321,6 +321,11 @@ function recognize(P){
   const a = P[0], b = P[n - 1], chord = dist(a, b);
   let maxDev = 0; for(const q of P) maxDev = Math.max(maxDev, Math.sqrt(segDist2(q[0], q[1], a[0], a[1], b[0], b[1])));
   if(chord > 0.75 * L && maxDev < Math.max(11 / cam.z, chord * 0.1)) return {kind: 'line', pts: [a, b]};   // (1.73.1) more forgiving; 1.73: 0.8 / 8 px / 7.5 %, before: 0.85 / 6 px / 6 %
+  // (1.73.2) Rafael's iPad (screenshot): real held lines are bent, slightly curved, or have a little hook where the
+  // Pencil touched down, and many stayed as drawn or became bent lines. Holding the Pencil means "make this a shape",
+  // so a stroke that mostly goes one way (start to end at least 55 % of the path) becomes a straight line from where
+  // it started to where the Pencil rests, unless it has real corners (see below) or closes into a shape.
+  const open = chord >= 0.55 * L;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for(const q of P){ x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
   const bw = x1 - x0, bh = y1 - y0, diag = Math.hypot(bw, bh);
@@ -343,12 +348,16 @@ function recognize(P){
     if(k >= 5 && k <= 8) return {kind: 'poly', pts: V, closed: true};
     return null;
   }
-  const V = rdp(P, Math.max(5 / cam.z, diag * 0.05));
-  if(V.length >= 3 && V.length <= 5){
-    let dev = 0;
-    for(const q of P){ let m = Infinity; for(let i = 0; i < V.length - 1; i++) m = Math.min(m, segDist2(q[0], q[1], V[i][0], V[i][1], V[i+1][0], V[i+1][1])); dev = Math.max(dev, Math.sqrt(m)); }
-    if(dev < diag * 0.06) return {kind: 'polyline', pts: V};
+  // (1.73.2) Open strokes never become bent lines any more (letters like m, n, w and zig-zags were being turned into
+  // sharp-cornered lines). A stroke with a real corner (a turn of 35° or more between two legs that are not tiny
+  // hooks) stays as drawn; anything else that mostly goes one way becomes a straight line.
+  const V = rdp(P, Math.max(5 / cam.z, diag * 0.05)), leg = Math.max(18 / cam.z, diag * 0.12);
+  for(let i = 1; i < V.length - 1; i++){
+    const t1 = Math.atan2(V[i][1] - V[i-1][1], V[i][0] - V[i-1][0]), t2 = Math.atan2(V[i+1][1] - V[i][1], V[i+1][0] - V[i][0]);
+    let d = Math.abs(t2 - t1); if(d > Math.PI) d = 2 * Math.PI - d;
+    if(d >= 0.61 && dist(V[i-1], V[i]) >= leg && dist(V[i], V[i+1]) >= leg) return null;
   }
+  if(open) return {kind: 'line', pts: [a, b]};
   return null;
 }
 function ellipse(cx, cy, rx, ry){

@@ -139,6 +139,50 @@ async def main():
         ln = math.hypot(P[-2] - P[1], P[-3] - P[0])
         check(abs(ln - 400) < 6, f'drag makes the line longer than drawn (160 -> {ln:.0f})')
         await page.evaluate("__inkwell.prefs.angleSnap = true")
+        # 1.73.2: real strokes from Rafael's iPad: curved, gently bent, hooked at the start -> straight; a sharp V keeps its corner
+        async def held(pts, ox, oy):
+            await page.mouse.move(ox + pts[0][0], oy + pts[0][1]); await page.mouse.down()
+            for (x, y) in pts[1:]: await page.mouse.move(ox + x, oy + y); await page.wait_for_timeout(8)
+            ex, ey = pts[-1]
+            for _ in range(36): await page.mouse.move(ox + ex + rnd.uniform(-2, 2), oy + ey + rnd.uniform(-2, 2)); await page.wait_for_timeout(25)
+            await page.mouse.up(); await page.wait_for_timeout(250)
+            return (await page.evaluate(STROKES))[-1]
+        def verts(P):
+            pts = [(P[i], P[i + 1]) for i in range(0, len(P), 3)]
+            n = 0
+            for i in range(1, len(pts) - 1):
+                a = math.atan2(pts[i][1] - pts[i-1][1], pts[i][0] - pts[i-1][0]); b = math.atan2(pts[i+1][1] - pts[i][1], pts[i+1][0] - pts[i][0])
+                d = abs(b - a); d = 2 * math.pi - d if d > math.pi else d
+                if d > 0.3: n += 1
+            return n
+        ox, oy = x0 + 650, y0
+        arc = [(4 * i, -0.6 * 4 * i + 26 * math.sin(math.pi * i / 50)) for i in range(51)]   # curved, bulge ~13 % of chord
+        P = await held(arc, ox, oy + 140)
+        check(wobble(P) < 0.5, f'curved held line -> straight (wobble {wobble(P):.2f})')
+        bent = [(4 * i, 0) for i in range(26)] + [(100 + 4 * i * math.cos(0.35), -4 * i * math.sin(0.35)) for i in range(1, 26)]   # 20 deg bend
+        P = await held(bent, ox, oy + 260)
+        check(wobble(P) < 0.5 and verts(P) == 0, f'gently bent held line -> straight, no kink (wobble {wobble(P):.2f}, kinks {verts(P)})')
+        hook = [(6 * math.cos(a), 6 * math.sin(a)) for a in [3.0, 2.4, 1.8, 1.2, 0.6, 0.0]] + [(6 + 4 * i, -3 * i) for i in range(1, 46)]
+        P = await held(hook, ox, oy + 420)
+        check(wobble(P) < 0.5, f'held line with a hook at the start -> straight (wobble {wobble(P):.2f})')
+        vee = [(3 * i, 3 * i) for i in range(31)] + [(90 + 3 * i, 90 - 3 * i) for i in range(1, 31)]
+        P = await held(vee, ox - 300, oy + 520)
+        check(wobble(P) > 50, f'held V stays as drawn, not straightened (wobble {wobble(P):.1f})')
+        zz = [(0, 0), (60, -50), (10, -40), (90, -90), (40, -80), (120, -130)]
+        zpts = []
+        for k in range(len(zz) - 1):
+            for i in range(10): zpts.append((zz[k][0] + (zz[k+1][0] - zz[k][0]) * i / 10, zz[k][1] + (zz[k+1][1] - zz[k][1]) * i / 10))
+        zpts.append(zz[-1])
+        n0 = len(await page.evaluate(STROKES))
+        P = await held(zpts, ox - 120, oy + 680)
+        check(verts(P) >= 4 and wobble(P) > 10, f'held zig-zag stays as drawn ({verts(P)} turns, wobble {wobble(P):.1f})')
+        mm = [(0, 0), (0, -40), (20, 0), (40, -40), (40, 0), (60, -40), (60, 0)]
+        mp = []
+        for k in range(len(mm) - 1):
+            for i in range(8): mp.append((mm[k][0] + (mm[k+1][0] - mm[k][0]) * i / 8, mm[k][1] + (mm[k+1][1] - mm[k][1]) * i / 8))
+        mp.append(mm[-1])
+        P = await held(mp, ox + 80, oy + 680)
+        check(verts(P) >= 4, f'held letter stays as written, no sharp-cornered copy ({verts(P)} turns)')
         # lifting right away keeps the hand-drawn line
         await page.mouse.move(x0, y0 + 330); await page.mouse.down()
         for i in range(1, 61): await page.mouse.move(x0 + 4 * i, y0 + 330 + 3 * math.sin(i / 5)); await page.wait_for_timeout(8)

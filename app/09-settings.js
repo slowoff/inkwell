@@ -657,6 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.73.1', '2026-10-30', ['Hold to straighten is more forgiving: more shaking allowed while you rest the Pencil, wobblier lines still turn straight, and dragging the straight line clicks into angles from further away (with Snap to angles on)']],
   ['1.73', '2026-10-30', ['New paper for chemistry: Paper → Hex gives a honeycomb of hexagons, so rings and zig-zag chains line up. The slider sets the bond length. It also shows when printing and in exported PDFs', 'Hold to straighten works with a normal hand: a little shaking while you rest the Pencil no longer stops a line from turning straight, and the line ends where you rested. Keep holding after it turns straight and drag to move its end, like the Line tool (clicks into 0°, 15°, 45°, 90° … with Snap to angles)']],
   ['1.72.1', '2026-10-29', ['Finger draws: new icon, a finger pointing down and drawing a wavy line']],
   ['1.72', '2026-10-29', [

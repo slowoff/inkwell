@@ -320,7 +320,7 @@ function recognize(P){
   if(L < 24 / cam.z) return null;
   const a = P[0], b = P[n - 1], chord = dist(a, b);
   let maxDev = 0; for(const q of P) maxDev = Math.max(maxDev, Math.sqrt(segDist2(q[0], q[1], a[0], a[1], b[0], b[1])));
-  if(chord > 0.8 * L && maxDev < Math.max(8 / cam.z, chord * 0.075)) return {kind: 'line', pts: [a, b]};   // (1.73) was 0.85 / 6 px / 6 %
+  if(chord > 0.75 * L && maxDev < Math.max(11 / cam.z, chord * 0.1)) return {kind: 'line', pts: [a, b]};   // (1.73.1) more forgiving; 1.73: 0.8 / 8 px / 7.5 %, before: 0.85 / 6 px / 6 %
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for(const q of P){ x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
   const bw = x1 - x0, bh = y1 - y0, diag = Math.hypot(bw, bh);

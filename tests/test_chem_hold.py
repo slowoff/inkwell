@@ -111,6 +111,34 @@ async def main():
         s = await page.evaluate(STROKES)
         P = s[-1]; ang = math.degrees(math.atan2(P[-2] - P[1], P[-3] - P[0])); ln = math.hypot(P[-2] - P[1], P[-3] - P[0])
         check(wobble(P) < 0.5 and abs(ang - 45) < 0.05 and abs(ln - math.hypot(200, 196)) < 6, f'drag after straightening: straight, end follows the Pencil, clicks to 45 deg ({ang:.2f} deg, len {ln:.0f})')
+        # 1.73.1: more forgiving
+        async def hold_drag(y, tx, ty, ox=330):
+            X = x0 + ox
+            await page.mouse.move(X, y); await page.mouse.down()
+            for i in range(1, 41): await page.mouse.move(X + 4 * i, y + 2 * math.sin(i / 4)); await page.wait_for_timeout(8)
+            for _ in range(36): await page.mouse.move(X + 160 + rnd.uniform(-2, 2), y + rnd.uniform(-2, 2)); await page.wait_for_timeout(25)
+            for i in range(1, 21): await page.mouse.move(X + 160 + (tx - 160) * i / 20, y + ty * i / 20); await page.wait_for_timeout(16)
+            await page.mouse.up(); await page.wait_for_timeout(250)
+            P = (await page.evaluate(STROKES))[-1]
+            return P, math.degrees(math.atan2(P[-2] - P[1], P[-3] - P[0]))
+        await shaky_line(page, x0 + 330, y0, shake=7)
+        s = await page.evaluate(STROKES)
+        check(wobble(s[-1]) < 0.5, f'7 px tremor while resting: straightened (wobble {wobble(s[-1]):.2f})')
+        await page.mouse.move(x0 + 330, y0 + 120); await page.mouse.down()
+        for i in range(1, 61): await page.mouse.move(x0 + 330 + 4 * i, y0 + 120 + 9 * math.sin(i / 7)); await page.wait_for_timeout(8)
+        for _ in range(36): await page.mouse.move(x0 + 570 + rnd.uniform(-2, 2), y0 + 120 + 9 * math.sin(60 / 7) + rnd.uniform(-2, 2)); await page.wait_for_timeout(25)
+        await page.mouse.up(); await page.wait_for_timeout(250)
+        s = await page.evaluate(STROKES)
+        check(wobble(s[-1]) < 0.5, f'wobbly line (9 px waves over 240 px): straightened (wobble {wobble(s[-1]):.2f})')
+        P, ang = await hold_drag(y0 + 230, 200, 168)   # ~40 deg
+        check(abs(ang - 45) < 0.05, f'snap on: drag at ~40 deg clicks to 45 ({ang:.2f})')
+        await page.evaluate("__inkwell.prefs.angleSnap = false")
+        P, ang = await hold_drag(y0 + 330, 200, 168)
+        check(abs(ang - 40) < 1.5, f'snap off: drag keeps ~40 deg ({ang:.2f})')
+        P, ang = await hold_drag(y0 + 430, 400, 0, ox=20)
+        ln = math.hypot(P[-2] - P[1], P[-3] - P[0])
+        check(abs(ln - 400) < 6, f'drag makes the line longer than drawn (160 -> {ln:.0f})')
+        await page.evaluate("__inkwell.prefs.angleSnap = true")
         # lifting right away keeps the hand-drawn line
         await page.mouse.move(x0, y0 + 330); await page.mouse.down()
         for i in range(1, 61): await page.mouse.move(x0 + 4 * i, y0 + 330 + 3 * math.sin(i / 5)); await page.wait_for_timeout(8)

@@ -279,13 +279,13 @@ function startTool(e, sx, sy, pr){
   }
   drawLive();
 }
-const HOLD_STILL = 9;   // screen px
+const HOLD_STILL = 13;   // screen px (1.73: 9, 1.73.1: 13)
 // (1.73) Once a held stroke has turned into a straight line, keep holding and drag: the line's start stays put and its
 // end follows the Pencil, like the Line tool, clicking into 15° steps (0, 45, 90 ...) when close (Snap to angles).
 function dragLineEnd(a, b){
   let len = Math.hypot(b[0] - a[0], b[1] - a[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
   const sn = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
-  if(prefs.angleSnap !== false && Math.abs(sn - ang) < 0.06) ang = sn;
+  if(prefs.angleSnap !== false && Math.abs(sn - ang) < 0.1) ang = sn;   // (1.73.1) within ~6° (the Line tool: ~3.5°)
   return [a[0] + len * Math.cos(ang), a[1] + len * Math.sin(ang)];
 }
 function armHold(){

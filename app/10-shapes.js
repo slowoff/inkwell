@@ -89,12 +89,12 @@ function drawPickPreview(a){
    Shapes (inserted as ink strokes, so lasso, recolour, eraser and sync all just work)
    ===================================================================== */
 function polyPts(V, closed, step = 2.5){
-  const out = [], pts = closed ? V.concat([V[0]]) : V;
+  const pr = shapePr(), out = [], pts = closed ? V.concat([V[0]]) : V;
   for(let i = 0; i < pts.length - 1; i++){
     const a = pts[i], b = pts[i + 1], n = Math.max(1, Math.ceil(dist(a, b) / step));
-    for(let k = 0; k < n; k++) out.push(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n, 0.55);
+    for(let k = 0; k < n; k++) out.push(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n, pr);
   }
-  const l = pts[pts.length - 1]; out.push(l[0], l[1], 0.55);
+  const l = pts[pts.length - 1]; out.push(l[0], l[1], pr);
   return out;
 }
 function arrowHead(from, tip, size){

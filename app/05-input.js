@@ -12,6 +12,17 @@ const touches = new Map();
 let penDown = false, spaceDown = false, selDrag = null, penAt = -1e9;
 
 const penWidth = () => 0.6 * Math.pow(25, prefs.pen.s / 100);
+/* (1.73.4) Shapes used a fixed pressure while Pencil ink gets thinner with a light touch, so at the same pen size shapes
+   came out thicker than handwriting. Shapes now use how hard this person really writes: the typical pressure of a Pencil
+   stroke, averaged over recent strokes (prefs.penPr, per device; no Pencil used yet = the old 0.55). */
+const midPressure = p => { const a = []; for(let i = 2; i < p.length; i += 3) a.push(p[i]); a.sort((x, y) => x - y); return a[a.length >> 1]; };
+const shapePr = () => prefs.penPr > 0 && prefs.penPr <= 1 ? prefs.penPr : 0.55;
+function notePenPr(a){
+  if(!a.isPen || a.snapped || a.edge || a.hl || a.pts.length < 24) return;
+  const m = midPressure(a.pts);
+  prefs.penPr = +(prefs.penPr > 0 ? prefs.penPr * 0.7 + m * 0.3 : m).toFixed(3);
+  savePrefs();
+}
 const hlWidth = () => 6 + prefs.hl.s * 0.44;
 const eraserRadius = () => 4 + prefs.eraser.s * 0.5;
 const markWidth = () => 6 + prefs.mark.s * 0.44;
@@ -243,7 +254,7 @@ function startTool(e, sx, sy, pr){
   closePops();
   const [wx, wy] = toWorld(sx, sy);
   const tool = prefs.tool;
-  act = {tool, id: e.pointerId, sx, sy, moved: false, target: e.target, anchor: [sx, sy]};
+  act = {tool, id: e.pointerId, sx, sy, moved: false, target: e.target, anchor: [sx, sy], isPen: e.pointerType === 'pen'};
   TS.clear();
   if(pick){
     clearSel(); act.kind = 'pick'; act.w0 = [wx, wy]; act.w1 = null;
@@ -342,7 +353,7 @@ function toolMove(e){
     if(st >= 1.5){ act.trav = (act.trav || 0) + st; act.lp = [sx, sy]; if(act.trav > 8) clearTimeout(act.wheelT); }
     if(act.kind === 'stroke'){
       if(act.snapped){
-        if(act.snapped === 'line'){ act.pts = densify([act.lineStart, dragLineEnd(act.lineStart, toWorld(sx, sy))], false); }
+        if(act.snapped === 'line'){ act.pts = densify([act.lineStart, dragLineEnd(act.lineStart, toWorld(sx, sy))], false, act.snapPr); }
         continue;
       }
       let X = sx, Y = sy;
@@ -574,6 +585,7 @@ function endTool(e){
   clearLive(); Live.free();
   if(a.kind === 'stroke'){
     PenGuard.flush(a);
+    notePenPr(a);
     Scribe.release();
     if(a.pts.length < 3) return;
     const it = {t: 's', id: 's' + newId(), c: a.c, w: a.w, hl: a.hl, p: a.pts};

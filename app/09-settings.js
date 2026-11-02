@@ -657,6 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.73.4', '2026-11-02', ['Fix: shapes and straightened lines now have the same thickness as your Pencil writing, also with a light touch']],
   ['1.73.3', '2026-11-02', ['Fix: a curve drawn in one go could get a straight piece laid over part of it. A Pencil point that jumps back and returns at once is now ignored']],
   ['1.73.2', '2026-10-30', ['Fix: hold to straighten now straightens lines that are curved, bent or have a small hook at the start (before they often stayed as drawn or became a bent line). Strokes with corners (letters like m or w, zig-zags) are never straightened any more, they stay as you drew them']],
   ['1.73.1', '2026-10-30', ['Hold to straighten is more forgiving: more shaking allowed while you rest the Pencil, wobblier lines still turn straight, and dragging the straight line clicks into angles from further away (with Snap to angles on)']],

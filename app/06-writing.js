@@ -262,7 +262,8 @@ function trySnap(a){
   if(!s) return;
   a.snapped = s.kind;
   if(s.kind === 'line'){ a.lineStart = s.pts[0]; s.pts[1] = dragLineEnd(s.pts[0], s.pts[1]); }
-  a.pts = densify(s.pts, s.closed);
+  a.snapPr = a.isPen ? midPressure(p) : shapePr();   // the shape keeps the thickness this stroke was written with
+  a.pts = densify(s.pts, s.closed, a.snapPr);
   drawLive();
 }
 // (1.73) While the Pencil rests at the end of a stroke the hand still shakes a little, which left a tiny scribble at
@@ -282,14 +283,14 @@ function holdTrim(P){
   const out = [start].concat(P.slice(i + 1, j), [end]);
   return out.length >= 2 ? out : P;
 }
-function densify(V, closed){
+function densify(V, closed, pr = 0.55){
   const step = 2 / cam.z, out = [];
   const pts = closed ? V.concat([V[0]]) : V;
   for(let i = 0; i < pts.length - 1; i++){
     const a = pts[i], b = pts[i + 1], d = dist(a, b), n = Math.max(1, Math.ceil(d / step));
-    for(let k = 0; k < n; k++) out.push(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n, 0.55);
+    for(let k = 0; k < n; k++) out.push(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n, pr);
   }
-  const l = pts[pts.length - 1]; out.push(l[0], l[1], 0.55);
+  const l = pts[pts.length - 1]; out.push(l[0], l[1], pr);
   return out;
 }
 function rdp(P, eps){

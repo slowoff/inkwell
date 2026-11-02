@@ -210,7 +210,10 @@ html,body{background:var(--paper)}
    the picture layer gets its own GPU layer while it moves, and the ink canvas (painted with the page) ended up below it.
    Every drawing layer above the pictures gets its own GPU layer, so their order stays as written above (the picture
    layer itself is left alone: pinned for good, a long imported script would use a lot of memory). */
-#hlm,#ink,#worldFront,#live{will-change:transform}
+#hlm,#ink,#live{will-change:transform}
+/* (1.73.6) only on iPad/iPhone Safari: on a PC this hint made Chrome draw text boxes on the page soft (a layer drawn once,
+   then moved by fractions of a pixel) */
+@supports (-webkit-touch-callout:none){#worldFront{will-change:transform}}
 .it{position:absolute}
 .it-img{display:block;border-radius:2px;box-shadow:0 0 0 1px var(--line),0 2px 8px rgba(0,0,0,.08);background:#fff}
 .it-img.doc img{transition:filter .2s}
@@ -248,6 +251,10 @@ select.pf-ls option:checked{background:#9fbbe8}
 .it-text.on-paper:empty::before{color:#8a94a0}
 .it-text.lh[contenteditable="true"]{background:transparent}
 .it-text.lh h1,.it-text.lh h2,.it-text.lh li,.it-text.lh p,.it-text.lh div{line-height:inherit}
+/* (1.73.6) Text on ruled lines stays on them whatever its size: a size or style on part of the text used to make each
+   line a little taller than the ruling, so the text slid further off the lines with every row. With line-height 0 these
+   inline parts cannot change a row's height, and they stand on the same baseline as the box's own text. */
+.it-text.lh :where(span,font,b,i,u,s,em,strong,mark,a,sub,sup,code){line-height:0}
 .it-text ul,.it-text ol{margin:0;padding-left:24px}
 .it-text ul.check{list-style:none;padding-left:2px}
 .it-text ul.check li{position:relative;padding-left:28px}

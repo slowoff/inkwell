@@ -40,7 +40,8 @@ async def main():
         loaded = await page.evaluate("!!document.querySelector('[data-id=pic] img')")
         check(loaded, 'picture loaded')
         lay = await page.evaluate("['hlm','ink','worldFront','live','worldBack'].map(id => getComputedStyle(document.getElementById(id)).willChange)")
-        check(lay[:4] == ['transform'] * 4 and lay[4] == 'auto', f'drawing layers above pictures have their own layer, picture layer not pinned ({lay})')
+        webkit = await page.evaluate("CSS.supports('-webkit-touch-callout', 'none')")
+        check(lay[0] == lay[1] == lay[3] == 'transform' and lay[2] == ('transform' if webkit else 'auto') and lay[4] == 'auto', f'drawing layers above pictures have their own layer, text layer only on iPad Safari, picture layer not pinned ({lay})')
         sx, sy = st[0] + 300, st[1] + 300
         check(await blue_at(page, sx, sy) > 0.2, 'ink on the picture visible at rest')
         # mid pan (finger down and moving, not lifted)

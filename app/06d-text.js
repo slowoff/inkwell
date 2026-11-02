@@ -143,6 +143,9 @@ worldFront.addEventListener('click', e => {
 // (1.48) Tab in a text box types a tab (jumps to the next tab stop) instead of leaving the box; Shift+Tab removes
 // the tab right before the cursor. The tab sits in a white-space:pre span, which cleanHTML keeps.
 worldFront.addEventListener('keydown', e => {
+  // (1.74) take the first spelling suggestion from the keyboard. Ctrl+Space always works; Ctrl+Tab only where the browser
+  // passes it on (a normal Chrome tab keeps it for switching tabs).
+  if(editing && e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && (e.key === 'Tab' || e.key === ' ' || e.code === 'Space') && Spell.acceptFirst()){ e.preventDefault(); return; }
   if(!editing || e.key !== 'Tab' || e.ctrlKey || e.metaKey || e.altKey) return;
   e.preventDefault();
   if(e.shiftKey){
@@ -629,9 +632,18 @@ const Spell = {
     const r = await Spell.call({op: 'suggest', lang, word: x.w});
     if(Spell.at !== x) return;
     const list = (r.list || []).slice(0, 4);
-    bar.innerHTML = (list.length ? list.map(w => `<button data-fix="${esc(w)}">${esc(w)}</button>`).join('') : '<span class="spell-none">No suggestions</span>')
+    bar.innerHTML = (list.length ? list.map(w => `<button data-fix="${esc(w)}"${w === list[0] ? ' title="Ctrl+Space"' : ''}>${esc(w)}</button>`).join('') : '<span class="spell-none">No suggestions</span>')
       + '<button class="spell-add" data-add>Add to dictionary</button>';
     Spell.place();
+    if(Spell.takeFirst === x){ Spell.takeFirst = null; if(list.length) Spell.fix(list[0]); }
+  },
+  // (1.74) keyboard: use the first suggestion of the bar that is showing; true if the bar was showing
+  acceptFirst(){
+    const bar = $('spellBar'); if(bar.hidden || !Spell.at) return false;
+    const b = bar.querySelector('[data-fix]');
+    if(b) Spell.fix(b.dataset.fix);
+    else if(bar.querySelector('.spell-wait')) Spell.takeFirst = Spell.at;   // still looking: take it when it arrives
+    return true;
   },
   place(){
     const bar = $('spellBar'), x = Spell.at;

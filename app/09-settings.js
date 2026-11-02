@@ -657,6 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.74', '2026-11-02', ['Spelling: Ctrl+Space takes the first suggestion. Ctrl+Tab does the same where the browser allows it (a normal Chrome tab keeps Ctrl+Tab for switching tabs)']],
   ['1.73.6', '2026-11-02', ['Fix: text on ruled lines stays on the lines after you change its size (each row used to get a little taller than the ruling)','Fix: text boxes on the page look sharp on a PC when not selected']],
   ['1.73.5', '2026-11-02', ['Fix: curves no longer get a straight piece across them. The iPad sometimes sends the same Pencil points twice, and the line went back and drew them again. Repeats are now ignored']],
   ['1.73.4', '2026-11-02', ['Fix: shapes and straightened lines now have the same thickness as your Pencil writing, also with a light touch']],

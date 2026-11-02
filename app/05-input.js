@@ -299,37 +299,18 @@ function dragLineEnd(a, b){
   if(prefs.angleSnap !== false && Math.abs(sn - ang) < 0.1) ang = sn;   // (1.73.1) within ~6° (the Line tool: ~3.5°)
   return [a[0] + len * Math.cos(ang), a[1] + len * Math.sin(ang)];
 }
-/* (1.73.3) Rafael's iPad: a curve drawn in one go sometimes got a straight piece laid over part of it (the Pencil point
-   seemed to jump back along the stroke and return at once). A Pencil point that leaps far more than the steps before it
-   waits: if the Pencil's next points return to where it was, the leap was a glitch and is dropped; otherwise it was
-   real and is kept (at most 3 points late). All in screen px, so zoom does not matter. */
-const PenGuard = {
-  add(a, q){
-    const l = a.last, dx = q[0] - l[0], dy = q[1] - l[1];
-    (a.steps || (a.steps = [])).push(Math.hypot(dx, dy)); if(a.steps.length > 6) a.steps.shift();
-    a.dir = [dx, dy];
-    a.last = [q[0], q[1]];
-    a.pts.push(...toWorld(q[0], q[1]), q[2]);
-  },
-  take(a, X, Y, pr){
-    const l = a.last, d = Math.hypot(X - l[0], Y - l[1]);
-    if(a.sus){
-      if(d < 0.4 * a.sus.d){ a.sus = null; return [[X, Y, pr]]; }   // back where it was: the leap was a glitch
-      a.sus.q.push([X, Y, pr]);
-      if(a.sus.q.length < 3) return [];
-      const out = a.sus.q; a.sus = null; return out;                 // it did not come back: the leap was real
-    }
-    const st = a.steps;
-    if(st && st.length >= 3){
-      const med = st.slice().sort((p, q) => p - q)[st.length >> 1];
-      const back = a.dir[0] * (X - l[0]) + a.dir[1] * (Y - l[1]) < 0;
-      if(d > Math.max(12, (back ? 2.5 : 6) * med)){ a.sus = {d, back, q: [[X, Y, pr]]}; return []; }
-    }
-    return [[X, Y, pr]];
-  },
-  // pen lifted with a leap still waiting: forward points are real, a jump back is not
-  flush(a){ if(a.sus && !a.sus.back && !a.snapped) for(const q of a.sus.q) this.add(a, q); a.sus = null; }
-};
+/* (1.73.5) Rafael's iPad (read from his saved strokes): iPadOS sometimes hands over Pencil points it already delivered.
+   getCoalescedEvents repeats recent points with exactly the same coordinates, so the stroke jumped back and went over
+   the same stretch again, which drew a straight piece across every curve. A point with exactly the coordinates of a
+   recent point of this stroke is one of those repeats. (Replaces 1.73.3's PenGuard, which guessed from step sizes and
+   missed most of them.) */
+const SEEN_MAX = 32;
+function repeatedPoint(a, sx, sy){
+  const k = sx + '|' + sy, s = a.seen || (a.seen = [a.sx + '|' + a.sy]);
+  if(s.includes(k)) return true;
+  s.push(k); if(s.length > SEEN_MAX) s.shift();
+  return false;
+}
 function armHold(){
   clearTimeout(act.hold);
   const a = act;
@@ -342,6 +323,7 @@ function toolMove(e){
   const list = evs && evs.length ? evs : [e];
   for(const ev of list){
     const [sx, sy] = pt(ev);
+    if(act.kind === 'stroke' && ev.pointerType === 'pen' && repeatedPoint(act, sx, sy)) continue;
     const pr = ev.pointerType === 'pen' ? (ev.pressure || 0.5) : 0.55;
     if(!act.moved && Math.hypot(sx - act.sx, sy - act.sy) > 4) act.moved = true;
     if(!act.far && Math.hypot(sx - act.sx, sy - act.sy) > 9){ act.far = true; clearTimeout(act.wheelT); }
@@ -359,9 +341,9 @@ function toolMove(e){
       let X = sx, Y = sy;
       if(act.edge) [X, Y] = projectEdge(act.edge, sx, sy, act.w);
       if(Math.hypot(X - act.last[0], Y - act.last[1]) < 0.8) continue;
-      const fresh = ev.pointerType === 'pen' && !act.edge ? PenGuard.take(act, X, Y, pr) : [[X, Y, pr]];
-      for(const q of fresh) PenGuard.add(act, q);
-      if(fresh.length) act.lastEv = [ev, sx, sy];
+      act.last = [X, Y];
+      act.pts.push(...toWorld(X, Y), pr);
+      act.lastEv = [ev, sx, sy];
       // (1.73) "holding still" allows normal hand tremor: the wait only starts over once the Pencil leaves a circle of
       // HOLD_STILL px around where it stopped (was 3 px, so lines only straightened when the hand was perfectly still)
       // The circle's centre follows the average of the points inside it, so it settles in the middle of the shaking.
@@ -584,7 +566,6 @@ function endTool(e){
   clearTimeout(a.hold); clearTimeout(a.wheelT);
   clearLive(); Live.free();
   if(a.kind === 'stroke'){
-    PenGuard.flush(a);
     notePenPr(a);
     Scribe.release();
     if(a.pts.length < 3) return;

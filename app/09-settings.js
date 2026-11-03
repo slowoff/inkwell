@@ -658,6 +658,7 @@ async function renderVersion(){
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
   // (entries with no lines are not shown: held back until Rafael says the feature is good)
+  ['1.77.2', '2026-11-03', []],
   ['1.77.1', '2026-11-03', []],
   ['1.77', '2026-11-03', []],
   ['1.76.4', '2026-11-03', ['Menus polished: Paper, More, Shapes, Writing and the colour menus are tidier, with icons in More, simple rows in Shapes and shorter explanations']],

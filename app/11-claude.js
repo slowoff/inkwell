@@ -441,6 +441,8 @@ function renderMd(src){
   const graphs = [];
   // an unfinished block (still arriving) shows a waiting line, not its JSON
   src = String(src || '').replace(/```graph[ \t]*\r?\n([\s\S]*?)(```|$)/g, (_, j, end) => { graphs.push(end ? askGraph(j) : '<p class="graph-wait">Drawing graph…</p>'); return '\n\n\u0001' + (graphs.length - 1) + '\u0001\n\n'; });
+  // (1.77.2) other code blocks: kept whole, so the lines stay together and nothing inside is read as Markdown
+  src = src.replace(/```[^\n`]*\r?\n([\s\S]*?)(```|$)/g, (_, c) => { graphs.push('<pre class="md-code">' + esc(c.replace(/\s+$/, '')) + '</pre>'); return '\n\n\u0001' + (graphs.length - 1) + '\u0001\n\n'; });
   const math = [];
   const keep = (tex, display) => { math.push([tex, display]); return '\u0000' + (math.length - 1) + '\u0000'; };
   let s = String(src || '')

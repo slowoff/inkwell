@@ -59,6 +59,8 @@ async def main():
         check(d > 500, 'curve has many points')
         wait = await page.evaluate("md => __inkwell.renderMd(md)", 'Hi\n\n```graph\n{"type":')
         check('Drawing graph' in wait and 'type' not in wait, 'half-arrived graph shows a waiting line')
+        code = await page.evaluate("md => __inkwell.renderMd(md)", 'A\n\n```\n80 | *x*\n75 | y\n```\n\nB')
+        check(code.count('<pre') == 1 and '```' not in code and '<i>' not in code and '80 | *x*\n75 | y' in code, 'code block stays one block')
         bl = await page.evaluate("md => JSON.stringify(__inkwell.answerBlocks(md))", MD)
         check('Parabola' not in bl and 'End.' in bl, 'Put on page leaves graphs out')
         await page.locator('#gt').screenshot(path=os.environ.get('GSHOT', '/tmp/claude-0/gt.png'))

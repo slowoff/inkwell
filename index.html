@@ -168,8 +168,10 @@
   <button class="toggle shape-snap" id="mlOn" title="A coloured line down the left side, like the margin on school paper"><span class="sw"></span><span>Margin line</span></button>
   <div id="mlOpts" hidden>
     <label class="field"><span>Position <b id="mlXVal"></b></span><input type="range" id="mlX" min="-100" max="150" step="1"></label>
-    <div class="seg" id="mlColor"><button data-v="blue">Blue</button><button data-v="red">Red</button><button data-v="green">Green</button><button data-v="grey">Grey</button></div>
-    <div class="seg" id="mlWidth"><button data-v="thin">Thin</button><button data-v="thick">Thick</button></div>
+    <div class="ml-row">
+      <div class="ml-colors" id="mlColor" role="group" aria-label="Line colour"><button class="swatch" data-v="blue" title="Blue" aria-label="Blue" style="--c:#3B82F6"><span></span></button><button class="swatch" data-v="red" title="Red" aria-label="Red" style="--c:#E5484D"><span></span></button><button class="swatch" data-v="green" title="Green" aria-label="Green" style="--c:#2FA36B"><span></span></button><button class="swatch" data-v="grey" title="Grey" aria-label="Grey" style="--c:#8A96A3"><span></span></button></div>
+      <div class="seg ml-width" id="mlWidth" role="group" aria-label="Line thickness"><button data-v="thin" title="Thin" aria-label="Thin"><i></i></button><button data-v="thick" title="Thick" aria-label="Thick"><i></i></button></div>
+    </div>
   </div>
   <button class="btn ghost" id="paperDefault">Use for new pages</button>
 </div>

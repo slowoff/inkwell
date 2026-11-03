@@ -657,6 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.76.1', '2026-11-03', ['Margin line menu: colours are now round swatches and the thickness buttons show the actual line']],
   ['1.76', '2026-11-03', ['Paper → Margin line: a Position slider moves the line left or right']],
   ['1.75', '2026-11-03', ['Paper → Margin line: a coloured line down the left side of the page like on school paper. Blue, red, green or grey, thin or thick. It also shows in printing and exported PDFs']],
   ['1.74', '2026-11-02', ['Spelling: Ctrl+Space takes the first suggestion. Ctrl+Tab does the same where the browser allows it (a normal Chrome tab keeps Ctrl+Tab for switching tabs)']],

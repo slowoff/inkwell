@@ -930,3 +930,11 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 @media (any-pointer:coarse){ .ah-filter button{height:44px} }
 #mlOpts{display:flex;flex-direction:column;gap:8px}
 #mlOpts[hidden]{display:none}
+.ml-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ml-colors{display:flex;gap:2px}
+.ml-width{flex:none}
+.ml-width button{width:40px;display:grid;place-items:center}
+.ml-width i{display:block;width:3px;height:18px;border-radius:2px;background:currentColor}
+.ml-width button[data-v=thin] i{width:1.5px}
+.ml-width button[data-v=thick] i{width:4px}
+@media (any-pointer:coarse){ .ml-width button{height:38px;width:44px} }

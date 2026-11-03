@@ -983,3 +983,30 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 #tcolorPop .custom-color{border-top:1px solid var(--line);border-radius:0;margin-top:2px}
 #colorPop .custom-color{border-top:1px solid var(--line);border-radius:0}
 #colorPop .custom-color.on{background:none}
+/* (1.77) tables and graphs in Claude's answers */
+.am.bot .md-table{overflow-x:auto;margin:0 0 .6em}
+.am.bot table{border-collapse:collapse;font-size:13.5px;width:100%}
+.am.bot th,.am.bot td{padding:6px 9px;border:1px solid var(--line);text-align:left;vertical-align:top}
+.am.bot th{background:var(--well);font-weight:600}
+.graph{margin:0 0 .7em;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.graph svg{display:block;width:100%;height:auto}
+.gr-title{font-weight:600;font-size:13.5px;margin:0 0 6px}
+.gr-grid{stroke:var(--line);stroke-width:.6}
+.gr-axis{stroke:var(--muted);stroke-width:1}
+.graph svg text.gr-t{fill:var(--muted);stroke:none;font-size:9.5px;font-weight:400}
+.gr-l{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.gr-d{stroke:none}
+.gr-l.gr-c0{stroke:#3B82F6}.gr-l.gr-c1{stroke:#E5484D}.gr-l.gr-c2{stroke:#2FA36B}.gr-l.gr-c3{stroke:#E07A10}.gr-l.gr-c4{stroke:#7B3FBF}.gr-l.gr-c5{stroke:#0E8C8C}
+.gr-d.gr-c0{fill:#3B82F6}.gr-d.gr-c1{fill:#E5484D}.gr-d.gr-c2{fill:#2FA36B}.gr-d.gr-c3{fill:#E07A10}.gr-d.gr-c4{fill:#7B3FBF}.gr-d.gr-c5{fill:#0E8C8C}
+.gr-keys{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:12.5px;color:var(--muted)}
+.gr-keys span{display:inline-flex;align-items:center;gap:5px}
+.gr-keys i{width:12px;height:3px;border-radius:2px}
+.gr-k0{background:#3B82F6}.gr-k1{background:#E5484D}.gr-k2{background:#2FA36B}.gr-k3{background:#E07A10}.gr-k4{background:#7B3FBF}.gr-k5{background:#0E8C8C}
+.gr-bars{display:flex;flex-direction:column;gap:6px}
+.gr-row{display:grid;grid-template-columns:minmax(0,34%) 1fr auto;align-items:center;gap:8px;font-size:12.5px}
+.gr-lbl{overflow-wrap:anywhere}
+.gr-track{height:14px;background:var(--well);border-radius:4px;overflow:hidden}
+.gr-track i{display:block;height:100%;background:#3B82F6;border-radius:4px}
+.gr-track i.neg{background:#E5484D}
+.gr-val{font-variant-numeric:tabular-nums;color:var(--muted)}
+.graph-wait,.graph-err{color:var(--muted);font-size:13px}

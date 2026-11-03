@@ -110,8 +110,8 @@ const Ask = {
   },
   renderMode(){
     const sel = $('askModeSel');
-    sel.value = this.mode === 'practice' ? 'practice' : (prefs.askMode === 'solve' ? 'solve' : 'tutor');
-    sel.title = {tutor: 'Tutor: explains and gives hints, you solve it', solve: 'Solve: shows the full worked solution', practice: 'Practice: Claude quizzes you on pages you pick'}[sel.value];
+    sel.value = this.mode === 'practice' ? 'practice' : (['solve', 'normal'].includes(prefs.askMode) ? prefs.askMode : 'tutor');
+    sel.title = {normal: 'Normal: answers like the regular Claude app', tutor: 'Tutor: explains and gives hints, you solve it', solve: 'Solve: shows the full worked solution', practice: 'Practice: Claude quizzes you on pages you pick'}[sel.value];
     this.renderPending && this.renderPending();
   },
   reset(){ if(this.ctrl) this.ctrl.abort(); this.mode = null; this.renderMode(); this.pending = null; this.renderPending(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
@@ -361,7 +361,86 @@ const Ask = {
   }
 };
 // Small Markdown renderer for answers: paragraphs, lists, headings, bold/italic, code, and $math$ via KaTeX.
+/* (1.77) Graphs in Claude's answers: a ```graph block holds a small JSON description and is drawn here, so a graph costs
+   few tokens and never runs code from the answer. Lines are SVG; bars are plain divs. */
+function graphTicks(a, b, n){
+  const raw = (b - a) / n, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  const st = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p, out = [];
+  for(let v = Math.ceil(a / st) * st; v <= b + st * 1e-6; v += st) out.push(Math.abs(v) < st * 1e-6 ? 0 : +v.toPrecision(10));
+  return out;
+}
+function askGraph(json){
+  const fail = '<p class="graph-err">This graph could not be drawn.</p>';
+  let g; try { g = JSON.parse(json); } catch { return fail; }
+  if(!g || typeof g !== 'object') return fail;
+  const head = g.title ? `<div class="gr-title">${esc(String(g.title))}</div>` : '';
+  if(g.type === 'bar'){
+    const labels = Array.isArray(g.labels) ? g.labels : [], vals = (Array.isArray(g.values) ? g.values : []).map(Number);
+    if(!vals.length || vals.length !== labels.length || vals.some(v => !Number.isFinite(v))) return fail;
+    const top = Math.max(...vals.map(Math.abs)) || 1;
+    const rows = vals.map((v, i) => `<div class="gr-row"><span class="gr-lbl">${esc(String(labels[i]))}</span><span class="gr-track"><i style="width:${(Math.abs(v) / top * 100).toFixed(1)}%"${v < 0 ? ' class="neg"' : ''}></i></span><span class="gr-val">${esc(String(v))}</span></div>`).join('');
+    return `<figure class="graph">${head}<div class="gr-bars">${rows}</div></figure>`;
+  }
+  const series = (Array.isArray(g.series) ? g.series : []).slice(0, 6);
+  if(!series.length) return fail;
+  let x0 = Array.isArray(g.x) ? +g.x[0] : NaN, x1 = Array.isArray(g.x) ? +g.x[1] : NaN;
+  const allPts = series.flatMap(s => Array.isArray(s.points) ? s.points : []).filter(p => Array.isArray(p) && Number.isFinite(+p[0]) && Number.isFinite(+p[1]));
+  if(!Number.isFinite(x0) || !Number.isFinite(x1) || x0 >= x1){
+    if(allPts.length){ x0 = Math.min(...allPts.map(p => +p[0])); x1 = Math.max(...allPts.map(p => +p[0])); }
+    else { x0 = -10; x1 = 10; }
+    if(x0 === x1){ x0 -= 1; x1 += 1; }
+  }
+  const N = 240, lines = [];
+  for(const s of series){
+    let pts = [];
+    if(s.fn != null){
+      let fn; try { fn = parseFn(String(s.fn)); } catch { return fail; }
+      if(!fn) return fail;
+      for(let i = 0; i <= N; i++){ const x = x0 + (x1 - x0) * i / N; let y = NaN; try { y = fn(x); } catch { /* a gap */ } pts.push([x, y]); }
+    } else if(Array.isArray(s.points)) pts = s.points.filter(p => Array.isArray(p)).map(p => [+p[0], +p[1]]).sort((a, b) => a[0] - b[0]);
+    if(!pts.some(p => Number.isFinite(p[0]) && Number.isFinite(p[1]))) return fail;
+    lines.push({label: s.label, pts, dots: s.fn == null && (g.type === 'scatter' || s.dots === true), only: g.type === 'scatter'});
+  }
+  let y0 = Array.isArray(g.y) ? +g.y[0] : NaN, y1 = Array.isArray(g.y) ? +g.y[1] : NaN;
+  if(!Number.isFinite(y0) || !Number.isFinite(y1) || y0 >= y1){
+    // the middle 96 % of the values, so a pole (tan x, 1/x) does not flatten everything else
+    const ys = lines.flatMap(l => l.pts.map(p => p[1])).filter(Number.isFinite).sort((a, b) => a - b), cut = lines.some(l => l.pts.length > 50) ? Math.floor(ys.length * 0.02) : 0;
+    y0 = ys[cut]; y1 = ys[ys.length - 1 - cut];
+    const pad = (y1 - y0) * 0.08 || Math.abs(y0) * 0.1 || 1; y0 -= pad; y1 += pad;
+  }
+  const W = 320, H = 200, L = 34, R = 8, T = 8, B = 24 + (g.xlabel ? 12 : 0);
+  const X = v => L + (v - x0) / (x1 - x0) * (W - L - R), Y = v => H - B - (v - y0) / (y1 - y0) * (H - T - B);
+  const num = v => String(+v.toPrecision(4)).replace(/^-/, '−');
+  let svg = '';
+  for(const v of graphTicks(y0, y1, 5)) svg += `<line class="gr-grid" x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="gr-t" x="${L - 4}" y="${(Y(v) + 3).toFixed(1)}" text-anchor="end">${num(v)}</text>`;
+  for(const v of graphTicks(x0, x1, 6)) svg += `<line class="gr-grid" y1="${T}" y2="${H - B}" x1="${X(v).toFixed(1)}" x2="${X(v).toFixed(1)}"/><text class="gr-t" y="${H - B + 12}" x="${X(v).toFixed(1)}" text-anchor="middle">${num(v)}</text>`;
+  if(y0 <= 0 && y1 >= 0) svg += `<line class="gr-axis" x1="${L}" x2="${W - R}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}"/>`;
+  if(x0 <= 0 && x1 >= 0) svg += `<line class="gr-axis" y1="${T}" y2="${H - B}" x1="${X(0).toFixed(1)}" x2="${X(0).toFixed(1)}"/>`;
+  if(g.xlabel) svg += `<text class="gr-t" x="${(L + W - R) / 2}" y="${H - 3}" text-anchor="middle">${esc(String(g.xlabel))}</text>`;
+  if(g.ylabel) svg += `<text class="gr-t" x="9" y="${(T + H - B) / 2}" text-anchor="middle" transform="rotate(-90 9 ${(T + H - B) / 2})">${esc(String(g.ylabel))}</text>`;
+  const id = 'gc' + newId();
+  let ink = '';
+  lines.forEach((l, i) => {
+    const c = `gr-c${i % 6}`;
+    let d = '', on = false;
+    const jump = (y1 - y0) * 3;
+    l.pts.forEach((p, k) => {
+      const good = Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[1] - (y0 + y1) / 2) < jump;
+      const prev = k && l.pts[k - 1][1];
+      if(!good || (on && Math.abs(p[1] - prev) > y1 - y0)){ on = false; if(!good) return; }
+      d += (on ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1); on = true;
+    });
+    if(!l.only) ink += `<path class="gr-l ${c}" d="${d}"/>`;
+    if(l.dots) for(const p of l.pts) if(Number.isFinite(p[0]) && Number.isFinite(p[1])) ink += `<circle class="${c} gr-d" cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="3"/>`;
+  });
+  svg += `<clipPath id="${id}"><rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/></clipPath><g clip-path="url(#${id})">${ink}</g>`;
+  const keys = lines.some(l => l.label) ? `<div class="gr-keys">${lines.map((l, i) => l.label ? `<span><i class="gr-k${i % 6}"></i>${esc(String(l.label))}</span>` : '').join('')}</div>` : '';
+  return `<figure class="graph">${head}<svg viewBox="0 0 ${W} ${H}" role="img">${svg}</svg>${keys}</figure>`;
+}
 function renderMd(src){
+  const graphs = [];
+  // an unfinished block (still arriving) shows a waiting line, not its JSON
+  src = String(src || '').replace(/```graph[ \t]*\r?\n([\s\S]*?)(```|$)/g, (_, j, end) => { graphs.push(end ? askGraph(j) : '<p class="graph-wait">Drawing graph…</p>'); return '\n\n\u0001' + (graphs.length - 1) + '\u0001\n\n'; });
   const math = [];
   const keep = (tex, display) => { math.push([tex, display]); return '\u0000' + (math.length - 1) + '\u0000'; };
   let s = String(src || '')
@@ -376,9 +455,23 @@ function renderMd(src){
   const flushL = () => { if(list){ out.push(`<${list.t}>` + list.items.map(i => '<li>' + inline(i) + '</li>').join('') + `</${list.t}>`); list = null; } };
   // (1.69.3) "> text" quote lines: one block, a blank "> " line starts a new paragraph inside it
   const flushQ = () => { if(quote.length){ const ps = quote.join('\n').split(/\n\s*\n/).map(t => t.trim()).filter(Boolean); out.push('<blockquote>' + ps.map(t => '<p>' + inline(t.replace(/\n/g, '<br>')) + '</p>').join('') + '</blockquote>'); quote = []; } };
-  for(const raw of s.split('\n')){
+  // (1.77) a Markdown table: a row with | followed by a --- row
+  const isRule = l => l.includes('-') && l.includes('|') && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(l);
+  const cells = l => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => inline(c.trim()));
+  const lines = s.split('\n');
+  for(let li = 0; li < lines.length; li++){
+    const raw = lines[li];
     const line = raw.trimEnd();
     let m;
+    if((m = /^\s*\u0001(\d+)\u0001\s*$/.exec(line))){ flushP(); flushL(); flushQ(); out.push(graphs[+m[1]]); continue; }
+    if(line.includes('|') && !isRule(line) && li + 1 < lines.length && isRule(lines[li + 1])){
+      flushP(); flushL(); flushQ();
+      const head = cells(line); li += 1;
+      const body = [];
+      while(li + 1 < lines.length && lines[li + 1].includes('|')){ li++; body.push(cells(lines[li])); }
+      out.push('<div class="md-table"><table><thead><tr>' + head.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>' + body.map(r => '<tr>' + head.map((_, i) => `<td>${r[i] || ''}</td>`).join('') + '</tr>').join('') + '</tbody></table></div>');
+      continue;
+    }
     if((m = /^\s*(?:&gt;\s?)+(.*)$/.exec(line))){ flushP(); flushL(); quote.push(m[1]); continue; }
     flushQ();
     if(!line.trim()){ flushP(); flushL(); continue; }
@@ -431,7 +524,7 @@ $('askModeSel').addEventListener('change', () => {
   const was = Ask.mode === 'practice' ? 'practice' : prefs.askMode;
   prefs.askMode = v; savePrefs();
   if(Ask.mode === 'practice') Ask.reset(); else Ask.renderMode();
-  if(was !== v) note(v === 'solve' ? 'Solve · full worked solutions' : 'Tutor · hints, you solve it');
+  if(was !== v) note(v === 'solve' ? 'Solve · full worked solutions' : v === 'normal' ? 'Normal · answers directly' : 'Tutor · hints, you solve it');
 });
 $('askSend').addEventListener('click', () => Ask.submit());
 $('askAttX').addEventListener('click', () => { Ask.pending = null; Ask.renderPending(); });
@@ -689,6 +782,8 @@ function mdInline(t){
 function answerBlocks(md){
   const blocks = [];
   let s = String(md || '').replace(/\r/g, '');
+  // (1.77) graphs stay in the Claude panel for now
+  s = s.replace(/```graph[ \t]*\n[\s\S]*?(```|$)/g, '');
   // (1.69.3) quote markers ("> ") are dropped on the page: the quoted text becomes a normal paragraph
   s = s.replace(/^[ \t]*(?:>[ \t]?)+/gm, '');
   // display maths becomes its own block

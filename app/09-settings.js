@@ -657,7 +657,9 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
-  ['1.77', '2026-11-03', ['Ask Claude shows real tables and can draw graphs and bar charts in its answers (for now they stay in the Claude panel)', 'New Normal mode in Ask Claude: answers directly, like the regular Claude app']],
+  // (entries with no lines are not shown: held back until Rafael says the feature is good)
+  ['1.77.1', '2026-11-03', []],
+  ['1.77', '2026-11-03', []],
   ['1.76.4', '2026-11-03', ['Menus polished: Paper, More, Shapes, Writing and the colour menus are tidier, with icons in More, simple rows in Shapes and shorter explanations']],
   ['1.76.3', '2026-11-03', ['Colour menu cleaned up: smaller swatches sorted by colour, a tidier Custom colour row that shows when a custom colour is in use, shorter hint']],
   ['1.76.2', '2026-11-03', ['Margin line: turning it off and on again keeps your colour, thickness and position, also on other pages']],
@@ -804,7 +806,7 @@ const CHANGELOG = [
 ];
 function renderChangelog(){
   const day = d => new Date(d + 'T12:00:00').toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'});
-  $('changelog').innerHTML = CHANGELOG.map(([v, d, items]) => `<section><h4>${esc(v)}<small>${esc(day(d))}</small></h4><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></section>`).join('');
+  $('changelog').innerHTML = CHANGELOG.filter(e => e[2].length).map(([v, d, items]) => `<section><h4>${esc(v)}<small>${esc(day(d))}</small></h4><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></section>`).join('');
 }
 // (1.47.1) the change log opens in its own window on top of Settings (it was cut off at the bottom of Settings)
 $('logBtn').addEventListener('click', () => {

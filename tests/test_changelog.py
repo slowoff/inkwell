@@ -36,7 +36,9 @@ async def main():
                       settings: !document.getElementById('settingsDlg').hidden}; })()""")
             check(not info['hidden'] and info['onTop'], f'[{vw}px] tapping it opens a window on top ({info})')
             check(info['title'] == "What's new" and info['n'] >= 50, f'[{vw}px] window lists the versions ({info["n"]})')
-            check(info['first'] == ver, f'[{vw}px] newest entry is the current version {ver} ({info["first"]})')
+            newest = await page.evaluate("__inkwell.CHANGELOG[0][0]")
+            shown = await page.evaluate("__inkwell.CHANGELOG.find(e => e[2].length)[0]")
+            check(newest == ver and info['first'] == shown, f'[{vw}px] newest entry is the current version {ver}; the window starts at the newest with lines ({newest}, {info["first"]}, {shown})')
             check(info['top'] >= 0 and info['bottom'] <= info['vh'] + 0.5 and info['right'] <= vw + 0.5, f'[{vw}px] window fits the screen, nothing cut off ({info})')
             check(info['scroll'], f'[{vw}px] the long list scrolls inside the window, the title stays put')
             # 1.58.2: on the iPad the status bar (top) and home bar (bottom) areas are kept free

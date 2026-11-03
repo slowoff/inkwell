@@ -784,14 +784,17 @@ function mdInline(t){
 function answerBlocks(md){
   const blocks = [];
   let s = String(md || '').replace(/\r/g, '');
-  // (1.77) graphs stay in the Claude panel for now
-  s = s.replace(/```graph[ \t]*\n[\s\S]*?(```|$)/g, '');
+  // (1.78) a graph becomes its own block: a picture on the page (graphPic)
+  const gjson = [];
+  s = s.replace(/```graph[ \t]*\n([\s\S]*?)(```|$)/g, (_, j, end) => { if(!end) return ''; gjson.push(j); return '\n\n\u0003' + (gjson.length - 1) + '\u0003\n\n'; });
   // (1.69.3) quote markers ("> ") are dropped on the page: the quoted text becomes a normal paragraph
   s = s.replace(/^[ \t]*(?:>[ \t]?)+/gm, '');
   // display maths becomes its own block
   s = s.replace(/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g, (_, a, b) => '\n\n\u0001' + (a || b).trim().replace(/\n/g, ' ') + '\u0001\n\n');
   for(const part of s.split(/\n{2,}/)){
     const p = part.trim(); if(!p) continue;
+    const gm = /^\u0003(\d+)\u0003$/.exec(p);
+    if(gm){ blocks.push({t: 'g', json: gjson[+gm[1]]}); continue; }
     const m = /^\u0001([\s\S]*)\u0001$/.exec(p);
     if(m){ blocks.push({t: 'm', tex: m[1]}); continue; }
     const inl = x => mdInline(x.replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => '\u0002' + t + '\u0002').replace(/\$([^$\n]+?)\$/g, (_, t) => '\u0002' + t + '\u0002')).replace(/\u0002([^\u0002]*)\u0002/g, (_, t) => texPlain(t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')));
@@ -808,10 +811,58 @@ function answerBlocks(md){
   }
   return blocks;
 }
+/* (1.78) A graph from an answer as a picture for the page: dark on white whatever the theme, so it prints like the rest.
+   Drawn from what askGraph makes. Null when the graph cannot be drawn. */
+async function graphPic(json){
+  const d = document.createElement('div'); d.innerHTML = askGraph(json);
+  if(d.querySelector('.graph-err')) return null;
+  const S = 3, CW = 320 * S, F = 'Helvetica, Arial, sans-serif', INK = '#18212B', MUTED = '#5D6B79';
+  const title = d.querySelector('.gr-title'), svg = d.querySelector('svg'), rows = [...d.querySelectorAll('.gr-row')], keys = [...d.querySelectorAll('.gr-keys span')];
+  const COL = ['#3B82F6', '#E5484D', '#2FA36B', '#E07A10', '#7B3FBF', '#0E8C8C'];
+  const svgH = svg ? 200 * S : 0, barH = 22 * S;
+  const c = document.createElement('canvas'); c.width = CW;
+  c.height = (title ? 24 * S : 6 * S) + svgH + (rows.length ? rows.length * barH : 0) + (keys.length ? 20 * S : 0) + 6 * S;
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.textBaseline = 'middle';
+  let y = 6 * S;
+  if(title){ x.fillStyle = INK; x.font = `600 ${13 * S}px ${F}`; x.fillText(title.textContent, 6 * S, y + 7 * S); y = 24 * S; }
+  if(svg){
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); svg.setAttribute('width', CW); svg.setAttribute('height', svgH);
+    const css = `text{font:9.5px ${F};fill:${MUTED};stroke:none}.gr-grid{stroke:#D5DFEA;stroke-width:.6}.gr-axis{stroke:${MUTED};stroke-width:1}.gr-l{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}` + COL.map((k, i) => `.gr-l.gr-c${i}{stroke:${k}}.gr-d.gr-c${i}{fill:${k}}`).join('');
+    const st = document.createElementNS('http://www.w3.org/2000/svg', 'style'); st.textContent = css; svg.prepend(st);
+    const img = new Image();
+    await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg)); });
+    x.drawImage(img, 0, y, CW, svgH); y += svgH;
+  }
+  // bars: label, bar, value
+  for(const r of rows){
+    const lb = r.querySelector('.gr-lbl').textContent, v = r.querySelector('.gr-val').textContent, b = r.querySelector('i');
+    x.font = `${12 * S}px ${F}`; x.fillStyle = INK;
+    let t = lb; while(t.length > 1 && x.measureText(t).width > 96 * S) t = t.slice(0, -1);
+    x.fillText(t === lb ? t : t + '…', 6 * S, y + 11 * S);
+    const bx = 108 * S, bw = 164 * S;
+    x.fillStyle = '#E8ECF1'; x.fillRect(bx, y + 4 * S, bw, 14 * S);
+    x.fillStyle = b.classList.contains('neg') ? COL[1] : COL[0]; x.fillRect(bx, y + 4 * S, bw * parseFloat(b.style.width) / 100, 14 * S);
+    x.fillStyle = MUTED; x.fillText(v, bx + bw + 6 * S, y + 11 * S);
+    y += barH;
+  }
+  if(keys.length){
+    let kx = 6 * S; x.font = `${12 * S}px ${F}`;
+    keys.forEach(k => {
+      const i = +k.querySelector('i').className.replace('gr-k', ''), t = k.textContent;
+      x.fillStyle = COL[i]; x.fillRect(kx, y + 9 * S, 12 * S, 3 * S); kx += 17 * S;
+      x.fillStyle = MUTED; x.fillText(t, kx, y + 10 * S); kx += x.measureText(t).width + 12 * S;
+    });
+  }
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const out = {blob, w: c.width, h: c.height}; c.width = c.height = 1;
+  return out;
+}
 async function putAnswer(md, src){
   if(!cur){ toast('Open a page first'); return; }
-  const blocks = answerBlocks(md);
-  if(!blocks.length) return;
+  let blocks = answerBlocks(md);
+  for(const b of blocks) if(b.t === 'g'){ try { b.pic = await graphPic(b.json); if(b.pic) b.a = await saveAsset(b.pic.blob); } catch(err){ console.warn('graph picture', err); b.pic = null; } }
+  blocks = blocks.filter(b => b.t !== 'g' || b.pic);
+  if(!cur || !blocks.length) return;
   // laid out first, then centred in the middle of what is on screen, selected so it can be dragged right away
   // the visible part of the page that the Claude panel does not cover (screen px, stage coordinates)
   let fx0 = 0, fy0 = 0, fx1 = W, fy1 = H;
@@ -829,6 +880,11 @@ async function putAnswer(md, src){
   let x = 0, y = 0;
   const g = 'g' + newId(), added = [];
   for(const b of blocks){
+    if(b.t === 'g'){
+      const it = {t: 'i', id: 'i' + newId(), x, y, w: W0, h: W0 * b.pic.h / b.pic.w, a: b.a, g};
+      setItems([[it.id, it]]); added.push(it); y += it.h + 6;
+      continue;
+    }
     const id = (b.t === 'm' ? 'm' : 'x') + newId() + Math.random().toString(36).slice(2, 5);
     const it = b.t === 'm' ? {t: 'm', id, x, y, tex: b.tex, fs: 22, c: 'auto', g} : {t: 'x', id, x, y, w: W0, fs: 1, html: cleanHTML(b.html), g};
     setItems([[id, it]]);   // one by one so each box can be measured

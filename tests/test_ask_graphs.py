@@ -62,8 +62,23 @@ async def main():
         code = await page.evaluate("md => __inkwell.renderMd(md)", 'A\n\n```\n80 | *x*\n75 | y\n```\n\nB')
         check(code.count('<pre') == 1 and '```' not in code and '<i>' not in code and '80 | *x*\n75 | y' in code, 'code block stays one block')
         bl = await page.evaluate("md => JSON.stringify(__inkwell.answerBlocks(md))", MD)
-        check('Parabola' not in bl and 'End.' in bl, 'Put on page leaves graphs out')
-        await page.locator('#gt').screenshot(path=os.environ.get('GSHOT', '/tmp/claude-0/gt.png'))
+        check(bl.count('"t":"g"') == 4 and 'End.' in bl, 'graphs are blocks for Put on page')
+        # the Put on page path (the broken graph is left out)
+        await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(300)
+        await page.evaluate("md => __inkwell.putAnswer(md)", MD); await page.wait_for_timeout(800)
+        info = await page.evaluate("""async () => { const W = __inkwell, its = [...W.cur.items.values()].filter(i => i.t === 'i'); const out = [];
+          for(const it of its){ const r = await W.IDB.get('assets', it.a), bm = await createImageBitmap(r.blob), c = new OffscreenCanvas(bm.width, bm.height), x = c.getContext('2d'); x.drawImage(bm, 0, 0);
+            const d = x.getImageData(0, 0, bm.width, bm.height).data; let blue = 0, white = 0, dark = 0;
+            for(let i = 0; i < d.length; i += 4){ if(d[i] < 90 && d[i+1] > 100 && d[i+2] > 220) blue++; if(d[i] > 250 && d[i+1] > 250 && d[i+2] > 250) white++; if(d[i] < 120 && d[i+1] < 130 && d[i+2] < 140) dark++; }
+            out.push({w: it.w, h: it.h, g: !!it.g, pw: bm.width, ph: bm.height, blue, white: white / (d.length / 4), dark}); }
+          return out; }""")
+        check(len(info) == 3 and all(i['g'] and abs(i['h'] / i['w'] - i['ph'] / i['pw']) < .01 for i in info), f'3 graph pictures on the page, right shape ({info})')
+        check(all(i['blue'] > 200 and i['white'] > .4 and i['dark'] > 100 for i in info), 'pictures show blue ink, labels, white background')
+        pdf = await page.evaluate("async () => { const W = __inkwell; await W.exportPdfFile(); return W.Pdf.file && W.Pdf.file.size; }")
+        check(pdf and pdf > 3000, f'page with graphs exports to PDF ({pdf})')
+        await page.evaluate("() => { const s = document.getElementById('gt'); s.remove(); }")
+        await page.wait_for_timeout(1200)
+        await page.screenshot(path=os.environ.get('GSHOT2', '/tmp/claude-0/gt2.png'))
         check(not errs, f'no page errors {errs}')
         await b.close()
 asyncio.run(main())

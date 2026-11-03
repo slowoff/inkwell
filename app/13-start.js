@@ -622,6 +622,7 @@ async function boot(){
   if(!docs.size){ await seed(); await loadDocs(); if(!ui.page){ ui.nb = 'nb-school'; ui.sec = 'sec-general'; ui.page = 'pg-welcome'; } }
   await WELCOME.refresh();
   ensureUi();
+  applyBarPos();
   renderFinger(); renderScribe();
   $('mSnap').classList.toggle('on', prefs.snapLines);
   if(prefs.focus && width() !== 'narrow') app.classList.add('focus');

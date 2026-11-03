@@ -445,6 +445,7 @@ function renderPrefSettings(){
   $('setTheme').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.theme || 'auto')));
   const hold = +prefs.snapHold || 0;
   $('setHold').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === hold));
+  $('setBar').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === (prefs.barPos || 'top')));
   $('setLeft').querySelectorAll('button').forEach(b => b.classList.toggle('on', +b.dataset.v === (prefs.leftEdge ? 1 : 0)));
   { const cur = Math.round(cam.z * 100), m = Math.round(zMax() * 100), lim = zMax() < Z_TOP;
     $('setZoomCur').textContent = 'Use current zoom (' + cur + '%)';
@@ -466,6 +467,10 @@ $('setTheme').addEventListener('click', e => {
   const was = prefs.theme || 'auto';
   prefs.theme = b.dataset.v; savePrefs(); setThemeAttr(); themeChanged(); renderPrefSettings();
   if(was !== prefs.theme) note('Theme: ' + (prefs.theme === 'auto' ? 'Auto (follows the iPad)' : b.textContent.trim()));
+});
+$('setBar').addEventListener('click', e => {
+  const b = e.target.closest('button[data-v]'); if(!b) return;
+  prefs.barPos = b.dataset.v; savePrefs(); renderPrefSettings(); applyBarPos();
 });
 $('setLeft').addEventListener('click', e => {
   const b = e.target.closest('button[data-v]'); if(!b) return;
@@ -657,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.81', '2026-11-03', ['Settings → Top bar position: put the bar with the title, Import, Shapes and Ask Claude on the top, bottom, left or right']],
   ['1.80', '2026-11-03', ['Graphs: the Formulas window (select a graph) now lists the formulas on it. Tap one to change its function, colour or line, or remove it. Works for formulas drawn from now on']],
   ['1.79', '2026-11-03', ['New welcome page. It replaces the old one only if you never changed it']],
   ['1.78.3', '2026-11-03', ['Graphs from Shapes: on big graphs the numbers now sit on the long lines (5, 10, 15 …)']],

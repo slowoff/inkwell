@@ -946,6 +946,7 @@ function openPopAgain(id, anchor){
   p.style.left = clamp(r.left + r.width / 2 - pw / 2, 8, innerWidth - pw - 8) + 'px';
   let y = r.bottom + 8; if(y + ph > innerHeight - 8) y = Math.max(8, innerHeight - ph - 8);
   p.style.top = y + 'px';
+  popBeside(p, anchor, r, pw, ph);
 }
 $('laterList').addEventListener('click', async ev => {
   const go = ev.target.closest('[data-go]'), done = ev.target.closest('[data-done]');
@@ -1328,6 +1329,18 @@ async function restoreVersion(v){
 /* =====================================================================
    Popovers and dialogs
    ===================================================================== */
+/* (1.81) Settings -> Top bar position (prefs.barPos, per device): the title bar on top, bottom, left or right. CSS does the
+   layout from #main's data-bar (a phone-sized window keeps it on top or bottom); the stage follows through its ResizeObserver. */
+function applyBarPos(){ const v = prefs.barPos; if(v && v !== 'top') $('main').dataset.bar = v; else delete $('main').dataset.bar; closePops(); }
+// a menu from a bar on the side opens beside the bar, not on top of it
+function popBeside(p, anchor, r, pw, ph){
+  const side = anchor.closest('.bar1') && innerWidth >= 761 && $('main').dataset.bar;
+  if(side !== 'left' && side !== 'right') return false;
+  const bar = anchor.closest('.bar1').getBoundingClientRect();
+  p.style.left = clamp(side === 'left' ? bar.right + 8 : bar.left - pw - 8, 8, innerWidth - pw - 8) + 'px';
+  p.style.top = clamp(r.top, 8, Math.max(8, innerHeight - ph - 8)) + 'px';
+  return true;
+}
 function openPop(id, anchor){
   const p = $(id), wasOpen = !p.hidden;
   closePops(id === 'tcolorPop' ? 'keepFmt' : null);
@@ -1338,6 +1351,7 @@ function openPop(id, anchor){
   let y = r.bottom + 8;
   if(y + ph > innerHeight - 8) y = Math.max(8, r.top - ph - 8);
   p.style.left = x + 'px'; p.style.top = y + 'px';
+  popBeside(p, anchor, r, pw, ph);
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }

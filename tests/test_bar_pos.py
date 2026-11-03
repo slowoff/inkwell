@@ -1,0 +1,70 @@
+# 1.81: Settings -> Top bar position.
+import asyncio, os
+from playwright.async_api import async_playwright
+PORT = os.environ.get('INKWELL_PORT', '8766')
+URL = f'http://localhost:{PORT}/'
+fails = []
+def check(ok, what):
+    print(('ok   ' if ok else 'FAIL ') + what)
+    if not ok: fails.append(what)
+R = """() => { const r = s => { const b = document.querySelector(s).getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height}; };
+  const S = __inkwell; return {bar: r('.bar1'), tools: r('.bar2'), stage: r('#stage'), side: r('#main'), ask: r('#askBtn'), paper: r('#paperBtn'), lbl: getComputedStyle(document.querySelector('#paperBtn .lbl')).display}; }"""
+SHOT = os.environ.get('GSHOT')
+async def main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch()
+        ctx = await b.new_context(viewport={'width': 1180, 'height': 820}, has_touch=True)
+        await ctx.route('**/*.supabase.co/**', lambda r: r.abort())
+        page = await ctx.new_page(); errs = []
+        page.on('pageerror', lambda e: errs.append(str(e)))
+        await page.goto(URL)
+        await page.wait_for_function('navigator.serviceWorker && navigator.serviceWorker.controller', timeout=30000); await page.wait_for_timeout(2500)
+        await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
+        await page.click('#sideBtn'); await page.wait_for_timeout(300)
+        async def setpos(v):
+            await page.click('#settingsBtn') if await page.is_visible('#settingsBtn') else await page.evaluate("document.getElementById('settingsBtn').click()")
+            await page.wait_for_selector('#settingsDlg', state='visible')
+            await page.click(f'#setBar [data-v={v}]'); await page.wait_for_timeout(200)
+            check(await page.evaluate(f"document.querySelector('#setBar [data-v={v}]').classList.contains('on')"), f'{v}: chosen in Settings')
+            await page.click('#settingsDlg [data-close]'); await page.wait_for_timeout(400)
+        d0 = await page.evaluate(R)
+        check(d0['bar']['b'] <= d0['tools']['t'] + 1, 'default: on top')
+        for v in ('bottom', 'left', 'right', 'top'):
+            await page.evaluate("document.getElementById('settingsBtn').click()")
+            await page.wait_for_selector('#settingsDlg', state='visible')
+            await page.click(f'#setBar [data-v={v}]'); await page.wait_for_timeout(200)
+            await page.click('#settingsDlg [data-close]'); await page.wait_for_timeout(500)
+            d = await page.evaluate(R)
+            st = d['stage']; bar = d['bar']
+            ok = {'bottom': bar['t'] >= st['b'] - 1 and d['tools']['b'] <= st['t'] + 1, 'left': bar['r'] <= st['l'] + 1 and bar['r'] <= d['tools']['l'] + 1, 'right': bar['l'] >= st['r'] - 1 and bar['l'] >= d['tools']['r'] - 1, 'top': bar['b'] <= d['tools']['t'] + 1}[v]
+            check(ok and st['w'] > 300 and st['h'] > 300, f'{v}: bar in place, page beside it ({bar}, {st})')
+            if v in ('left', 'right'): check(d['lbl'] != 'none' and d['paper']['w'] > 120, f'{v}: labels show ({d["lbl"]}, {d["paper"]["w"]})')
+            # drawing surface matches the stage
+            cv = await page.evaluate("(() => { const c = document.getElementById('ink').getBoundingClientRect(); return [c.width, c.height]; })()")
+            check(abs(cv[0] - st['w']) < 2 and abs(cv[1] - st['h']) < 2, f'{v}: ink layer fits the stage ({cv})')
+            await page.click('#paperBtn'); await page.wait_for_timeout(200)
+            pop = await page.evaluate("(() => { const b = document.getElementById('paperPop').getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom}; })()")
+            inside = pop['l'] >= 0 and pop['r'] <= 1180 and pop['t'] >= 0 and pop['b'] <= 820
+            over = pop['l'] < bar['r'] - 1 and pop['r'] > bar['l'] + 1 and pop['t'] < bar['b'] - 1 and pop['b'] > bar['t'] + 1
+            check(inside and not over, f'{v}: menu on screen and not over the bar ({pop})')
+            if SHOT: await page.screenshot(path=f'{SHOT}-{v}.png')
+            await page.mouse.click(st['l'] + 40, st['b'] - 40); await page.wait_for_timeout(200)
+            if v == 'left':
+                # writes where the pen is
+                await page.evaluate("async () => { __inkwell.setTool('pen'); }")
+                n0 = await page.evaluate("__inkwell.cur.items.size")
+                X, Y = st['l'] + 300, st['t'] + 300
+                await page.mouse.move(X, Y); await page.mouse.down(); await page.mouse.move(X + 60, Y + 20, steps=6); await page.mouse.up(); await page.wait_for_timeout(300)
+                w = await page.evaluate("""([X, Y]) => { const W = __inkwell, it = [...W.cur.items.values()].at(-1), s = document.getElementById('stage').getBoundingClientRect(); return [it.p[0] * W.cam.z + W.cam.ox + s.left - X, it.p[1] * W.cam.z + W.cam.oy + s.top - Y]; }""", [X, Y])
+                check(abs(w[0]) < 3 and abs(w[1]) < 3, f'left: ink lands under the pen ({w})')
+            if v == 'right':
+                await page.reload(); await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000); await page.wait_for_timeout(600)
+                check(await page.evaluate("document.getElementById('main').dataset.bar") == 'right', 'kept after a reload')
+                if await page.evaluate("getComputedStyle(document.querySelector('.side')).display") != 'none' : pass
+        await page.set_viewport_size({'width': 390, 'height': 800}); await page.evaluate("__inkwell.prefs.barPos = 'left'; document.getElementById('main').dataset.bar = 'left'"); await page.wait_for_timeout(400)
+        c = await page.evaluate("getComputedStyle(document.getElementById('main')).display")
+        check(c != 'grid', f'phone-sized: side position is not used ({c})')
+        check(not errs, f'no page errors {errs}')
+        await b.close()
+asyncio.run(main())
+if fails: raise SystemExit(1)

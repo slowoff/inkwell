@@ -320,10 +320,14 @@ function buildGraph(o, gx, gy){
   const ax = X(clamp(0, x0, x1)), ay = Y(clamp(0, y0, y1));
   const ticks = (a, b, st) => { const out = []; if(!(st > 0)) return out; const n0 = Math.ceil(a / st - 1e-9), n1 = Math.floor(b / st + 1e-9); if(n1 - n0 > 200) return out; for(let n = n0; n <= n1; n++) out.push(n * st); return out; };
   const tx = ticks(x0, x1, xs), ty = ticks(y0, y1, ys);
+  const every = arr => Math.max(1, Math.ceil(arr.length / Math.max(4, Math.round(12 * S))));
+  const ex = every(tx), ey = every(ty);
   if(o.grid){
     const go = clamp((+L.gridO || 100) / 100, 0.1, 1);
-    for(const v of tx) if(Math.abs(X(v) - ax) > 0.5) stroke([[X(v), Y(y0)], [X(v), Y(y1)]], '#8A97A4', w * 0.45, go);
-    for(const v of ty) if(Math.abs(Y(v) - ay) > 0.5) stroke([[X(x0), Y(v)], [X(x1), Y(v)]], '#8A97A4', w * 0.45, go);
+    // (1.78.1) when not every line gets a number, the lines that have one are stronger, so a number is easy to follow
+    const line = (major, V) => major ? stroke(V, '#8A97A4', w * 0.8, Math.min(1, go * 1.8)) : stroke(V, '#8A97A4', w * 0.45, go);
+    tx.forEach((v, i) => { if(Math.abs(X(v) - ax) > 0.5) line(o.nums && ex > 1 && i % ex === 0, [[X(v), Y(y0)], [X(v), Y(y1)]]); });
+    ty.forEach((v, i) => { if(Math.abs(Y(v) - ay) > 0.5) line(o.nums && ey > 1 && i % ey === 0, [[X(x0), Y(v)], [X(x1), Y(v)]]); });
   }
   const xe = [X(x1) + 22, ay], ye = [ax, Y(y1) - 22];
   // (1.58) the two axis lines remember the graph's ranges (ga), so formulas can be added later (Add formula);
@@ -333,8 +337,6 @@ function buildGraph(o, gx, gy){
   arrow([X(x0), ay], xe);
   stroke([[ax, Y(y0)], ye]); items[items.length - 1].ga = {id: gid, k: 'y', v0: y0, v1: y1, f: GH / (GH + 22), c: clamp(0, x0, x1)};
   arrow([ax, Y(y0)], ye);
-  const every = arr => Math.max(1, Math.ceil(arr.length / Math.max(4, Math.round(12 * S))));
-  const ex = every(tx), ey = every(ty);
   // (1.58.4) numbers measured and centred: under their tick on the x axis, level with it left of the y axis;
   // a number that would touch one already placed is left out (0 first, then the x axis, then the y axis)
   const placed = [];
@@ -356,6 +358,13 @@ function buildGraph(o, gx, gy){
   });
   formula(labelTex(o.lx), xe[0] - 4, ay + 10, 18);
   formula(labelTex(o.ly), ax + 10, ye[1] - 8, 18);
+  // (1.78.1) with grid lines, the numbers again along the top and right edge, so a line far from an axis can be read there
+  if(o.nums && o.grid){
+    for(const [t, x, y] of [[labelTex(o.lx), xe[0] - 4, ay + 10], [labelTex(o.ly), ax + 10, ye[1] - 8]]){ if(t){ const [bw, bh] = texBox(t, 18); placed.push([x, y, x + bw, y + bh]); } }
+    placed.push([X(x1), ay - hs, xe[0] + 2, ay + hs], [ax - hs, ye[1] - 2, ax + hs, Y(y1)]);   // the arrow tips
+    tx.forEach((v, i) => { if(i % ex || Math.abs(X(v) - ax) < 0.5) return; const t = fmtNum(v), [bw, bh] = texBox(t, 12); num(t, X(v) - bw / 2, Y(y1) - bh - 1); });
+    ty.forEach((v, i) => { if(i % ey || Math.abs(Y(v) - ay) < 0.5) return; const t = fmtNum(v), [, bh] = texBox(t, 12); num(t, X(x1) + 2, Y(v) - bh / 2); });
+  }
   if(o.fn){
     const N = 600, segs = []; let seg = [];
     for(let i = 0; i <= N; i++){

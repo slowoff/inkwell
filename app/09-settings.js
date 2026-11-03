@@ -657,7 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
-  ['1.78.1', '2026-11-03', ['Graphs from Shapes are easier to read: with grid lines on, the numbers also show along the top and right edge, and on big graphs the lines that have a number are stronger. New graphs only']],
+  ['1.78.2', '2026-11-03', ['Graphs from Shapes: every fifth line is a bit longer, like on a ruler, so counting is easier. New graphs only']],
   ['1.78', '2026-11-03', ['Put on page now also places Claude\'s graphs and bar charts, so they print and export with your notes']],
   // (entries with no lines are not shown: held back until Rafael says the feature is good)
   ['1.77.3', '2026-11-03', ['Ask Claude shows real tables and can draw graphs and bar charts in its answers. They stay in the Claude panel for now', 'New Normal mode in Ask Claude: answers directly, like the regular Claude app', 'Code blocks in answers stay together as one block']],

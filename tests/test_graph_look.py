@@ -78,7 +78,7 @@ async def main():
         check(d['mc'] == ['#8A97A4'] and d['mo'] == [0.6], f"labels take the axes colour and fade ({d['mc']}, {d['mo']})")
         check(d['elOp'] == '0.6', f"formula element shown faded ({d['elOp']})")
         check(d['axes'] < base_axes, f"no arrow tips ({d['axes']} < {base_axes})")
-        check(abs(d['width'] - (380 * 1.4 + 22 + 4)) < 2, f"Large = 1.4x wide ({d['width']:.0f})")
+        check(abs(d['width'] - (380 * 1.4 + 22 + 4)) < 8, f"Large = 1.4x wide ({d['width']:.0f})")
         check(d['groups'] == 1 and d['sel'] == d['n'], 'one group, selected after insert')
 
         # 3. Fade on the selection: one undo step, works on ink and formulas

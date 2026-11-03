@@ -11,6 +11,9 @@ function normBg(bg){
   const b = Object.assign({}, prefs.bg, bg || {});
   if(!['blank', 'lined', 'grid', 'dots', 'hex'].includes(b.type)) b.type = 'grid';
   b.sx = clamp(+b.sx || 5 * MM, 2 * MM, 30 * MM); b.sy = clamp(+b.sy || 5 * MM, 2 * MM, 30 * MM);
+  // (1.75) a page without its own margin line stays without one, whatever "Use for new pages" holds
+  if(bg && !ML_COLORS[bg.ml]) delete b.ml;
+  if(!b.ml || (bg && !bg.mw)) delete b.mw;
   return b;
 }
 async function openPage(id, opts = {}){
@@ -1188,6 +1191,9 @@ function renderPaper(){
   $('fx').value = (bg.sx / MM).toFixed(1); $('fy').value = (bg.sy / MM).toFixed(1);
   $('fxVal').textContent = (bg.sx / MM).toFixed(1) + ' mm'; $('fyVal').textContent = (bg.sy / MM).toFixed(1) + ' mm';
   $('linkXY').checked = Math.abs(bg.sx - bg.sy) < 0.01;
+  $('mlOn').classList.toggle('on', !!bg.ml); $('mlOpts').hidden = !bg.ml;
+  document.querySelectorAll('#mlColor button').forEach(b => b.classList.toggle('on', b.dataset.v === bg.ml));
+  document.querySelectorAll('#mlWidth button').forEach(b => b.classList.toggle('on', b.dataset.v === (bg.mw === 'thick' ? 'thick' : 'thin')));
 }
 function setBg(patch){ cur.bg = Object.assign({}, cur.bg, patch); renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
 $('paperBtn').addEventListener('click', e => { if(!cur) return; renderPaper(); openPop('paperPop', e.currentTarget); });
@@ -1195,6 +1201,15 @@ $('paperType').addEventListener('click', e => { const b = e.target.closest('[dat
 $('fx').addEventListener('input', () => { const v = +$('fx').value * MM; setBg($('linkXY').checked ? {sx: v, sy: v} : {sx: v}); });
 $('fy').addEventListener('input', () => { const v = +$('fy').value * MM; setBg($('linkXY').checked && cur.bg.type !== 'lined' && cur.bg.type !== 'hex' ? {sx: v, sy: v} : {sy: v}); });
 $('linkXY').addEventListener('change', () => { if(!cur) return; if($('linkXY').checked) setBg({sy: cur.bg.sx}); note(onOff('Square cells', $('linkXY').checked)); });
+// (1.75) margin line. Off = the fields are gone, so the page's data is the same as before it was ever turned on
+$('mlOn').addEventListener('click', () => {
+  if(!cur) return;
+  if(cur.bg.ml){ const b = Object.assign({}, cur.bg); delete b.ml; delete b.mw; cur.bg = b; renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
+  else setBg({ml: 'blue'});
+  note(onOff('Margin line', !!cur.bg.ml));
+});
+$('mlColor').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur) setBg({ml: b.dataset.v}); });
+$('mlWidth').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur) setBg({mw: b.dataset.v}); });
 $('paperDefault').addEventListener('click', () => { if(!cur) return; prefs.bg = Object.assign({}, cur.bg); savePrefs(); closePops(); note('New pages will use this paper'); });
 
 /* more menu */

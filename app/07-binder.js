@@ -1203,16 +1203,23 @@ $('paperType').addEventListener('click', e => { const b = e.target.closest('[dat
 $('fx').addEventListener('input', () => { const v = +$('fx').value * MM; setBg($('linkXY').checked ? {sx: v, sy: v} : {sx: v}); });
 $('fy').addEventListener('input', () => { const v = +$('fy').value * MM; setBg($('linkXY').checked && cur.bg.type !== 'lined' && cur.bg.type !== 'hex' ? {sx: v, sy: v} : {sy: v}); });
 $('linkXY').addEventListener('change', () => { if(!cur) return; if($('linkXY').checked) setBg({sy: cur.bg.sx}); note(onOff('Square cells', $('linkXY').checked)); });
+function mlRemember(){ const b = cur.bg; prefs.mlLast = {ml: b.ml, mw: b.mw, mx: b.mx}; savePrefs(); }
 // (1.75) margin line. Off = the fields are gone, so the page's data is the same as before it was ever turned on
 $('mlOn').addEventListener('click', () => {
   if(!cur) return;
-  if(cur.bg.ml){ const b = Object.assign({}, cur.bg); delete b.ml; delete b.mw; delete b.mx; cur.bg = b; renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
-  else setBg({ml: 'blue'});
+  if(cur.bg.ml){ mlRemember(); const b = Object.assign({}, cur.bg); delete b.ml; delete b.mw; delete b.mx; cur.bg = b; renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
+  else {
+    // (1.76.2) back on with the last colour, thickness and position (per device, prefs.mlLast)
+    const L = prefs.mlLast || {}, patch = {ml: ML_COLORS[L.ml] ? L.ml : 'blue'};
+    if(L.mw === 'thick') patch.mw = 'thick';
+    if(Number.isFinite(L.mx)) patch.mx = L.mx;
+    setBg(patch);
+  }
   note(onOff('Margin line', !!cur.bg.ml));
 });
-$('mlX').addEventListener('input', () => { if(cur) setBg({mx: +$('mlX').value}); });
-$('mlColor').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur) setBg({ml: b.dataset.v}); });
-$('mlWidth').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur) setBg({mw: b.dataset.v}); });
+$('mlX').addEventListener('input', () => { if(cur){ setBg({mx: +$('mlX').value}); mlRemember(); } });
+$('mlColor').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur){ setBg({ml: b.dataset.v}); mlRemember(); } });
+$('mlWidth').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur){ setBg({mw: b.dataset.v}); mlRemember(); } });
 $('paperDefault').addEventListener('click', () => { if(!cur) return; prefs.bg = Object.assign({}, cur.bg); savePrefs(); closePops(); note('New pages will use this paper'); });
 
 /* more menu */

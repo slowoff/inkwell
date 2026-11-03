@@ -946,3 +946,40 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .ml-width button[data-v=thin] i{width:1.5px}
 .ml-width button[data-v=thick] i{width:4px}
 @media (any-pointer:coarse){ .ml-width button{height:38px;width:44px} }
+/* polish */
+.pop{gap:10px}
+.pop-title{padding:2px 4px 2px}
+.pop .hint{padding:0 4px;font-size:12.5px;line-height:1.4}
+#paperPop .field{padding:0 4px}
+#paperPop .check-row{justify-content:space-between;flex-direction:row-reverse;padding:0 4px;height:36px;font-size:14px;color:var(--fg)}
+#paperPop #linkXY{appearance:none;-webkit-appearance:none;width:34px;height:20px;border-radius:10px;background:var(--line);position:relative;margin:0;transition:background .15s}
+#paperPop #linkXY::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--paper);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+#paperPop #linkXY:checked{background:var(--accent)}
+#paperPop #linkXY:checked::after{transform:translateX(14px)}
+#paperPop #mlOn{border-top:1px solid var(--line);margin-top:2px;padding:10px 4px 0;height:46px;color:var(--fg);font-size:14px;justify-content:space-between;flex-direction:row-reverse}
+#paperPop #paperDefault{margin-top:2px}
+.ml-row{padding:0 0 0 0}
+#morePop{gap:0;min-width:250px}
+#morePop .menu-item{display:flex;align-items:center;gap:12px;padding:0 10px;height:44px;font-size:14.5px}
+#morePop .menu-toggle{justify-content:space-between}
+.mi-l{display:flex;align-items:center;gap:12px}
+.mi{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;color:var(--muted)}
+#morePop .danger .mi{color:inherit}
+#morePop .danger{border-top:1px solid var(--line);margin-top:4px;border-radius:0 0 8px 8px}
+#shapePop{gap:6px;width:296px}
+.shape-grid{grid-template-columns:repeat(6,1fr);justify-items:center;gap:2px}
+#shapePop>.btn.ghost,#shapePop .grid-maker>.btn.ghost{background:none;width:100%;height:44px;justify-content:flex-start;padding:0 8px;font-weight:500;font-size:14px;border-radius:8px}
+#compassOpen{border-top:0}
+#shapePop svg{flex:none}
+#compassOpen svg,#gridOpen svg,#graphOpen svg{margin-right:6px}
+#gridOpen .grid-n{margin-left:auto}
+.shape-grid{padding-bottom:6px;border-bottom:1px solid var(--line)}
+#snapShapes{border-top:1px solid var(--line);padding:6px 8px 0;height:44px;color:var(--fg);font-size:14px;justify-content:space-between;flex-direction:row-reverse;width:100%}
+.assist-pop{gap:4px;width:270px}
+.assist-pop .toggle{padding:0 4px;height:40px}
+.assist-pop .hint{margin:0 0 6px;color:var(--muted)}
+#tcolorPop{width:220px}
+#tpalette{grid-template-columns:repeat(4,1fr)}
+#tcolorPop .custom-color{border-top:1px solid var(--line);border-radius:0;margin-top:2px}
+#colorPop .custom-color{border-top:1px solid var(--line);border-radius:0}
+#colorPop .custom-color.on{background:none}

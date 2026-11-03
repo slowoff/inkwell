@@ -657,6 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.76.4', '2026-11-03', ['Menus polished: Paper, More, Shapes, Writing and the colour menus are tidier, with icons in More, simple rows in Shapes and shorter explanations']],
   ['1.76.3', '2026-11-03', ['Colour menu cleaned up: smaller swatches sorted by colour, a tidier Custom colour row that shows when a custom colour is in use, shorter hint']],
   ['1.76.2', '2026-11-03', ['Margin line: turning it off and on again keeps your colour, thickness and position, also on other pages']],
   ['1.76.1', '2026-11-03', ['Margin line menu: colours are now round swatches and the thickness buttons show the actual line']],

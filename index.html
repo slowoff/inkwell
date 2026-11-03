@@ -177,13 +177,13 @@
 </div>
 
 <div class="pop" id="morePop" hidden>
-  <button class="menu-item" id="mHistory">Page history…</button>
-  <button class="menu-item" id="mExport">Export page as PDF</button>
-  <button class="menu-item" id="mPractice">Practice from notes…</button>
-  <button class="menu-item" id="mTemplate">Save page as template</button>
-  <button class="menu-item toggle menu-toggle" id="mSnap" title="When on, a text box placed near the lines of a worksheet sits on them and every line of text follows the next ruled line"><span>Snap text to lines</span><span class="sw"></span></button>
-  <button class="menu-item" id="mFit">Fit everything on screen</button>
-  <button class="menu-item danger" id="mDelete">Delete page</button>
+  <button class="menu-item" id="mHistory"><svg class="mi" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></svg>Page history…</button>
+  <button class="menu-item" id="mExport"><svg class="mi" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 20h14"/></svg>Export page as PDF</button>
+  <button class="menu-item" id="mPractice"><svg class="mi" viewBox="0 0 24 24"><path d="M4 6.5C6.5 5 9.5 5 12 6.5c2.5-1.5 5.5-1.5 8 0V19c-2.500-1.500-5.500-1.500-8 0-2.500-1.500-5.500-1.500-8 0zM12 6.500V19"/></svg>Practice from notes…</button>
+  <button class="menu-item" id="mTemplate"><svg class="mi" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M10 10v10"/></svg>Save page as template</button>
+  <button class="menu-item toggle menu-toggle" id="mSnap" title="When on, a text box placed near the lines of a worksheet sits on them and every line of text follows the next ruled line"><span class="mi-l"><svg class="mi" viewBox="0 0 24 24"><path d="M4 8h16M4 16h16"/><path d="M9 12h6"/></svg>Snap text to lines</span><span class="sw"></span></button>
+  <button class="menu-item" id="mFit"><svg class="mi" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Fit everything on screen</button>
+  <button class="menu-item danger" id="mDelete"><svg class="mi" viewBox="0 0 24 24"><path d="M4.500 7h15M9.500 7V4.500h5V7M6.500 7l1 13h9l1-13"/></svg><span id="mDeleteT">Delete page</span></button>
 </div>
 
 <div class="pop later-pop" id="laterPop" hidden>
@@ -220,15 +220,15 @@
   </div>
   <button class="btn ghost" id="graphOpen"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3v18h16M5 3l-2 3M5 3l2 3M21 21l-3-2M21 21l-3 2"/><path d="M8 17c3-1 5-6 11-9"/></svg>&nbsp;Graph / axes</button>
   <button class="toggle shape-snap" id="snapShapes" title="Lines and arrows you draw, and shapes you turn with the rotate handle, click into 0°, 15°, 45°, 90° … when close to those angles"><span class="sw"></span><span>Snap to angles</span></button>
-  <p class="hint">Pick a shape, then drag on the page. Tap instead of dragging for a standard size. Compass: put the point on the centre, drag out to the radius, then go around for an arc. Grid: press Grid, set rows and columns, then Draw grid and drag a box.</p>
+  <p class="hint">Drag on the page, or tap for a standard size.</p>
 </div>
 
 <div class="pop assist-pop" id="assistPop" hidden>
   <div class="pop-title">Writing</div>
   <button class="toggle" id="scribeBtn"><span class="sw"></span><span>Write to text</span></button>
-  <p class="hint">What you write turns into typed text when you pause (needs sign-in and internet). Undo brings the ink back.</p>
+  <p class="hint">Handwriting becomes typed text when you pause. Needs sign-in.</p>
   <button class="toggle" id="waRef"><span class="sw"></span><span>Reference line</span></button>
-  <p class="hint">A faint line appears under the line you are writing, at the height of its first word, so you can keep the rest straight. Your writing is never moved.</p>
+  <p class="hint">A faint guide under the line you are writing.</p>
 </div>
 
 <div class="pop fade-pop" id="fadePop" hidden>

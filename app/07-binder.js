@@ -1230,10 +1230,10 @@ $('mlWidth').addEventListener('click', e => { const b = e.target.closest('[data-
 $('paperDefault').addEventListener('click', () => { if(!cur) return; prefs.bg = Object.assign({}, cur.bg); savePrefs(); closePops(); note('New pages will use this paper'); });
 
 /* more menu */
-$('moreBtn').addEventListener('click', e => { if(!cur) return; const d = $('mDelete'); d.classList.remove('armed'); d.textContent = 'Delete page'; openPop('morePop', e.currentTarget); });
+$('moreBtn').addEventListener('click', e => { if(!cur) return; const d = $('mDelete'); d.classList.remove('armed'); $('mDeleteT').textContent = 'Delete page'; openPop('morePop', e.currentTarget); });
 $('mDelete').addEventListener('click', () => {
   const d = $('mDelete');
-  if(!d.classList.contains('armed')){ d.classList.add('armed'); d.textContent = 'Tap again to delete this page'; return; }
+  if(!d.classList.contains('armed')){ d.classList.add('armed'); $('mDeleteT').textContent = 'Tap again to delete this page'; return; }
   closePops(); if(cur) deletePage(cur.id);
 });
 $('mSnap').addEventListener('click', () => { prefs.snapLines = !prefs.snapLines; savePrefs(); $('mSnap').classList.toggle('on', prefs.snapLines); note(onOff('Snap text to lines', prefs.snapLines)); });

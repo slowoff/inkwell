@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.82', '2026-11-03', ['Toolbar on the left or right: undo, redo, pens and colours are always there. Title, Import, Shapes, Ask Claude and the rest open from the new menu button']],
   ['1.81.1', '2026-11-03', ['Toolbar position moves the whole toolbar: pens and colours go with it']],
   ['1.81', '2026-11-03', ['Settings → Toolbar position: put the bar with the title, Import, Shapes and Ask Claude on the top, bottom, left or right']],
   ['1.80', '2026-11-03', ['Graphs: the Formulas window (select a graph) now lists the formulas on it. Tap one to change its function, colour or line, or remove it. Works for formulas drawn from now on']],

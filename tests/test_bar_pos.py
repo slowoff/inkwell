@@ -39,14 +39,24 @@ async def main():
             T = d['tools']
             ok = {'bottom': bar['t'] >= st['b'] - 1 and T['t'] >= st['b'] - 1, 'left': bar['r'] <= st['l'] + 1 and T['r'] <= st['l'] + 1, 'right': bar['l'] >= st['r'] - 1 and T['l'] >= st['r'] - 1, 'top': bar['b'] <= T['t'] + 1 and T['b'] <= st['t'] + 1}[v]
             check(ok and st['w'] > 300 and st['h'] > 300, f'{v}: bar in place, page beside it ({bar}, {st})')
-            if v in ('left', 'right'): check(d['lbl'] != 'none' and d['paper']['w'] > 120, f'{v}: labels show ({d["lbl"]}, {d["paper"]["w"]})')
             # drawing surface matches the stage
             cv = await page.evaluate("(() => { const c = document.getElementById('ink').getBoundingClientRect(); return [c.width, c.height]; })()")
             check(abs(cv[0] - st['w']) < 2 and abs(cv[1] - st['h']) < 2, f'{v}: ink layer fits the stage ({cv})')
+            if v in ('left', 'right'):
+                for q in ('#undo', '#redo', '#swatches', '.tools'):
+                    ok2 = await page.evaluate("s => { const b = document.querySelector(s).getBoundingClientRect(); return b.width > 0 && b.top >= 0 && b.bottom <= innerHeight; }", q)
+                    check(ok2, f'{v}: {q} always on screen')
+                check(await page.is_hidden('#paperBtn') and await page.is_hidden('#title'), f'{v}: the rest is tucked away')
+                await page.click('#barMore'); await page.wait_for_timeout(200)
+                pn = await page.evaluate("(() => { const b = document.getElementById('barExtra').getBoundingClientRect(); return {l: b.left, r: b.right, t: b.top, b: b.bottom}; })()")
+                check(pn['b'] <= 820 and pn['l'] >= 0 and pn['r'] <= 1180 and (pn['l'] >= bar['r'] or pn['r'] <= bar['l']), f'{v}: panel beside the column ({pn})')
+                d = await page.evaluate(R)
+                check(d['lbl'] != 'none' and d['paper']['w'] > 120, f'{v}: panel has labels ({d["lbl"]}, {d["paper"]["w"]})')
+                if SHOT: await page.screenshot(path=f'{SHOT}-{v}-panel.png')
             await page.click('#paperBtn'); await page.wait_for_timeout(200)
             pop = await page.evaluate("(() => { const b = document.getElementById('paperPop').getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom}; })()")
             inside = pop['l'] >= 0 and pop['r'] <= 1180 and pop['t'] >= 0 and pop['b'] <= 820
-            over = any(pop['l'] < q['r'] - 1 and pop['r'] > q['l'] + 1 and pop['t'] < q['b'] - 1 and pop['b'] > q['t'] + 1 for q in (bar, d['tools']))
+            over = any(pop['l'] < q['r'] - 1 and pop['r'] > q['l'] + 1 and pop['t'] < q['b'] - 1 and pop['b'] > q['t'] + 1 for q in (bar, d['tools'])) if v not in ('left', 'right') else pop['l'] < pn['r'] - 1 and pop['r'] > pn['l'] + 1
             check(inside and (v == 'top' or not over), f'{v}: menu on screen and not over the bars ({pop})')
             if SHOT: await page.screenshot(path=f'{SHOT}-{v}.png')
             for tool in ('pen', 'lasso', 'text', 'eraser', 'hl'):
@@ -56,6 +66,11 @@ async def main():
                 if SHOT and v == 'left' and tool == 'lasso': await page.screenshot(path=f'{SHOT}-left-lasso.png')
             await page.evaluate("__inkwell.setTool('pen')")
             await page.mouse.click(st['l'] + 40, st['b'] - 40); await page.wait_for_timeout(200)
+            if v in ('left', 'right'):
+                check(await page.is_hidden('#paperBtn'), f'{v}: tapping the page closes the panel')
+                await page.click('#barMore'); await page.click('#calcBtn'); await page.wait_for_timeout(200)
+                check(await page.is_hidden('#barExtra'), f'{v}: a button without a menu closes the panel')
+                await page.evaluate("document.getElementById('calcBtn').click()"); await page.wait_for_timeout(150)
             if v == 'left':
                 # writes where the pen is
                 await page.evaluate("async () => { __inkwell.setTool('pen'); }")

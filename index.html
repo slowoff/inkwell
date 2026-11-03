@@ -60,12 +60,14 @@
 
   <main class="main" id="main">
     <header class="bar1">
+      <button class="tb" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="tb" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+      <button class="tb" id="barMore" title="Title, Import, Shapes, Ask Claude and the rest" aria-label="Show the other buttons" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+      <div class="bar-extra" id="barExtra">
       <button class="tb" id="sideBtn" title="Show or hide notebooks" aria-label="Show or hide notebooks"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
       <button class="tb" id="backLink" title="Back to previous page" aria-label="Back to previous page" hidden><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg><span id="backLinkName"></span></button>
       <input class="title-in" id="title" placeholder="Untitled page" autocomplete="off" aria-label="Page title">
       <button class="tb" id="continueBtn" title="Continue where you left off" aria-label="Continue where you left off"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span class="lbl">Continue</span></button>
-      <button class="tb" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
-      <button class="tb" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
       <span class="sep"></span>
       <button class="tb" id="insertBtn" title="Import PDF or image" aria-label="Import PDF or image"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg><span class="lbl">Import</span></button>
       <button class="tb" id="shapeBtn" title="Insert shape or graph" aria-label="Insert shape or graph"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.5"/><path d="M13.5 13h7v7h-7z"/><path d="M4 20l4-6.5 4 6.5z"/></svg><span class="lbl">Shapes</span></button>
@@ -74,6 +76,7 @@
       <button class="tb" id="calcBtn" title="Calculator" aria-label="Calculator"><svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8 6.5h8v3H8z"/><path d="M8.5 13h.01M12 13h.01M15.5 13h.01M8.5 16.5h.01M12 16.5h.01M15.5 16.5h.01" stroke-width="2.4" stroke-linecap="round"/></svg><span class="lbl">Calculator</span></button>
       <button class="tb" id="paperBtn" title="Paper" aria-label="Paper"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/></svg><span class="lbl">Paper</span></button>
       <button class="tb" id="moreBtn" title="More" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
+      </div>
     </header>
 
     <div class="bar2" id="toolbar">

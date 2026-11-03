@@ -10,6 +10,49 @@ async function loadDocs(){
   docs.clear();
   for(const d of await IDB.all('docs')) if(inMap(d.kind)) docs.set(d.id, d);
 }
+/* (1.79) The welcome page. Also replaces the old one on a device where it was never touched (still timestamp 1, so it
+   never synced and holds nothing of the person's); a page that was edited or deleted is left alone. */
+const WELCOME = {
+  v: 2,
+  page(){ return {sec: 'sec-general', title: 'Start here', order: 0, snippet: 'It replaced OneNote. OneNote has not been told.'}; },
+  ink(id, c, w, pts){
+    const p = []; for(const [x, y] of pts) p.push(x, y, 0.55);
+    return ser({t: 's', id, c, w, hl: 0, p});
+  },
+  content(){
+    const intro = '<h1>Start here</h1><p>It replaced OneNote. OneNote has not been told.</p>' +
+      '<p>Write with the Apple Pencil anywhere. One finger moves the page, two fingers zoom.</p>' +
+      '<ul class="check"><li class="done">Open Inkwell (the hard part)</li>' +
+      '<li>Draw a wobbly line and hold the pen still. Everyone will think you drew it straight</li>' +
+      '<li>Circle something with the lasso and drag it around, just to feel powerful</li>' +
+      '<li>Import a worksheet and write on it, no printer involved</li>' +
+      '<li>Ask Claude to plot y = sin(x). Tutor makes you think, Solve does not, Normal just talks</li>' +
+      '<li>Try Paper → Margin line, like the red one on this page</li>' +
+      '<li>Sign in with the gear, top left, so your notes follow you</li></ul>';
+    const curve = [];
+    for(let i = 0; i <= 80; i++){ const t = i / 80; curve.push([60 + t * 340, 800 - 14 * Math.sin(t * 9) * (1 - t) - 8 - 150 * Math.pow(t, 14)]); }
+    return {wv: WELCOME.v, bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM, ml: 'red', mx: -3}, items: [
+      {t: 'x', id: 'x-welcome-1', x: 0, y: 0, w: 560, fs: 1, html: intro},
+      {t: 'x', id: 'x-welcome-2', x: 0, y: 390, w: 560, fs: 1, html: '<p>Formulas render properly. Tap one to edit it:</p>'},
+      {t: 'm', id: 'm-welcome-1', x: 4, y: 432, fs: 26, c: 'auto', tex: 't_{\\text{start}} = \\lim_{t \\to \\text{deadline}} t'},
+      {t: 'x', id: 'x-welcome-3', x: 0, y: 510, w: 560, fs: 1, html: '<p>Hide-answer tape: tap the yellow strip with a finger.</p><p><b>When is it due?</b> Tomorrow</p>'},
+      {t: 'tp', id: 'p-welcome-1', x: 136, y: 538, w: 92, h: 30},
+      {t: 'x', id: 'x-welcome-4', x: 60, y: 590, w: 340, fs: 1, html: '<p><b>Motivation over time</b> (drawn by hand, peer reviewed by nobody)</p>'},
+      WELCOME.ink('s-welcome-1', 'auto', 2, [[60, 650], [60, 815]]),
+      WELCOME.ink('s-welcome-3', 'auto', 2, [[60, 815], [410, 815]]),
+      WELCOME.ink('s-welcome-2', '#C2362B', 3, curve),
+      {t: 'x', id: 'x-welcome-5', x: 330, y: 822, w: 110, fs: 1, html: '<p>deadline</p>'}
+    ]};
+  },
+  async refresh(){
+    // content docs are not kept in the docs map
+    const c = await IDB.get('docs', 'c_pg-welcome'), p = await IDB.get('docs', 'pg-welcome');
+    if(!c || !p || c.deleted || p.deleted || c.updated !== 1 || p.updated !== 1 || c.dirty || (c.data && c.data.wv >= WELCOME.v)) return;
+    await IDB.put('docs', Object.assign({}, c, {data: WELCOME.content()}));
+    await IDB.put('docs', Object.assign({}, p, {data: Object.assign({}, p.data, {snippet: WELCOME.page().snippet})}));
+    await loadDocs();
+  }
+};
 async function seed(){
   // Fixed ids and an old timestamp: a second device never duplicates these, and real data from sync always wins.
   const T = 1;
@@ -20,16 +63,8 @@ async function seed(){
   await put('sec-physics', 'sec', {nb: 'nb-school', name: 'Physics', color: 2, order: 1});
   await put('sec-general', 'sec', {nb: 'nb-school', name: 'General', color: 4, order: 2});
   await put('sec-ideas', 'sec', {nb: 'nb-personal', name: 'Ideas', color: 3, order: 0});
-  await put('pg-welcome', 'page', {sec: 'sec-general', title: 'Start here', order: 0, snippet: 'Write with the Apple Pencil anywhere'});
-  const intro = '<h1>Start here</h1><p>Write with the Apple Pencil anywhere. One finger moves the page, two fingers zoom.</p>' +
-    '<ul class="check"><li class="done">Open Inkwell</li><li>Hold the pen still at the end of a line or circle to straighten it</li><li>Use the lasso to circle ink, then drag, resize or recolour it</li><li>Import a worksheet PDF and write on it</li><li>Link pages: in a text box, tap Link</li><li>Set up sync in the settings (gear, top left)</li></ul>';
-  await put('c_pg-welcome', 'content', {bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM}, items: [
-    {t: 'x', id: 'x-welcome-1', x: 0, y: 0, w: 560, fs: 1, html: intro},
-    {t: 'x', id: 'x-welcome-2', x: 0, y: 330, w: 560, fs: 1, html: '<p>Formulas render properly. Tap one to edit it:</p>'},
-    {t: 'm', id: 'm-welcome-1', x: 4, y: 372, fs: 26, c: 'auto', tex: 'v = \\frac{\\Delta s}{\\Delta t} = \\frac{120\\,\\text{m}}{8\\,\\text{s}}'},
-    {t: 'x', id: 'x-welcome-3', x: 0, y: 450, w: 560, fs: 1, html: '<p>Hide-answer tape: tap the yellow strip with a finger.</p><p><b>Answer:</b> v = 15 m/s</p>'},
-    {t: 'tp', id: 'p-welcome-1', x: 70, y: 478, w: 130, h: 30}
-  ]});
+  await put('pg-welcome', 'page', WELCOME.page());
+  await put('c_pg-welcome', 'content', WELCOME.content());
 }
 /* =====================================================================
    Import from OneNote (Microsoft Graph). Moves notebooks, sections and pages over once.
@@ -585,6 +620,7 @@ async function boot(){
   window.__inkwellStep = 'reading notebooks';
   await loadDocs();
   if(!docs.size){ await seed(); await loadDocs(); if(!ui.page){ ui.nb = 'nb-school'; ui.sec = 'sec-general'; ui.page = 'pg-welcome'; } }
+  await WELCOME.refresh();
   ensureUi();
   renderFinger(); renderScribe();
   $('mSnap').classList.toggle('on', prefs.snapLines);
@@ -705,5 +741,5 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
   });
 }
 
-window.__inkwell = {putAnswer, graphPic, shapePr, InkCheck, get inkCv(){ return inkCv; }, loadScript, pendAdd, pendDrop, assetRefs, DbSize, Spell, Live, HLS, invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, get lineReady(){ return lineReady; }, GD, renderGD};
+window.__inkwell = {WELCOME, putAnswer, graphPic, shapePr, InkCheck, get inkCv(){ return inkCv; }, loadScript, pendAdd, pendDrop, assetRefs, DbSize, Spell, Live, HLS, invalidate, freshItems, GAdd, TSize, fieldParts, undo, redo, Paste, Clip, boxPoly, TS, pdfLines, savePtxt, CHANGELOG, mergeCurrent, applyRemote, baseSet, WA, strokePath, strokeShape, ON, onInk, onTrace, onSplit, get cur(){ return cur; }, selectIds, get sel(){ return sel; }, Calc, calcEval, cleanScan, Clean, exportPdfFile, Pdf, Prac, Ask, Scribe, PT, ptxtOf, jumpToLine, Sync, exportPdf, printSheets, get exportJob(){ return exportJob; }, addItems, cam, HW, putAnswer, answerBlocks, texPlain, strokesToFormula, findSheet, warpSheet, cleanPaper, Scan, sliderPages, claudeJob, detectLines, scanMarks, openWheel, closeWheel, goToMark, clusterMarks, docs, prefs, parseFn, renderMd, buildGraph, renderDocx, startPick, recognize, setTool, openPage, newPage, IDB, deletePage, trashGroups, purgeTrash, removeDoc, removeItems, replaceItems, cleanHTML, htmlText, mergeContent, mergeKeys, flushSaves, saveContent, baseGet, saveAsset, Files, versionsOf, saveVersion, restoreVersion, openCleanup, renderCloud, snapCellAt, snapLineAt, pageTextAt, placeAt, fitCell, pageLines, get lineReady(){ return lineReady; }, GD, renderGD};
 boot().catch(e => { console.error(e); toast('Inkwell could not start: ' + (e.message || e)); });

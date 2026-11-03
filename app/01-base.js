@@ -10,6 +10,9 @@ const {newId, esc, clamp, MM, A4W, A4H, pad2, tsMs, tsKey, tsEq, hhmm, fmtDate, 
 const {hexEdges, ser, opOf, deser, r1, shapePoint, strokeShape, inkPass, strokePath, inkOutline, strokeBox} = InkGeo;
 const {stable, mergeKeys, mergeContent} = InkMerge;
 const {calcEval, parseFn, texPlain} = InkText;
+// (1.75) margin line on the paper: page field bg.ml = colour name, bg.mw = 'thick' or missing; 25 mm from the left edge
+const ML_COLORS = {blue: '#3B82F6', red: '#E5484D', green: '#2FA36B', grey: '#8A96A3'};
+const ML_X = 25 * MM;
 
 /* =====================================================================
    Basics

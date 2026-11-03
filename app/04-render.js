@@ -190,6 +190,16 @@ function drawBg(){
   bgCtx.setTransform(1, 0, 0, 1, 0, 0);
   bgCtx.clearRect(0, 0, bgCv.width, bgCv.height);
   if(!cur) return;
+  drawPaperLines();
+  const col = ML_COLORS[cur.bg.ml];
+  if(col){
+    // (1.75) stays the same width on screen at any zoom, like the paper lines
+    const lw = cur.bg.mw === 'thick' ? 3 : 1.5, X = Math.round(ML_X * cam.z + cam.ox);
+    bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bgCtx.fillStyle = col; bgCtx.fillRect(X - lw / 2, 0, lw, H);
+  }
+}
+function drawPaperLines(){
   const bg = cur.bg;
   if(bg.type === 'blank') return;
   bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);

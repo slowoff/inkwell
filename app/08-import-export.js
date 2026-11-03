@@ -351,6 +351,17 @@ function fieldParts(it, ox, oy){
     }
   return out;
 }
+// (1.75) margin line for a sheet: {d, c, w} in world units, or null when the page has none or it is outside the sheet
+function marginLine(bg, ya, yb, xa, xb){
+  const c = bg && ML_COLORS[bg.ml];
+  if(!c || ML_X < xa || ML_X > xb) return null;
+  return {d: `M${r1(ML_X)} ${r1(ya)}V${r1(yb)}`, c, w: bg.mw === 'thick' ? 2.4 : 1.2};
+}
+// (1.75) an export reaches at least the margin line, so it shows even when the notes start further right
+function withMargin(bg, b){
+  if(!bg || !ML_COLORS[bg.ml]) return b;
+  return [Math.min(b[0], ML_X), b[1], Math.max(b[2], ML_X), b[3]];
+}
 // paper lines, grid or dots for a world rectangle, as one SVG path (world units)
 function paperPath(bg, ya, yb, xa, xb){
   if(!bg || bg.type === 'blank') return '';
@@ -377,8 +388,9 @@ let exportJob = null;
 async function exportPdf(){
   if(!cur) return;
   finishEditing();
-  const b = contentBox();
+  let b = contentBox();
   if(!b){ toast('This page is empty'); return; }
+  b = withMargin(cur.bg, b);
   const margin = 40, pw = A4W - 2 * margin, ph = A4H - 2 * margin;
   const x0 = b[0] - 12, y0 = b[1] - 12, cw = b[2] - b[0] + 24, ch = b[3] - b[1] + 24;
   const s = Math.min(1, pw / cw), slice = ph / s;
@@ -437,9 +449,11 @@ async function printSheets(gi){
   const J = exportJob; if(!J || J.cur !== cur) return;
   const grp = J.groups[gi], bg = J.bg;
   const paper = (ya, yb, xa, xb) => {
-    const d = paperPath(bg, ya, yb, xa, xb); if(!d) return '';
-    return bg.type === 'dots' ? `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#AEBBC9" stroke-width="1.6" stroke-linecap="round"/></svg>`
-      : `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#D5DFEA" stroke-width="0.8" fill="none"/></svg>`;
+    const d = paperPath(bg, ya, yb, xa, xb), ml = marginLine(bg, ya, yb, xa, xb);
+    const mls = ml ? `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${ml.d}" stroke="${ml.c}" stroke-width="${ml.w}" fill="none"/></svg>` : '';
+    if(!d) return mls;
+    return mls + (bg.type === 'dots' ? `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#AEBBC9" stroke-width="1.6" stroke-linecap="round"/></svg>`
+      : `<svg style="position:absolute;left:0;top:0;overflow:visible" width="1" height="1"><path d="${d}" stroke="#D5DFEA" stroke-width="0.8" fill="none"/></svg>`);
   };
   let html = '';
   for(let k = grp.from; k <= grp.to; k++){
@@ -572,7 +586,7 @@ async function makePdf(){
     if(stop()) return;
     const {PDFDocument, LineCapStyle, pushGraphicsState, popGraphicsState, rectangle, clip, endPath} = PDFLib;
     const items = [...page0.items.values()];
-    const all = pdfSheets(items, b);
+    const all = pdfSheets(items, withMargin(page0.bg, b));
     Pdf.n = all.length;
     $('exportPick').hidden = all.length < 2;
     const pick = Pdf.only ? Pdf.only.filter(i => i < all.length) : null;
@@ -621,6 +635,8 @@ async function makePdf(){
       const at = {x: X(0), y: Y(0), scale: s * k};
       const d = paperPath(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
       if(d) page.drawSvgPath(d, page0.bg.type === 'dots' ? {...at, borderColor: hexRgb('#AEBBC9'), borderWidth: 1.6, borderLineCap: LineCapStyle.Round} : {...at, borderColor: hexRgb('#D5DFEA'), borderWidth: 0.8});
+      const ml = marginLine(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
+      if(ml) page.drawSvgPath(ml.d, {...at, borderColor: hexRgb(ml.c), borderWidth: ml.w});
       for(const it of pics){
         if(!reach(it.y, it.y + it.h)) continue;
         let img = embedded.get(it.a);

@@ -928,3 +928,5 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .ts-box b{position:absolute;display:block;border:1.5px dashed var(--accent);border-radius:2px;background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .shot-dlg img{display:block;max-width:100%;max-height:60vh;margin:8px auto 12px;border-radius:6px;box-shadow:0 0 0 1px var(--line);background:#fff;-webkit-touch-callout:default;-webkit-user-select:auto;user-select:auto}
 @media (any-pointer:coarse){ .ah-filter button{height:44px} }
+#mlOpts{display:flex;flex-direction:column;gap:8px}
+#mlOpts[hidden]{display:none}

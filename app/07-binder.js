@@ -559,7 +559,7 @@ document.querySelectorAll('.side-grip').forEach(g => {
 /* =====================================================================
    Toolbar
    ===================================================================== */
-const PALETTE = ['auto', '#5D6B79', '#8A97A4', '#1F4FCF', '#3BA5F0', '#0E8C8C', '#167A3C', '#4CC26B', '#9BC53D', '#F5C400', '#E07A10', '#C2362B', '#FF6FA3', '#CC3F66', '#7B3FBF', '#A04FBD', '#8B5A2B', '#FFFFFF'];
+const PALETTE = ['auto', '#5D6B79', '#8A97A4', '#FFFFFF', '#8B5A2B', '#E07A10', '#C2362B', '#CC3F66', '#FF6FA3', '#A04FBD', '#7B3FBF', '#1F4FCF', '#3BA5F0', '#0E8C8C', '#167A3C', '#4CC26B', '#9BC53D', '#F5C400'];
 // eraser picked in the Pencil menu: one erase, then back to the tool from before (set in wheelPick)
 let eraseOnce = null;
 function setTool(t){
@@ -674,10 +674,17 @@ $('swatches').addEventListener('pointerup', e => {
   prefs[t].c = favs[+b.dataset.i]; savePrefs(); renderOpts();
 });
 $('swatches').addEventListener('pointerleave', () => { if(lp && lp !== 'done') clearTimeout(lp); lp = null; });
+// (1.76.3) the custom row shows the colour in use when it is not one of the palette's
+function customRow(c){
+  const own = /^#[0-9a-f]{6}$/i.test(c || '') && !PALETTE.includes(c);
+  $('customRow').classList.toggle('on', own);
+  $('customRow').style.setProperty('--cc', own ? c : 'transparent');
+}
 $('colorBtn').addEventListener('click', e => {
   const t = prefs.tool;
   $('palette').innerHTML = PALETTE.map(c => `<button data-c="${c}" class="${prefs[t] && prefs[t].c === c ? 'on' : ''}" style="--c:${c === 'auto' ? 'var(--fg)' : c}" aria-label="${c === 'auto' ? 'Black or white ink' : c}"></button>`).join('');
   $('customColor').value = /^#[0-9a-f]{6}$/i.test(prefs[t].c) ? prefs[t].c : '#1f4fcf';
+  customRow(prefs[t].c);
   openPop('colorPop', e.currentTarget);
 });
 $('palette').addEventListener('click', e => {
@@ -685,7 +692,7 @@ $('palette').addEventListener('click', e => {
   const t = prefs.tool === 'hl' ? 'hl' : 'pen';
   prefs[t].c = b.dataset.c; savePrefs(); renderOpts(); closePops();
 });
-$('customColor').addEventListener('input', () => { const t = prefs.tool === 'hl' ? 'hl' : 'pen'; prefs[t].c = $('customColor').value; savePrefs(); renderOpts(); });
+$('customColor').addEventListener('input', () => { const t = prefs.tool === 'hl' ? 'hl' : 'pen'; prefs[t].c = $('customColor').value; customRow(prefs[t].c); document.querySelectorAll('#palette .on').forEach(b => b.classList.remove('on')); savePrefs(); renderOpts(); });
 $('rulerBtn').addEventListener('click', () => {
   prefs.ruler.on = !prefs.ruler.on;
   if(prefs.ruler.on) centerRuler(true);   // always appears in the middle of the screen, straight

@@ -1059,3 +1059,9 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
   .main[data-bar=left] .bar2 .size input,.main[data-bar=right] .bar2 .size input{flex:1;min-width:0;width:auto}
   .main[data-bar=left] .bar2 .opts .seg,.main[data-bar=right] .bar2 .opts .seg{width:100%}
 }
+/* (1.83) on the right the most used buttons sit nearest the corner, under the thumb of the hand holding the iPad */
+@media (min-width:761px){
+  .main[data-bar=right] .bar1{flex-direction:row-reverse}
+  .main[data-bar=right] #barMore{margin-left:0;margin-right:auto;order:9}
+  .main[data-bar=right] .bar2 .tools,.main[data-bar=right] .bar2 .swatches,.main[data-bar=right] .bar2 .opts{flex-direction:row-reverse}
+}

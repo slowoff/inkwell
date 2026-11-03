@@ -47,6 +47,10 @@ async def main():
                     ok2 = await page.evaluate("s => { const b = document.querySelector(s).getBoundingClientRect(); return b.width > 0 && b.top >= 0 && b.bottom <= innerHeight; }", q)
                     check(ok2, f'{v}: {q} always on screen')
                 check(await page.is_hidden('#paperBtn') and await page.is_hidden('#title'), f'{v}: the rest is tucked away')
+                if v == 'right':
+                    q = await page.evaluate("""() => { const r = s => document.querySelector(s).getBoundingClientRect(); const u = r('#undo'), m = r('#barMore'), p = r('[data-tool=pen]'), k = r('[data-tool=mark]'), sw = r('#swatches .swatch'); return {u: u.right, m: m.right, p: p.right, k: k.right, sw: sw.right, bottom: sw.bottom, W: innerWidth}; }""")
+                    check(q['W'] - q['u'] < 20 and q['W'] - q['p'] < 20 and q['W'] - q['sw'] < 20 and q['m'] < q['u'], f'right: undo, pen and first colour by the edge, menu button furthest ({q})')
+                    check(q['bottom'] < 300, f'right: colours start near the top ({q["bottom"]})')
                 await page.click('#barMore'); await page.wait_for_timeout(200)
                 pn = await page.evaluate("(() => { const b = document.getElementById('barExtra').getBoundingClientRect(); return {l: b.left, r: b.right, t: b.top, b: b.bottom}; })()")
                 check(pn['b'] <= 820 and pn['l'] >= 0 and pn['r'] <= 1180 and (pn['l'] >= bar['r'] or pn['r'] <= bar['l']), f'{v}: panel beside the column ({pn})')

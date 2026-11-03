@@ -14,6 +14,7 @@ function normBg(bg){
   // (1.75) a page without its own margin line stays without one, whatever "Use for new pages" holds
   if(bg && !ML_COLORS[bg.ml]) delete b.ml;
   if(!b.ml || (bg && !bg.mw)) delete b.mw;
+  if(!b.ml || (bg && !Number.isFinite(bg.mx))) delete b.mx;
   return b;
 }
 async function openPage(id, opts = {}){
@@ -1191,6 +1192,7 @@ function renderPaper(){
   $('fx').value = (bg.sx / MM).toFixed(1); $('fy').value = (bg.sy / MM).toFixed(1);
   $('fxVal').textContent = (bg.sx / MM).toFixed(1) + ' mm'; $('fyVal').textContent = (bg.sy / MM).toFixed(1) + ' mm';
   $('linkXY').checked = Math.abs(bg.sx - bg.sy) < 0.01;
+  $('mlX').value = Math.round(mlX(bg) / MM); $('mlXVal').textContent = Math.round(mlX(bg) / MM) + ' mm';
   $('mlOn').classList.toggle('on', !!bg.ml); $('mlOpts').hidden = !bg.ml;
   document.querySelectorAll('#mlColor button').forEach(b => b.classList.toggle('on', b.dataset.v === bg.ml));
   document.querySelectorAll('#mlWidth button').forEach(b => b.classList.toggle('on', b.dataset.v === (bg.mw === 'thick' ? 'thick' : 'thin')));
@@ -1204,10 +1206,11 @@ $('linkXY').addEventListener('change', () => { if(!cur) return; if($('linkXY').c
 // (1.75) margin line. Off = the fields are gone, so the page's data is the same as before it was ever turned on
 $('mlOn').addEventListener('click', () => {
   if(!cur) return;
-  if(cur.bg.ml){ const b = Object.assign({}, cur.bg); delete b.ml; delete b.mw; cur.bg = b; renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
+  if(cur.bg.ml){ const b = Object.assign({}, cur.bg); delete b.ml; delete b.mw; delete b.mx; cur.bg = b; renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
   else setBg({ml: 'blue'});
   note(onOff('Margin line', !!cur.bg.ml));
 });
+$('mlX').addEventListener('input', () => { if(cur) setBg({mx: +$('mlX').value}); });
 $('mlColor').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur) setBg({ml: b.dataset.v}); });
 $('mlWidth').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b && cur) setBg({mw: b.dataset.v}); });
 $('paperDefault').addEventListener('click', () => { if(!cur) return; prefs.bg = Object.assign({}, cur.bg); savePrefs(); closePops(); note('New pages will use this paper'); });

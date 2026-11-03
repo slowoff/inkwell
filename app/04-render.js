@@ -194,7 +194,7 @@ function drawBg(){
   const col = ML_COLORS[cur.bg.ml];
   if(col){
     // (1.75) stays the same width on screen at any zoom, like the paper lines
-    const lw = cur.bg.mw === 'thick' ? 3 : 1.5, X = Math.round(ML_X * cam.z + cam.ox);
+    const lw = cur.bg.mw === 'thick' ? 3 : 1.5, X = Math.round(mlX(cur.bg) * cam.z + cam.ox);
     bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     bgCtx.fillStyle = col; bgCtx.fillRect(X - lw / 2, 0, lw, H);
   }

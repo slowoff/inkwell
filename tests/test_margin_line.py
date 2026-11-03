@@ -9,7 +9,7 @@ def check(ok, what):
     if not ok: fails.append(what)
 # pixel of the paper canvas on the margin line
 PIX = """() => { const W = __inkwell, c = document.getElementById('bg') || document.querySelector('canvas'), d = devicePixelRatio || 1;
-  const x = Math.round((25 * 96 / 25.4 * W.cam.z + W.cam.ox) * d), y = Math.round(300 * d);
+  const x = Math.round(((Number.isFinite(W.cur.bg.mx) ? W.cur.bg.mx : 25) * 96 / 25.4 * W.cam.z + W.cam.ox) * d), y = Math.round(300 * d);
   return [...c.getContext('2d').getImageData(x, y, 1, 1).data]; }"""
 async def main():
     async with async_playwright() as p:
@@ -35,20 +35,24 @@ async def main():
         await page.click('#mlColor [data-v=red]'); await page.click('#mlWidth [data-v=thick]'); await page.wait_for_timeout(200)
         px = await page.evaluate(PIX)
         check(px[0] > 200 and px[2] < 120, f'red line drawn ({px})')
+        await page.evaluate("() => { const r = document.getElementById('mlX'); r.value = -10; r.dispatchEvent(new Event('input', {bubbles: true})); }"); await page.wait_for_timeout(200)
+        px = await page.evaluate(PIX)
+        check(await page.evaluate("() => __inkwell.cur.bg.mx") == -10 and px[0] > 200 and px[2] < 120, f'slider moves the line left of 0 ({px})')
+        check(await page.inner_text('#mlXVal') == '-10 mm', 'slider shows the position')
         await page.keyboard.press('Escape')
         # blank paper still shows it
         await page.evaluate("() => __inkwell.flushSaves()"); await page.wait_for_timeout(300)
         await page.reload(); await page.wait_for_timeout(3000)
         await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
         bg = await page.evaluate("() => __inkwell.cur.bg")
-        check(bg.get('ml') == 'red' and bg.get('mw') == 'thick', f'kept after reload ({bg})')
+        check(bg.get('ml') == 'red' and bg.get('mw') == 'thick' and bg.get('mx') == -10, f'kept after reload ({bg})')
         # "use for new pages": new pages get it, a page saved without one does not
         await page.evaluate("async () => { const P = __inkwell.prefs; P.bg = Object.assign({}, __inkwell.cur.bg); await __inkwell.newPage(); }"); await page.wait_for_timeout(300)
         bg = await page.evaluate("() => __inkwell.cur.bg")
         check(bg.get('ml') == 'red' and bg.get('mw') == 'thick', f'new page uses the default ({bg})')
         await page.click('#paperBtn'); await page.click('#mlOn'); await page.wait_for_timeout(200)
         bg = await page.evaluate("() => __inkwell.cur.bg")
-        check('ml' not in bg and 'mw' not in bg, f'off removes the fields ({bg})')
+        check('ml' not in bg and 'mw' not in bg and 'mx' not in bg, f'off removes the fields ({bg})')
         await page.keyboard.press('Escape')
         await page.evaluate("() => __inkwell.flushSaves()"); await page.wait_for_timeout(200)
         pid = await page.evaluate("() => __inkwell.cur.id")

@@ -12,7 +12,8 @@ const {stable, mergeKeys, mergeContent} = InkMerge;
 const {calcEval, parseFn, texPlain} = InkText;
 // (1.75) margin line on the paper: page field bg.ml = colour name, bg.mw = 'thick' or missing; 25 mm from the left edge
 const ML_COLORS = {blue: '#3B82F6', red: '#E5484D', green: '#2FA36B', grey: '#8A96A3'};
-const ML_X = 25 * MM;
+// (1.76) bg.mx = distance from world x = 0 in mm (may be negative); missing = 25
+const mlX = bg => (Number.isFinite(bg.mx) ? bg.mx : 25) * MM;
 
 /* =====================================================================
    Basics

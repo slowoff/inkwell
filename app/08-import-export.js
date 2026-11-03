@@ -354,13 +354,15 @@ function fieldParts(it, ox, oy){
 // (1.75) margin line for a sheet: {d, c, w} in world units, or null when the page has none or it is outside the sheet
 function marginLine(bg, ya, yb, xa, xb){
   const c = bg && ML_COLORS[bg.ml];
-  if(!c || ML_X < xa || ML_X > xb) return null;
-  return {d: `M${r1(ML_X)} ${r1(ya)}V${r1(yb)}`, c, w: bg.mw === 'thick' ? 2.4 : 1.2};
+  if(!c) return null;
+  const mx = mlX(bg);
+  if(mx < xa || mx > xb) return null;
+  return {d: `M${r1(mx)} ${r1(ya)}V${r1(yb)}`, c, w: bg.mw === 'thick' ? 2.4 : 1.2};
 }
 // (1.75) an export reaches at least the margin line, so it shows even when the notes start further right
 function withMargin(bg, b){
   if(!bg || !ML_COLORS[bg.ml]) return b;
-  return [Math.min(b[0], ML_X), b[1], Math.max(b[2], ML_X), b[3]];
+  return [Math.min(b[0], mlX(bg)), b[1], Math.max(b[2], mlX(bg)), b[3]];
 }
 // paper lines, grid or dots for a world rectangle, as one SVG path (world units)
 function paperPath(bg, ya, yb, xa, xb){

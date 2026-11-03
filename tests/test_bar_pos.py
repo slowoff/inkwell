@@ -36,7 +36,8 @@ async def main():
             await page.click('#settingsDlg [data-close]'); await page.wait_for_timeout(500)
             d = await page.evaluate(R)
             st = d['stage']; bar = d['bar']
-            ok = {'bottom': bar['t'] >= st['b'] - 1 and d['tools']['b'] <= st['t'] + 1, 'left': bar['r'] <= st['l'] + 1 and bar['r'] <= d['tools']['l'] + 1, 'right': bar['l'] >= st['r'] - 1 and bar['l'] >= d['tools']['r'] - 1, 'top': bar['b'] <= d['tools']['t'] + 1}[v]
+            T = d['tools']
+            ok = {'bottom': bar['t'] >= st['b'] - 1 and T['t'] >= st['b'] - 1, 'left': bar['r'] <= st['l'] + 1 and T['r'] <= st['l'] + 1, 'right': bar['l'] >= st['r'] - 1 and T['l'] >= st['r'] - 1, 'top': bar['b'] <= T['t'] + 1 and T['b'] <= st['t'] + 1}[v]
             check(ok and st['w'] > 300 and st['h'] > 300, f'{v}: bar in place, page beside it ({bar}, {st})')
             if v in ('left', 'right'): check(d['lbl'] != 'none' and d['paper']['w'] > 120, f'{v}: labels show ({d["lbl"]}, {d["paper"]["w"]})')
             # drawing surface matches the stage
@@ -45,9 +46,15 @@ async def main():
             await page.click('#paperBtn'); await page.wait_for_timeout(200)
             pop = await page.evaluate("(() => { const b = document.getElementById('paperPop').getBoundingClientRect(); return {l: b.left, t: b.top, r: b.right, b: b.bottom}; })()")
             inside = pop['l'] >= 0 and pop['r'] <= 1180 and pop['t'] >= 0 and pop['b'] <= 820
-            over = pop['l'] < bar['r'] - 1 and pop['r'] > bar['l'] + 1 and pop['t'] < bar['b'] - 1 and pop['b'] > bar['t'] + 1
-            check(inside and not over, f'{v}: menu on screen and not over the bar ({pop})')
+            over = any(pop['l'] < q['r'] - 1 and pop['r'] > q['l'] + 1 and pop['t'] < q['b'] - 1 and pop['b'] > q['t'] + 1 for q in (bar, d['tools']))
+            check(inside and (v == 'top' or not over), f'{v}: menu on screen and not over the bars ({pop})')
             if SHOT: await page.screenshot(path=f'{SHOT}-{v}.png')
+            for tool in ('pen', 'lasso', 'text', 'eraser', 'hl'):
+                await page.evaluate(f"__inkwell.setTool('{tool}')"); await page.wait_for_timeout(120)
+                over = await page.evaluate("(() => { const b = document.getElementById('toolbar'); return b.scrollWidth - b.clientWidth; })()")
+                check(over <= 1, f'{v}: {tool} options fit across ({over})')
+                if SHOT and v == 'left' and tool == 'lasso': await page.screenshot(path=f'{SHOT}-left-lasso.png')
+            await page.evaluate("__inkwell.setTool('pen')")
             await page.mouse.click(st['l'] + 40, st['b'] - 40); await page.wait_for_timeout(200)
             if v == 'left':
                 # writes where the pen is

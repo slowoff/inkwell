@@ -1329,14 +1329,16 @@ async function restoreVersion(v){
 /* =====================================================================
    Popovers and dialogs
    ===================================================================== */
-/* (1.81) Settings -> Top bar position (prefs.barPos, per device): the title bar on top, bottom, left or right. CSS does the
+/* (1.81) Settings -> Toolbar position (prefs.barPos, per device): both bars on top, bottom, left or right. CSS does the
    layout from #main's data-bar (a phone-sized window keeps it on top or bottom); the stage follows through its ResizeObserver. */
 function applyBarPos(){ const v = prefs.barPos; if(v && v !== 'top') $('main').dataset.bar = v; else delete $('main').dataset.bar; closePops(); }
 // a menu from a bar on the side opens beside the bar, not on top of it
 function popBeside(p, anchor, r, pw, ph){
-  const side = anchor.closest('.bar1') && innerWidth >= 761 && $('main').dataset.bar;
+  const side = anchor.closest('.bar1,.bar2') && innerWidth >= 761 && $('main').dataset.bar;
+  // at the bottom the top line's menus open above both bars
+  if(side === 'bottom' && anchor.closest('.bar1')){ p.style.top = Math.max(8, $('toolbar').getBoundingClientRect().top - ph - 8) + 'px'; return true; }
   if(side !== 'left' && side !== 'right') return false;
-  const bar = anchor.closest('.bar1').getBoundingClientRect();
+  const bar = anchor.closest('.bar1,.bar2').getBoundingClientRect();
   p.style.left = clamp(side === 'left' ? bar.right + 8 : bar.left - pw - 8, 8, innerWidth - pw - 8) + 'px';
   p.style.top = clamp(r.top, 8, Math.max(8, innerHeight - ph - 8)) + 'px';
   return true;

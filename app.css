@@ -1021,21 +1021,26 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .ga-del{width:44px;height:44px;flex:none;display:grid;place-items:center;color:var(--muted);border-radius:9px}
 .ga-del svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 @media (hover:hover){ .ga-pick:hover,.ga-del:hover{background:var(--panel2)} }
-/* (1.81) Top bar position */
-.main[data-bar=bottom] .bar1{order:9;position:static;border-bottom:0;border-top:1px solid var(--line);padding-bottom:calc(6px + var(--sab))}
+/* (1.81) Bars position; (1.81.1) both bars move together */
 .main[data-bar=bottom] .stage{order:5}
+.main[data-bar=bottom] .bar2{order:6;border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
+.main[data-bar=bottom] .bar1{order:9;position:static;border-bottom:0;padding-bottom:calc(6px + var(--sab))}
 @media (min-width:761px){
-  .main[data-bar=left],.main[data-bar=right]{display:grid;grid-template-rows:auto minmax(0,1fr);grid-template-columns:172px minmax(0,1fr)}
-  .main[data-bar=right]{grid-template-columns:minmax(0,1fr) 172px}
+  .main[data-bar=left],.main[data-bar=right]{display:grid;grid-template-rows:auto minmax(0,1fr);grid-template-columns:196px minmax(0,1fr)}
+  .main[data-bar=right]{grid-template-columns:minmax(0,1fr) 196px}
   .main[data-bar] .bar1{container-type:normal}
-  .main[data-bar=left] .bar1,.main[data-bar=right] .bar1{grid-row:1/3;position:static;flex-wrap:wrap;align-items:flex-start;align-content:flex-start;overflow-y:auto;border-bottom:0;padding-bottom:calc(6px + var(--sab));scrollbar-width:none}
-  .main[data-bar=left] .bar1{grid-column:1;border-right:1px solid var(--line)}
-  .main[data-bar=right] .bar1{grid-column:2;border-left:1px solid var(--line)}
-  .main[data-bar=left] .bar2,.main[data-bar=left] .stage{grid-column:2}
-  .main[data-bar=right] .bar2,.main[data-bar=right] .stage{grid-column:1}
-  .main[data-bar=left] .bar2,.main[data-bar=right] .bar2{grid-row:1}
-  .main[data-bar=left] .stage,.main[data-bar=right] .stage{grid-row:2}
-  .main[data-bar=left] .bar1 .sep,.main[data-bar=right] .bar1 .sep{display:none}
-  .main[data-bar=left] .title-in,.main[data-bar=right] .title-in{flex:1 0 100%;width:100%;order:-1;font-size:16px;white-space:normal}
+  .main[data-bar=left] .stage{grid-column:2;grid-row:1/3}
+  .main[data-bar=right] .stage{grid-column:1;grid-row:1/3}
+  .main[data-bar=left] .bar1,.main[data-bar=left] .bar2{grid-column:1;border-right:1px solid var(--line)}
+  .main[data-bar=right] .bar1,.main[data-bar=right] .bar2{grid-column:2;border-left:1px solid var(--line)}
+  .main[data-bar=left] .bar1,.main[data-bar=right] .bar1{grid-row:1;position:static;flex-wrap:wrap;align-items:flex-start;align-content:flex-start}
+  .main[data-bar=left] .bar2,.main[data-bar=right] .bar2{grid-row:2;flex-wrap:wrap;align-items:flex-start;align-content:flex-start;overflow:hidden auto;border-bottom:0;padding-bottom:calc(6px + var(--sab));-webkit-mask-image:none;mask-image:none}
+  .main[data-bar=left] .sep,.main[data-bar=right] .sep{display:none}
+  .main[data-bar=left] .title-in,.main[data-bar=right] .title-in{flex:1 0 100%;width:100%;order:-1;font-size:16px}
   .main[data-bar=left] .bar1 .tb:has(.lbl),.main[data-bar=right] .bar1 .tb:has(.lbl){flex:1 0 100%;justify-content:flex-start;height:44px}
+  .main[data-bar=left] .bar2 .tools,.main[data-bar=right] .bar2 .tools,.main[data-bar=left] .bar2 .opts,.main[data-bar=right] .bar2 .opts,.main[data-bar=left] .bar2 .swatches,.main[data-bar=right] .bar2 .swatches,.main[data-bar=left] .bar2 .fmt,.main[data-bar=right] .bar2 .fmt{flex-wrap:wrap;width:100%;min-width:0;overflow:visible}
+  .main[data-bar=left] .bar2 .tools,.main[data-bar=right] .bar2 .tools{padding-bottom:6px;border-bottom:1px solid var(--line);margin-bottom:6px}
+  .main[data-bar=left] .bar2 .size,.main[data-bar=right] .bar2 .size{width:100%}
+  .main[data-bar=left] .bar2 .size input,.main[data-bar=right] .bar2 .size input{flex:1;min-width:0;width:auto}
+  .main[data-bar=left] .bar2 .opts .seg,.main[data-bar=right] .bar2 .opts .seg{width:100%}
 }

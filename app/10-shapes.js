@@ -371,13 +371,16 @@ function buildGraph(o, gx, gy){
     }
     if(seg.length > 1) segs.push(seg);
     const fw = w * (L.fnW > 0 ? L.fnW : 1.15), fc = L.fnC || '#1F4FCF';
+    const gf = o.src ? {id: 'f' + newId(), src: o.src, s: L.fnS || 'solid'} : null;   // (1.80) so it can be changed later
     for(const sg of segs){
       const pieces = L.fnS === 'dash' ? dashPolys(sg, Math.max(8, fw * 4), Math.max(6, fw * 3))
         : L.fnS === 'dot' ? dashPolys(sg, Math.max(0.6, fw * 0.3), Math.max(5, fw * 2.6)) : [sg];
       for(const pc of pieces){
         // thin out points that lie on a straight line
         const V = pc.length > 2 ? rdp(pc, 0.25) : pc;
-        items.push({t: 's', id: id('s'), c: fc, w: fw, hl: 0, p: polyPts(V, false)});
+        const it = {t: 's', id: id('s'), c: fc, w: fw, hl: 0, p: polyPts(V, false)};
+        if(gf) it.gf = gf;
+        items.push(it);
       }
     }
   }
@@ -418,7 +421,7 @@ function readGraph(){
   if(graphType !== '3d'){
     Object.assign(o, {x0: num('gX0'), x1: num('gX1'), xs: Math.abs(num('gXs')), y0: num('gY0'), y1: num('gY1'), ys: Math.abs(num('gYs'))});
     if(!(o.x1 > o.x0) || !(o.y1 > o.y0)) return {err: 'Each "to" must be bigger than its "from".'};
-    try { o.fn = parseFn($('gFn').value); } catch(err){ return {err: err.message}; }
+    try { o.fn = parseFn($('gFn').value); o.src = $('gFn').value.trim(); } catch(err){ return {err: err.message}; }
   }
   return {o};
 }
@@ -505,8 +508,50 @@ $('gInsert').addEventListener('click', () => {
 });
 
 /* (1.58) Add formula: draw another function on a graph that is selected */
+/* (1.80) Formulas on a graph: every curve and its label carry gf = {id, src (what was typed), s (line style)}, so the window
+   lists them and can change or remove one. Curves from before 1.80 do not know their formula and are not listed. */
 const GAdd = {
   g: null,   // {x: x-axis item, y: y-axis item}
+  edit: null,   // the gf id being changed, null = adding a new one
+  parts(fid){ const g = cur.items.get(GAdd.g.x.id); return g ? [...cur.items.values()].filter(it => it.gf && it.g === g.g && it.gf.id === fid) : []; },
+  list(){
+    const g = GAdd.g && cur.items.get(GAdd.g.x.id), out = new Map();
+    if(!g) return [];
+    for(const it of cur.items.values()){
+      if(!it.gf || it.g !== g.g) continue;
+      let f = out.get(it.gf.id); if(!f){ f = {id: it.gf.id, src: it.gf.src, s: it.gf.s || 'solid', c: it.c, lbl: false}; out.set(f.id, f); }
+      if(it.t === 'm') f.lbl = true; else f.c = it.c;
+    }
+    return [...out.values()];
+  },
+  plain: src => 'y = ' + String(src).replace(/^\s*[yf]\s*(\(\s*x\s*\))?\s*=\s*/i, ''),
+  renderList(){
+    const fs = GAdd.list();
+    $('gaListWrap').hidden = !fs.length;
+    $('gaList').innerHTML = fs.map(f => `<div class="ga-row${f.id === GAdd.edit ? ' on' : ''}" data-f="${f.id}"><button class="ga-pick" data-pick title="Change this formula"><i style="background:${esc(f.c)}"></i><span>${esc(GAdd.plain(f.src))}</span></button><button class="ga-del" data-del aria-label="Remove this formula" title="Remove"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join('');
+    $('gaTitle').textContent = GAdd.edit ? 'Change formula' : fs.length ? 'Formulas on the graph' : 'Add formula to the graph';
+    $('gaAdd').textContent = GAdd.edit ? 'Save' : 'Add';
+    $('gaNew').hidden = !GAdd.edit;
+  },
+  // pick a formula to change, or null for a new one
+  pick(fid){
+    const f = fid && GAdd.list().find(x => x.id === fid);
+    GAdd.edit = f ? f.id : null;
+    if(f){
+      if(!$('gaC').querySelector(`[data-c="${CSS.escape(f.c)}"]`)) $('gaC').insertAdjacentHTML('beforeend', `<button class="swatch" data-c="${esc(f.c)}" aria-label="Colour ${esc(f.c)}"><span style="--c:${esc(f.c)}"></span></button>`);
+      GAdd.c = f.c; GAdd.s = f.s; $('gaFn').value = f.src; $('gaLbl').checked = f.lbl;
+    } else {
+      $('gaFn').value = ''; $('gaLbl').checked = !!prefs.gaLbl;
+    }
+    $('gaMsg').textContent = '';
+    GAdd.render(); GAdd.renderList();
+  },
+  remove(fid){
+    const ids = GAdd.parts(fid).map(it => it.id); if(!ids.length) return;
+    const keep = sel ? sel.ids.filter(i => !ids.includes(i)) : [];
+    removeItems(ids); selectIds(keep);
+    if(GAdd.edit === fid) GAdd.pick(null); else GAdd.renderList();
+  },
   // a graph in the selection: both axis lines of the same graph
   find(its){
     const xs = its.filter(it => it.t === 's' && it.ga && it.ga.k === 'x');
@@ -529,9 +574,8 @@ const GAdd = {
     GAdd.s = 'solid';
     $('gaC').innerHTML = cols.map(c => `<button class="swatch" data-c="${c}" aria-label="Colour ${c}"><span style="--c:${c}"></span></button>`).join('');
     GAdd.render();
-    $('gaFn').value = ''; $('gaMsg').textContent = '';
     if(prefs.gaLbl === undefined) prefs.gaLbl = true;
-    $('gaLbl').checked = !!prefs.gaLbl;
+    GAdd.pick(null);
     showModal('gAddDlg');
     setTimeout(() => $('gaFn').focus(), 60);
   },
@@ -567,7 +611,7 @@ const GAdd = {
     if(seg.length > 1) segs.push(seg);
     if(!segs.length){ $('gaMsg').textContent = 'This function never shows inside the graph\'s range (' + fmtNum(A.v0) + ' to ' + fmtNum(A.v1) + ' across, ' + fmtNum(B.v0) + ' to ' + fmtNum(B.v1) + ' up).'; return; }
     const id = pre => pre + newId() + Math.random().toString(36).slice(2, 5);
-    const items = [];
+    const items = [], src = $('gaFn').value.trim(), gf = {id: GAdd.edit || 'f' + newId(), src, s: GAdd.s};
     for(const sg of segs){
       const pieces = GAdd.s === 'dash' ? dashPolys(sg, Math.max(8, fw * 4), Math.max(6, fw * 3)) : GAdd.s === 'dot' ? dashPolys(sg, Math.max(0.6, fw * 0.3), Math.max(5, fw * 2.6)) : [sg];
       for(const pc of pieces){ const V = pc.length > 2 ? rdp(pc, 0.25) : pc; items.push({t: 's', id: id('s'), c: GAdd.c, w: fw, hl: 0, p: polyPts(V, false)}); }
@@ -576,10 +620,11 @@ const GAdd = {
       const fs = Math.max(10, 16 * k), at = P(last[0], last[1]);
       items.push({t: 'm', id: id('m'), x: at[0] + 6 * k, y: at[1] - fs * 1.6, tex: GAdd.tex($('gaFn').value), fs, c: GAdd.c});
     }
-    for(const it of items){ it.ne = 1; if(gx.g) it.g = gx.g; if(o < 1) it.o = o; }
+    const old = GAdd.edit ? GAdd.parts(GAdd.edit) : [];   // the version being replaced: one undo step with the new one
+    for(const it of items){ it.ne = 1; it.gf = gf; if(gx.g) it.g = gx.g; if(o < 1) it.o = o; }
     const keep = sel ? sel.ids.slice() : [];
     hideModal('gAddDlg');
-    addItems(items);
+    apply([...old.map(it => [it.id, null]), ...items.map(it => [it.id, it])], [...items.map(it => [it.id, null]), ...old.map(it => [it.id, it])]);
     setTool('lasso'); setTimeout(() => selectIds(keep.filter(i => cur.items.has(i)).concat(items.map(it => it.id))), 60);
   }
 };
@@ -588,6 +633,12 @@ $('gaC').addEventListener('click', e => { const b = e.target.closest('[data-c]')
 $('gaS').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(!b) return; GAdd.s = b.dataset.v; GAdd.render(); });
 $('gaLbl').addEventListener('change', () => { prefs.gaLbl = $('gaLbl').checked; savePrefs(); });
 $('gaAdd').addEventListener('click', () => GAdd.add());
+$('gaNew').addEventListener('click', () => { GAdd.pick(null); $('gaFn').focus(); });
+$('gaList').addEventListener('click', e => {
+  const row = e.target.closest('[data-f]'); if(!row) return;
+  if(e.target.closest('[data-del]')){ GAdd.remove(row.dataset.f); return; }
+  if(e.target.closest('[data-pick]')) GAdd.pick(GAdd.edit === row.dataset.f ? null : row.dataset.f);
+});
 $('gaFn').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); GAdd.add(); } });
 $('gaFn').addEventListener('input', () => { $('gaMsg').textContent = ''; });
 

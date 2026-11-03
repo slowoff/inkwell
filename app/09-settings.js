@@ -657,6 +657,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.80', '2026-11-03', ['Graphs: the Formulas window (select a graph) now lists the formulas on it. Tap one to change its function, colour or line, or remove it. Works for formulas drawn from now on']],
   ['1.79', '2026-11-03', ['New welcome page. It replaces the old one only if you never changed it']],
   ['1.78.3', '2026-11-03', ['Graphs from Shapes: on big graphs the numbers now sit on the long lines (5, 10, 15 …)']],
   ['1.78.2', '2026-11-03', ['Graphs from Shapes: every fifth line is a bit longer, like on a ruler, so counting is easier. New graphs only']],

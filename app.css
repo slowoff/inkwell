@@ -1011,3 +1011,13 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .gr-val{font-variant-numeric:tabular-nums;color:var(--muted)}
 .graph-wait,.graph-err{color:var(--muted);font-size:13px}
 .am.bot .md-code{margin:0 0 .6em;padding:8px 10px;overflow-x:auto;background:var(--desk);border-radius:8px;font-family:var(--f-mono);font-size:12.5px;line-height:1.35;white-space:pre}
+/* (1.80) formulas on a graph */
+.ga-list{display:flex;flex-direction:column;gap:2px;margin-bottom:4px}
+.ga-row{display:flex;align-items:center;border-radius:9px}
+.ga-row.on{background:var(--accent-soft)}
+.ga-pick{flex:1;min-width:0;display:flex;align-items:center;gap:10px;height:44px;padding:0 10px;text-align:left;font-size:14.5px;border-radius:9px}
+.ga-pick i{width:14px;height:14px;flex:none;border-radius:50%}
+.ga-pick span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ga-del{width:44px;height:44px;flex:none;display:grid;place-items:center;color:var(--muted);border-radius:9px}
+.ga-del svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+@media (hover:hover){ .ga-pick:hover,.ga-del:hover{background:var(--panel2)} }

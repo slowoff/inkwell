@@ -31,6 +31,15 @@ async def main():
         check(d['edge'] == 2 and d['widths'] == 1, f'numbers only on the axes, one line weight (reverted 1.78.1) ({d["edge"]}, {d["widths"]})')
         d = await page.evaluate(B, {**G, 'x0': -10, 'x1': 10, 'y0': -10, 'y1': 10})
         check(d['v'].count(max(d['v'])) == 4, 'counted from 0 on negative numbers too (-10, -5, 5, 10)')
+        N = "o => __inkwell.buildGraph(Object.assign({type: 'q4', lx: 'x', ly: 'y', look: {}}, o), 100, 100).filter(i => i.t === 'm').map(i => i.tex)"
+        n = await page.evaluate(N, dict(x0=-30, x1=30, xs=1, y0=-30, y1=30, ys=1, nums=True))
+        nums = [int(t) for t in n if t.lstrip('-').isdigit()]
+        check(nums and all(v % 5 == 0 for v in nums) and nums.count(25) == 2 and nums.count(-25) == 2, f'big graph: numbers on the fifth lines ({sorted(set(nums))})')
+        n = await page.evaluate(N, dict(x0=0, x1=10, xs=1, y0=0, y1=10, ys=1, nums=True))
+        check(all(str(v) in n for v in range(1, 11)), f'small graph: every line keeps its number ({n})')
+        n = await page.evaluate(N, dict(x0=-100, x1=100, xs=1, y0=-100, y1=100, ys=1, nums=True))
+        nums = [int(t) for t in n if t.lstrip('-').isdigit()]
+        check(all(v % 15 == 0 for v in nums), f'huge graph: numbers still on long lines ({sorted(set(nums))})')
         await page.evaluate("o => __inkwell.addItems(__inkwell.buildGraph(Object.assign({type: 'q1', lx: 'x', ly: 'y', look: {gridO: 50, bg: true}}, o), 100, 100))", G)
         await page.evaluate("() => { const W = __inkwell; W.cam.z = 1.5; W.cam.ox = -20; W.cam.oy = -20; W.invalidate(); }"); await page.wait_for_timeout(600)
         if os.environ.get('GSHOT'): await page.screenshot(path=os.environ['GSHOT'])

@@ -320,14 +320,18 @@ function buildGraph(o, gx, gy){
   const ax = X(clamp(0, x0, x1)), ay = Y(clamp(0, y0, y1));
   const ticks = (a, b, st) => { const out = []; if(!(st > 0)) return out; const n0 = Math.ceil(a / st - 1e-9), n1 = Math.floor(b / st + 1e-9); if(n1 - n0 > 200) return out; for(let n = n0; n <= n1; n++) out.push(n * st); return out; };
   const tx = ticks(x0, x1, xs), ty = ticks(y0, y1, ys);
-  // counted from 0, so 5, 10, 15 … with step 1
-  const fifth = (v, st) => Math.round(v / st) % 5 === 0;
+  // (1.78.3) the long lines and the numbers go together, counted from 0: every fifth line (5, 10, 15 … with step 1), or
+  // every tenth, fifteenth … when that many numbers would not fit. Graphs small enough to number every line keep that.
+  const every = arr => Math.max(1, Math.ceil(arr.length / Math.max(4, Math.round(12 * S))));
+  const longN = arr => Math.max(5, Math.ceil((arr.length - 1) / Math.round(14 * S) / 5) * 5);
+  const mx = longN(tx), my = longN(ty), allX = every(tx) === 1, allY = every(ty) === 1;
+  const longX = v => Math.round(v / xs) % mx === 0, longY = v => Math.round(v / ys) % my === 0;
   if(o.grid){
     const go = clamp((+L.gridO || 100) / 100, 0.1, 1);
     // (1.78.2) every fifth grid line sticks out past the edge of the graph
     const over = 8 * S;
-    for(const v of tx) if(Math.abs(X(v) - ax) > 0.5){ const e = fifth(v, xs) ? over : 0; stroke([[X(v), Y(y0) + e], [X(v), Y(y1) - e]], '#8A97A4', w * 0.45, go); }
-    for(const v of ty) if(Math.abs(Y(v) - ay) > 0.5){ const e = fifth(v, ys) ? over : 0; stroke([[X(x0) - e, Y(v)], [X(x1) + e, Y(v)]], '#8A97A4', w * 0.45, go); }
+    for(const v of tx) if(Math.abs(X(v) - ax) > 0.5){ const e = longX(v) ? over : 0; stroke([[X(v), Y(y0) + e], [X(v), Y(y1) - e]], '#8A97A4', w * 0.45, go); }
+    for(const v of ty) if(Math.abs(Y(v) - ay) > 0.5){ const e = longY(v) ? over : 0; stroke([[X(x0) - e, Y(v)], [X(x1) + e, Y(v)]], '#8A97A4', w * 0.45, go); }
   }
   const xe = [X(x1) + 22, ay], ye = [ax, Y(y1) - 22];
   // (1.58) the two axis lines remember the graph's ranges (ga), so formulas can be added later (Add formula);
@@ -337,8 +341,6 @@ function buildGraph(o, gx, gy){
   arrow([X(x0), ay], xe);
   stroke([[ax, Y(y0)], ye]); items[items.length - 1].ga = {id: gid, k: 'y', v0: y0, v1: y1, f: GH / (GH + 22), c: clamp(0, x0, x1)};
   arrow([ax, Y(y0)], ye);
-  const every = arr => Math.max(1, Math.ceil(arr.length / Math.max(4, Math.round(12 * S))));
-  const ex = every(tx), ey = every(ty);
   // (1.58.4) numbers measured and centred: under their tick on the x axis, level with it left of the y axis;
   // a number that would touch one already placed is left out (0 first, then the x axis, then the y axis)
   const placed = [];
@@ -350,13 +352,13 @@ function buildGraph(o, gx, gy){
   if(o.nums && x0 <= 0 && x1 >= 0 && y0 <= 0 && y1 >= 0){ const [bw] = texBox('0', 12); num('0', ax - 4 - bw, ay + 3); }
   tx.forEach((v, i) => {
     if(Math.abs(X(v) - ax) < 0.5) return;
-    { const k = fifth(v, xs) ? 9 : 4; stroke([[X(v), ay - k], [X(v), ay + k]]); }
-    if(o.nums && i % ex === 0){ const t = fmtNum(v), [bw] = texBox(t, 12); num(t, X(v) - bw / 2, ay + (tx.some(u => fifth(u, xs)) ? 7 : 3)); }
+    { const k = longX(v) ? 9 : 4; stroke([[X(v), ay - k], [X(v), ay + k]]); }
+    if(o.nums && (allX || longX(v))){ const t = fmtNum(v), [bw] = texBox(t, 12); num(t, X(v) - bw / 2, ay + (tx.some(longX) ? 7 : 3)); }
   });
   ty.forEach((v, i) => {
     if(Math.abs(Y(v) - ay) < 0.5) return;
-    { const k = fifth(v, ys) ? 9 : 4; stroke([[ax - k, Y(v)], [ax + k, Y(v)]]); }
-    if(o.nums && i % ey === 0){ const t = fmtNum(v), [bw, bh] = texBox(t, 12); num(t, ax - (ty.some(u => fifth(u, ys)) ? 9 : 4) - bw, Y(v) - bh / 2); }
+    { const k = longY(v) ? 9 : 4; stroke([[ax - k, Y(v)], [ax + k, Y(v)]]); }
+    if(o.nums && (allY || longY(v))){ const t = fmtNum(v), [bw, bh] = texBox(t, 12); num(t, ax - (ty.some(longY) ? 9 : 4) - bw, Y(v) - bh / 2); }
   });
   formula(labelTex(o.lx), xe[0] - 4, ay + 10, 18);
   formula(labelTex(o.ly), ax + 10, ye[1] - 8, 18);

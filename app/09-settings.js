@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.83', '2026-11-03', ['Toolbar on the right is now a narrow column of two buttons per row, with undo, redo and pens nearest your thumb','The arrow at its foot hides the toolbar for more page; the handle in the corner brings it back']],
   ['1.82.1', '2026-11-03', ['Toolbar on the right: undo, the pen and the first colours sit nearest the top right corner, within reach of your thumb']],
   ['1.82', '2026-11-03', ['Toolbar on the left or right: undo, redo, pens and colours are always there. Title, Import, Shapes, Ask Claude and the rest open from the new menu button']],
   ['1.81.1', '2026-11-03', ['Toolbar position moves the whole toolbar: pens and colours go with it']],

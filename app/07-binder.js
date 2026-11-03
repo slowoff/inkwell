@@ -774,6 +774,7 @@ const markCounts = new Map();   // page id -> number of marked spots
 function updLaterBadge(){
   let n = 0; for(const v of markCounts.values()) n += v;
   const el = $('laterCount'); el.hidden = !n; el.textContent = n > 99 ? '99+' : String(n);
+  if(n) $('barMore').dataset.n = el.textContent; else delete $('barMore').dataset.n;
 }
 const markBadgeSoon = debounce(() => {
   if(cur){ const n = clusterMarks([...cur.items.values()]).length; if(n) markCounts.set(cur.id, n); else markCounts.delete(cur.id); }
@@ -1331,7 +1332,10 @@ async function restoreVersion(v){
    ===================================================================== */
 /* (1.81) Settings -> Toolbar position (prefs.barPos, per device): both bars on top, bottom, left or right. CSS does the
    layout from #main's data-bar (a phone-sized window keeps it on top or bottom); the stage follows through its ResizeObserver. */
-function applyBarPos(){ const v = prefs.barPos; if(v && v !== 'top') $('main').dataset.bar = v; else delete $('main').dataset.bar; barExtra(false); closePops(); }
+function applyBarPos(){ const v = prefs.barPos; if(v && v !== 'top') $('main').dataset.bar = v; else delete $('main').dataset.bar; if(prefs.barCol) $('main').dataset.col = '1'; else delete $('main').dataset.col; barExtra(false); closePops(); }
+function barCollapse(on){ prefs.barCol = on; savePrefs(); applyBarPos(); }
+$('barHide').addEventListener('click', () => barCollapse(true));
+$('barShow').addEventListener('click', () => barCollapse(false));
 // (1.82) on the side, only undo, redo, tools and colours stay out; the rest opens from one button
 function barExtra(on){ $('barExtra').classList.toggle('open', on); $('barMore').classList.toggle('on', on); $('barMore').setAttribute('aria-expanded', on ? 'true' : 'false'); }
 $('barMore').addEventListener('click', () => barExtra(!$('barExtra').classList.contains('open')));

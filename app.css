@@ -1059,9 +1059,38 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
   .main[data-bar=left] .bar2 .size input,.main[data-bar=right] .bar2 .size input{flex:1;min-width:0;width:auto}
   .main[data-bar=left] .bar2 .opts .seg,.main[data-bar=right] .bar2 .opts .seg{width:100%}
 }
-/* (1.83) on the right the most used buttons sit nearest the corner, under the thumb of the hand holding the iPad */
+/* (1.83) Toolbar on the right: a narrow two-button column for the hand holding the iPad at the top right. The most used
+   buttons sit nearest the corner; the menu and hide buttons sit at the foot of the column, out of the thumb's way. */
+#barHide,#barShow{display:none}
 @media (min-width:761px){
-  .main[data-bar=right] .bar1{flex-direction:row-reverse}
-  .main[data-bar=right] #barMore{margin-left:0;margin-right:auto;order:9}
-  .main[data-bar=right] .bar2 .tools,.main[data-bar=right] .bar2 .swatches,.main[data-bar=right] .bar2 .opts{flex-direction:row-reverse}
+  .main[data-bar=right]{position:relative;grid-template-columns:minmax(0,1fr) 112px}
+  .main[data-bar=right] .bar1{position:static;flex-direction:row-reverse;justify-content:center;padding:6px 8px;gap:4px}
+  .main[data-bar=right] .bar1 #undo,.main[data-bar=right] .bar1 #redo{width:44px;height:44px;min-width:44px}
+  .main[data-bar=right] #barMore,.main[data-bar=right] #barHide{display:inline-flex;position:absolute;z-index:15;bottom:calc(6px + var(--sab));width:44px;height:44px;min-width:44px;margin:0;background:var(--panel)}
+  .main[data-bar=right] #barHide{right:calc(10px + var(--sar))}
+  .main[data-bar=right] #barMore{right:calc(58px + var(--sar))}
+  .main[data-bar=right] .bar-extra.open{right:calc(120px + var(--sar));top:6px;z-index:16}
+  .main[data-bar=right] .bar2{display:block;padding:8px 8px calc(62px + var(--sab))}
+  .main[data-bar=right] .bar2 .tools,.main[data-bar=right] .bar2 .swatches{display:grid;grid-template-columns:repeat(2,44px);justify-content:center;gap:4px;direction:rtl;width:auto}
+  .main[data-bar=right] .bar2 .tool,.main[data-bar=right] .bar2 .swatch{width:44px;height:44px}
+  .main[data-bar=right] .bar2 .tools{padding-bottom:8px;margin-bottom:8px}
+  .main[data-bar=right] .bar2 .opts{display:flex;flex-flow:row-reverse wrap;justify-content:center;align-items:center;gap:4px}
+  .main[data-bar=right] .bar2 .tb{min-width:44px;height:44px;padding:0 4px}
+  .main[data-bar=right] .bar2 .opts .seg{flex-direction:column;width:92px}
+  .main[data-bar=right] .bar2 .opts .seg button{flex:none;height:36px;width:100%}
+  .main[data-bar=right] .bar2 .size{width:92px;padding:0;gap:0;margin-top:4px}
+  .main[data-bar=right] .bar2 .size>:not(input){display:none}
+  .main[data-bar=right] .bar2 .size input{width:92px;flex:none}
+  .main[data-bar=right] .bar2 .zoom{min-width:44px;justify-content:center}
+  .main[data-bar=right] .bar2 .spacer,.main[data-bar=right] .bar2 .sep{display:none}
+  .main[data-bar=right] .bar2{text-align:center}
+  .main[data-bar=right] #rulerBtn,.main[data-bar=right] #fingerBtn{display:inline-flex;vertical-align:top;width:44px;height:44px;min-width:44px;padding:0;margin-top:6px;justify-content:center;border-radius:8px}
+  .main[data-bar=right] #fingerBtn .sw{display:none}
+  .main[data-bar=right] #fingerBtn.on{background:var(--accent-soft);color:var(--accent)}
+  .main[data-bar=right] .bar2 .zoom{display:flex;margin:6px auto 0;min-width:44px}
+  #barMore[data-n]::after{content:attr(data-n);position:absolute;top:0;right:0;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#7B3FBF;color:#fff;font-size:10px;line-height:16px;font-weight:600;text-align:center}
+  /* hidden: a small handle in the corner brings the column back */
+  .main[data-bar=right][data-col]{grid-template-columns:minmax(0,1fr) 0}
+  .main[data-bar=right][data-col] .bar1,.main[data-bar=right][data-col] .bar2{display:none}
+  .main[data-bar=right][data-col] #barShow{display:inline-flex;position:absolute;z-index:15;top:8px;right:calc(8px + var(--sar));width:44px;height:44px;min-width:44px;background:var(--raise);border-radius:12px;box-shadow:var(--shadow),0 0 0 1px var(--line)}
 }

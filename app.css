@@ -1106,3 +1106,8 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
   .main[data-bar=right][data-col] #barShow{right:calc(8px + var(--sar))}
   .main[data-bar=left][data-col] #barShow{left:8px}
 }
+/* (1.84) the outer ring changing with the inner one */
+.wh-seg.wh-new,.wh-i.wh-new{animation:whNew .13s ease-out}
+@keyframes whNew{from{opacity:0}to{opacity:1}}
+.wh-redo.off{opacity:.4}
+@media (prefers-reduced-motion:reduce){.wh-seg.wh-new,.wh-i.wh-new{animation:none}}

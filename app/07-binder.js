@@ -979,19 +979,36 @@ function wheelIcon(tool){ const s = document.querySelector(`.tool[data-tool="${t
 // Inner ring: undo and tools; outer ring: colours, thickness (and eraser mode). Picked by direction.
 const WH_R0 = 34, WH_R1 = 92, WH_R2 = 152, WH_SPAN = Math.PI * 200 / 180;
 let wheelGeo = null;   // {x, y, dir, segs: [{ring, a0, a1, el}]}
+// (1.84) the outer ring follows the inner ring: it shows the choices of the option under the Pencil (wheelGeo.view)
 function wheelItems(){
-  const t = prefs.tool, inkT = t === 'hl' ? 'hl' : 'pen';
-  const favs = inkT === 'hl' ? prefs.hlFavs : prefs.penFavs;
-  const sizeT = ['pen', 'hl', 'eraser', 'mark'].includes(t) ? t : 'pen';
+  const t = prefs.tool, view = wheelGeo.view || t, inkT = view === 'hl' ? 'hl' : 'pen';
   const names = {pen: 'Pen', hl: 'Highlighter', mark: 'Mark for later', eraser: 'Eraser', lasso: 'Lasso'};
   const undoSvg = '<svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>';
-  const inner = [{w: 'undo', label: 'Undo', icon: undoSvg, cls: 'wh-undo'}]
-    .concat(['pen', 'hl', 'eraser', 'lasso'].map(v => ({w: 'tool', v, label: names[v], icon: wheelIcon(v), on: v === t, cls: 'wh-tool'})));
-  const outer = favs.map(c => ({w: 'c', v: c, label: inkT === 'hl' ? 'Highlighter colour' : 'Pen colour', cls: 'wh-col' + (inkT === 'hl' ? ' hl' : ''),
-    icon: `<span style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>`, on: (t === 'pen' || t === 'hl') && prefs[inkT].c === c}));
-  const sizes = wheelSizes(sizeT), sv = prefs[sizeT].s, best = sizes.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);
-  sizes.forEach((v, i) => outer.push({w: 's', v, slot: i, label: ['Thin', 'Medium', 'Thick'][i], cls: 'wh-size', icon: `<span style="--d:${4 + v / 7}px"></span>`, on: best === v}));
-  if(t === 'eraser'){ const area = prefs.eraser.mode === 'area'; outer.push({w: 'em', label: 'Eraser: switch to ' + (area ? 'Stroke' : 'Partial'), cls: 'wh-em', icon: area ? 'Partial' : 'Stroke'}); }
+  const redoSvg = '<svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>';
+  const inner = [{w: 'undo', label: 'Undo', icon: undoSvg, on: view === 'undo', cls: 'wh-undo'}]
+    .concat(['pen', 'hl', 'eraser', 'lasso'].map(v => ({w: 'tool', v, label: names[v], icon: wheelIcon(v), on: v === view, cls: 'wh-tool'})));
+  const outer = [];
+  const sizes = sizeT => {
+    const list = wheelSizes(sizeT), sv = prefs[sizeT].s, best = list.reduce((a, b) => Math.abs(b - sv) < Math.abs(a - sv) ? b : a);
+    list.forEach((v, i) => outer.push({w: 's', v, slot: i, label: ['Thin', 'Medium', 'Thick'][i], cls: 'wh-size', icon: `<span style="--d:${4 + v / 7}px"></span>`, on: best === v}));
+  };
+  if(view === 'undo'){
+    const none = !(cur && cur.redo.length);
+    outer.push({w: 'redo', label: none ? 'Nothing to redo' : 'Redo', cls: 'wh-redo' + (none ? ' off' : ''), icon: redoSvg});
+  } else if(view === 'eraser'){
+    const mode = prefs.eraser.mode === 'area' ? 'area' : 'stroke';
+    outer.push({w: 'em', v: 'stroke', label: 'Stroke: removes whole strokes', cls: 'wh-em', icon: 'Stroke', on: mode === 'stroke'}, {w: 'em', v: 'area', label: 'Partial: rubs out only what it touches', cls: 'wh-em', icon: 'Partial', on: mode === 'area'});
+    sizes('eraser');
+  } else if(view === 'lasso'){
+    const lm = prefs.lassoMode === 'box' || prefs.lassoMode === 'tap' ? prefs.lassoMode : 'free';
+    [['free', 'Free', 'Free: draw a loop'], ['box', 'Box', 'Box: drag a rectangle'], ['tap', 'Tap', 'Tap: tap a thing to select it']].forEach(([v, icon, label]) => outer.push({w: 'lm', v, label, cls: 'wh-em', icon, on: v === lm}));
+    outer.push({w: 'paste', label: 'Paste', cls: 'wh-em', icon: 'Paste'});
+  } else {
+    const favs = inkT === 'hl' ? prefs.hlFavs : prefs.penFavs;
+    favs.forEach(c => outer.push({w: 'c', v: c, label: inkT === 'hl' ? 'Highlighter colour' : 'Pen colour', cls: 'wh-col' + (inkT === 'hl' ? ' hl' : ''),
+      icon: `<span style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>`, on: (view === 'pen' || view === 'hl') && prefs[inkT].c === c}));
+    sizes(['pen', 'hl', 'mark'].includes(view) ? view : 'pen');
+  }
   return [inner, outer];
 }
 const arcPt = (r, a) => `${(r * Math.cos(a)).toFixed(2)} ${(r * Math.sin(a)).toFixed(2)}`;
@@ -1043,7 +1060,7 @@ function openWheel(x, y, pointerId){
     const d = base + off * Math.PI / 180, sc = fitScore(d);
     if(sc > best){ best = sc; dir = d; } if(sc === 13) break;
   }
-  wheelGeo = {x, y, dir, segs: []};
+  wheelGeo = {x, y, dir, segs: [], view: prefs.tool};
   buildWheel();
   const w = $('wheel');
   w.style.left = x + 'px'; w.style.top = y + 'px';
@@ -1087,7 +1104,7 @@ function wheelHoldTrack(b){
   hold.timer = setTimeout(() => {
     if(wheelHold !== hold) return;
     wheelHoldStop();
-    const t = ['pen', 'hl', 'eraser', 'mark'].includes(prefs.tool) ? prefs.tool : 'pen', i = +b.dataset.slot, v = Math.round(prefs[t].s);
+    const vw = wheelGeo && wheelGeo.view, t = ['pen', 'hl', 'eraser', 'mark'].includes(vw) ? vw : 'pen', i = +b.dataset.slot, v = Math.round(prefs[t].s);
     if(!(i >= 0 && i < 3) || !(v >= 1)) return;
     const list = wheelSizes(t), old = list[i]; list[i] = v;
     if(!prefs.wheelSizes || typeof prefs.wheelSizes !== 'object') prefs.wheelSizes = {};
@@ -1110,7 +1127,27 @@ function wheelHoldTrack(b){
   }, WHEEL_SAVE);
 }
 // the option under the Pencil grows, fills in and is named above the menu
+const WHEEL_VIEW = 170;
+let wheelViewT = 0, wheelViewFor = null;
 function wheelHover(b){
+  // (1.84) resting on the inner ring: the outer ring turns into that option's choices. Only after a short rest, because the way
+  // to anything in the outer ring leads across the inner ring and what is aimed at must not change on the way.
+  const nv = b && wheelGeo && (b.dataset.w === 'undo' ? 'undo' : b.dataset.w === 'tool' ? b.dataset.v : null);
+  if(!nv || nv === wheelGeo.view){ clearTimeout(wheelViewT); wheelViewFor = null; }
+  else if(nv !== wheelViewFor){
+    clearTimeout(wheelViewT); wheelViewFor = nv;
+    const i = b.dataset.i;
+    wheelViewT = setTimeout(() => {
+      wheelViewFor = null;
+      if(!wheelGeo || $('wheel').hidden) return;
+      wheelGeo.view = nv; buildWheel();
+      $('wheel').querySelectorAll('.wh-seg,.wh-i').forEach(x => { const q = wheelGeo.segs[+x.dataset.i]; if(q && q.ring === 1) x.classList.add('wh-new'); });
+      const nb = $('wheel').querySelector(`.wh-seg[data-i="${i}"]`);
+      // redrawn under the Pencil: a lift can no longer count on a click (saved = pick in pointerup)
+      if(wheelPress){ wheelPress.saved = true; if(+i < 5) wheelPress.b = nb; }
+      wheelHover(nb);
+    }, WHEEL_VIEW);
+  }
   wheelHoldTrack(b);
   const w = $('wheel');
   w.querySelectorAll('.wh-b.hover').forEach(x => { if(x !== b) x.classList.remove('hover'); });
@@ -1123,25 +1160,28 @@ function wheelHover(b){
   L.innerHTML = (c ? `<span class="wh-dot" style="--c:${c === 'auto' ? 'var(--fg)' : c}"></span>` : '') + esc(b.getAttribute('aria-label') || '');
   L.hidden = false;
 }
-function closeWheel(){ wheelHoldStop(); const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; wheelGeo = null; }
+function closeWheel(){ clearTimeout(wheelViewT); wheelViewFor = null; wheelHoldStop(); const w = $('wheel'); if(w && !w.hidden){ w.hidden = true; w.innerHTML = ''; w.classList.remove('picking'); } wheelDrag = null; wheelPress = null; wheelGeo = null; }
 function wheelPick(b){
-  const k = b.dataset.w, v = b.dataset.v;
+  const k = b.dataset.w, v = b.dataset.v, view = wheelGeo ? wheelGeo.view : prefs.tool;
+  // the tool whose choices the outer ring shows becomes the tool (an eraser picked here erases once, as from the inner ring)
+  const toTool = n => { const was = prefs.tool; if(was !== n) setTool(n); if(n === 'eraser' && was !== 'eraser') eraseOnce = ['pen', 'hl', 'mark'].includes(was) ? was : 'pen'; };
   if(k === 'undo'){ undo(); closeWheel(); return; }
-  if(k === 'tool'){
-    const was = prefs.tool;
-    setTool(v);
-    if(v === 'eraser' && was !== 'eraser') eraseOnce = ['pen', 'hl', 'mark'].includes(was) ? was : 'pen';
-  }
+  if(k === 'redo'){ redo(); closeWheel(); return; }
+  if(k === 'tool') toTool(v);
   else if(k === 'c'){
-    if(prefs.tool !== 'pen' && prefs.tool !== 'hl') setTool('pen');
+    toTool(view === 'hl' ? 'hl' : 'pen');
     prefs[prefs.tool].c = v; savePrefs(); renderOpts();
   } else if(k === 's'){
-    if(!['pen', 'hl', 'eraser', 'mark'].includes(prefs.tool)) setTool('pen');
-    prefs[prefs.tool].s = +v; savePrefs(); renderOpts();
+    const n = ['pen', 'hl', 'eraser', 'mark'].includes(view) ? view : 'pen';
+    toTool(n); prefs[n].s = +v; savePrefs(); renderOpts();
   } else if(k === 'em'){
-    prefs.eraser.mode = prefs.eraser.mode === 'area' ? 'stroke' : 'area'; savePrefs(); renderOpts();
-    note(prefs.eraser.mode === 'area' ? 'Eraser: Partial' : 'Eraser: Stroke');
-    buildWheel(); return;   // stay open to see the change
+    toTool('eraser'); prefs.eraser.mode = v; savePrefs(); renderOpts();
+    note(v === 'area' ? 'Eraser: Partial' : 'Eraser: Stroke');
+  } else if(k === 'lm'){
+    toTool('lasso'); prefs.lassoMode = v; savePrefs(); renderOpts();
+    note(LASSO_NAMES[v] || 'Select');
+  } else if(k === 'paste'){
+    toTool('lasso'); closeWheel(); $('pasteBtn').click(); return;
   }
   closeWheel();
 }

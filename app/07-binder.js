@@ -948,6 +948,7 @@ function openPopAgain(id, anchor){
   let y = r.bottom + 8; if(y + ph > innerHeight - 8) y = Math.max(8, innerHeight - ph - 8);
   p.style.top = y + 'px';
   popBeside(p, anchor, r, pw, ph);
+  popFit(p);
 }
 $('laterList').addEventListener('click', async ev => {
   const go = ev.target.closest('[data-go]'), done = ev.target.closest('[data-done]');
@@ -1205,6 +1206,7 @@ function renderPaper(){
   $('mlOn').classList.toggle('on', !!bg.ml); $('mlOpts').hidden = !bg.ml;
   document.querySelectorAll('#mlColor button').forEach(b => b.classList.toggle('on', b.dataset.v === bg.ml));
   document.querySelectorAll('#mlWidth button').forEach(b => b.classList.toggle('on', b.dataset.v === (bg.mw === 'thick' ? 'thick' : 'thin')));
+  popFit($('paperPop'));
 }
 function setBg(patch){ cur.bg = Object.assign({}, cur.bg, patch); renderPaper(); invalidate(1, 0, 0); saveContentSoon(); }
 $('paperBtn').addEventListener('click', e => { if(!cur) return; renderPaper(); openPop('paperPop', e.currentTarget); });
@@ -1358,6 +1360,18 @@ function popBeside(p, anchor, r, pw, ph){
   p.style.top = clamp(r.top, 8, Math.max(8, innerHeight - ph - 8)) + 'px';
   return true;
 }
+// (1.83.3) keeps an open menu inside what is really on screen, also when it grows while open (Margin line on). The bottom
+// comes from the app itself too: on the iPad the home-bar strip below it can count as part of the window.
+function popFit(p){
+  if(p.hidden) return;
+  const vv = window.visualViewport, mb = $('main').getBoundingClientRect().bottom;
+  const limit = Math.min(innerHeight, vv ? vv.height : innerHeight, mb > 0 ? mb : innerHeight);
+  p.style.maxHeight = ''; p.style.overflowY = '';
+  let h = p.offsetHeight;
+  if(h > limit - 16){ h = limit - 16; p.style.maxHeight = h + 'px'; p.style.overflowY = 'auto'; }
+  const top = parseFloat(p.style.top) || 0;
+  if(top + h > limit - 8) p.style.top = Math.max(8, limit - h - 8) + 'px';
+}
 function openPop(id, anchor){
   const p = $(id), wasOpen = !p.hidden;
   closePops(id === 'tcolorPop' ? 'keepFmt' : null);
@@ -1369,6 +1383,7 @@ function openPop(id, anchor){
   if(y + ph > innerHeight - 8) y = Math.max(8, r.top - ph - 8);
   p.style.left = x + 'px'; p.style.top = y + 'px';
   popBeside(p, anchor, r, pw, ph);
+  popFit(p); requestAnimationFrame(() => popFit(p));
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }

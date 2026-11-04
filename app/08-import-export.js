@@ -561,7 +561,7 @@ function pagesLabel(list){
   }
   return out.join(', ');
 }
-const Pdf = {abort: false, file: null, run: 0, page: null, n: 0, only: null, mode: 'page', orig: null, origName: ''};
+const Pdf = {abort: false, file: null, run: 0, page: null, n: 0, only: null, mode: 'page', orig: null, origName: '', clear: false};
 // (1.85) puts the writing in its own optional layer, which PDF readers can show or hide (OCG); returns the name to mark it with
 function pdfLayer(doc){
   const {PDFName, PDFArray, PDFDict, PDFHexString} = PDFLib, ctx = doc.context;
@@ -594,7 +594,7 @@ async function exportPdfFile(){
   if(!cur) return;
   finishEditing();
   if(!contentBox()){ toast('This page is empty'); return; }
-  Pdf.page = cur; Pdf.only = null; Pdf.n = 0; Pdf.mode = 'page'; Pdf.orig = null; Pdf.origName = '';
+  Pdf.page = cur; Pdf.only = null; Pdf.n = 0; Pdf.mode = 'page'; Pdf.orig = null; Pdf.origName = ''; Pdf.clear = false; $('exportClear').checked = false;
   renderExportMode();
   $('exportTitle').textContent = 'Export as PDF'; $('exportParts').innerHTML = ''; $('exportActs').hidden = false;
   $('exportPick').hidden = true; $('exportPages').value = ''; $('exportPages').hidden = true;
@@ -608,7 +608,7 @@ async function makePdf(){
   Pdf.abort = false; Pdf.file = null;
   const stop = () => Pdf.abort || run !== Pdf.run;
   $('exportSave').disabled = true; $('exportInfo').textContent = 'Making the PDF…';
-  const mode = Pdf.mode, writingOnly = mode !== 'page';
+  const mode = Pdf.mode, writingOnly = mode !== 'page', noPaper = writingOnly || Pdf.clear;
   const say = t => { if(run === Pdf.run) $('exportInfo').textContent = t; };
   const tick = () => new Promise(r => setTimeout(r, 0));
   const b = page0 === cur ? contentBox() : null;
@@ -643,7 +643,7 @@ async function makePdf(){
       const inPage = q => docs.some(d => q[2] > d.x && q[0] < d.x + d.w && q[3] > d.y && q[1] < d.y + d.h);
       outside = items.filter(it => !(it.t === 'i' && it.doc) && !it.mk && !(it.fl && it.c === 'paper') && !inPage(itemBox(it))).length;
     } else {
-      all = pdfSheets(items, writingOnly ? b : withMargin(page0.bg, b));
+      all = pdfSheets(items, noPaper ? b : withMargin(page0.bg, b));
       Pdf.n = all.length;
       $('exportPick').hidden = all.length < 2;
       pick = Pdf.only ? Pdf.only.filter(i => i < all.length) : null;
@@ -679,7 +679,7 @@ async function makePdf(){
       overlays.set(it.id, await doc.embedPng(await renderPng(d, it.w, it.h, sc)));
     }
     const pics = items.filter(it => it.t === 'i' && it.a), embedded = new Map();
-    const inks = [2, 1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && inkPass(it) === pass && !(writingOnly && it.fl && it.c === 'paper')));
+    const inks = [2, 1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && inkPass(it) === pass && !(noPaper && it.fl && it.c === 'paper')));
     const inkBoxes = new Map(inks.map(it => [it.id, box(it)]));
     for(let si = 0; si < sheets.length; si++){
       if(stop()) return;
@@ -695,7 +695,7 @@ async function makePdf(){
         page.pushOperators(concatTransformationMatrix(...pdfUpright(page.getCropBox(), sh.ang)), rectangle(0, 0, sh.VW, sh.VH), clip(), endPath());
       } else page.pushOperators(pushGraphicsState(), rectangle(m * k, PH - (m + (yb - ya) * s) * k, (sh.W - 2 * m) * k, (yb - ya) * s * k), clip(), endPath());
       const at = {x: X(0), y: Y(0), scale: sk};
-      if(!writingOnly){
+      if(!noPaper){
         const d = paperPath(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
         if(d) page.drawSvgPath(d, page0.bg.type === 'dots' ? {...at, borderColor: hexRgb('#AEBBC9'), borderWidth: 1.6, borderLineCap: LineCapStyle.Round} : {...at, borderColor: hexRgb('#D5DFEA'), borderWidth: 0.8});
         const ml = marginLine(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
@@ -740,7 +740,7 @@ async function makePdf(){
     say('Saving…'); await tick();
     const bytes = await doc.save();
     if(stop()) return;
-    const part = (pick && pick.length ? (pick.length === 1 ? ` (page ${pick[0] + 1})` : ` (pages ${pagesLabel(pick).replace(/–/g, '-')})`) : '') + (mode === 'ink' ? ' (only writing)' : '');
+    const part = (pick && pick.length ? (pick.length === 1 ? ` (page ${pick[0] + 1})` : ` (pages ${pagesLabel(pick).replace(/–/g, '-')})`) : '') + (mode === 'ink' ? ' (only writing)' : Pdf.clear ? ' (transparent)' : '');
     const base = mode === 'orig' ? Pdf.origName.replace(/\.pdf$/i, '') + ' (with notes)' : title + part;
     const name = (base.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Inkwell page') + '.pdf';
     Pdf.file = new File([bytes], name, {type: 'application/pdf'});
@@ -759,12 +759,15 @@ function renderExportMode(){
   $('exportMode').querySelectorAll('[data-m]').forEach(x => x.classList.toggle('on', x.dataset.m === Pdf.mode));
   $('exportOrigWrap').hidden = Pdf.mode !== 'orig';
   $('exportOrigName').textContent = Pdf.origName ? Pdf.origName : 'Inkwell keeps pictures of imported pages, so it needs the original file once.';
-  $('exportPrint').hidden = Pdf.mode !== 'page';
+  $('exportPrint').hidden = Pdf.mode !== 'page' || Pdf.clear;
+  $('exportClearWrap').hidden = Pdf.mode !== 'page';
 }
 $('exportMode').addEventListener('click', e => {
   const b = e.target.closest('[data-m]'); if(!b || b.dataset.m === Pdf.mode) return;
   Pdf.mode = b.dataset.m; renderExportMode(); makePdf();
 });
+// (1.85.1) whole page without paper lines, margin line and graph backgrounds; writing and imported pages stay
+$('exportClear').addEventListener('change', () => { Pdf.clear = $('exportClear').checked; renderExportMode(); makePdf(); });
 $('exportOrigFile').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if(!f) return;
   Pdf.orig = await f.arrayBuffer(); Pdf.origName = f.name; renderExportMode(); makePdf();

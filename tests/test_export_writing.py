@@ -60,6 +60,21 @@ async def main():
         fx, fy = 0.75, 0.75; cx, cy = d1['x'] + d1['w'] * fx, d1['y'] + d1['h'] * fy
         await page.evaluate(ADD, [cx - 20, cy, .5, cx, cy, .5, cx + 20, cy, .5])
         await page.evaluate("() => __inkwell.exportPdfFile()"); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        # 0. whole page with a transparent background
+        await page.evaluate("() => { const W = __inkwell; W.cur.bg = Object.assign({}, W.cur.bg, {type: 'grid', ml: 'blue', mx: 300}); W.addItems([{t: 's', id: 'fillp', c: 'paper', w: 1, hl: 0, fl: 1, p: [W.cur.items.size * 0 + 700, 100, .5, 900, 100, .5, 900, 300, .5, 700, 300, .5]}]); }")
+        await page.wait_for_timeout(200); await page.evaluate("() => __inkwell.exportPdfFile()"); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        BLUE = """async () => { const W = window.__inkwell; if(!window.pdfjsLib) await W.loadScript('lib/pdf.min.js');
+          const pdf = await pdfjsLib.getDocument({data: await W.Pdf.file.arrayBuffer()}).promise, pg = await pdf.getPage(1), ops = await pg.getOperatorList(); return {imgs: ops.fnArray.filter(f => f === pdfjsLib.OPS.paintImageXObject || f === pdfjsLib.OPS.paintJpegXObject).length, n: ops.fnArray.length, name: W.Pdf.file.name}; }"""
+        full = await page.evaluate(BLUE)
+        check(await page.is_visible('#exportClearWrap') and await page.is_visible('#exportPrint'), 'switch shows for Whole page')
+        await page.check('#exportClear'); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        clr = await page.evaluate(BLUE)
+        check(clr['imgs'] >= 1 and clr['imgs'] == full['imgs'] and clr['n'] < full['n'] and 'transparent' in clr['name'], f'imported pages stay, paper lines and fills go ({full}, {clr})')
+        await page.click('#exportMode [data-m=ink]'); await page.wait_for_timeout(300)
+        check(await page.is_hidden('#exportClearWrap'), 'switch only for Whole page')
+        await page.click('#exportDlg [data-close]'); await page.wait_for_timeout(200)
+        await page.evaluate("() => { const W = __inkwell; W.removeItems(['fillp']); W.exportPdfFile(); }"); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        check(not await page.is_checked('#exportClear'), 'off again next time')
         # 1. only the writing
         await page.click('#exportMode [data-m=ink]'); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
         r = await page.evaluate(RENDER, {'layerOff': False})

@@ -1111,3 +1111,9 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 @keyframes whNew{from{opacity:0}to{opacity:1}}
 .wh-redo.off{opacity:.4}
 @media (prefers-reduced-motion:reduce){.wh-seg.wh-new,.wh-i.wh-new{animation:none}}
+/* (1.85) what goes in the exported PDF */
+.export-mode{margin:2px 0 8px}
+.export-mode button{white-space:normal;line-height:1.15;font-size:13px;height:auto;min-height:38px}
+.export-orig{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.export-orig .btn{flex:none;cursor:pointer}
+.export-orig .hint{min-width:0;overflow-wrap:anywhere}

@@ -287,7 +287,8 @@ $('impGo').addEventListener('click', async () => {
         const a = await saveAsset(await canvasBlob(pc));
         r.canvas.width = r.canvas.height = 1; pc.width = pc.height = 1;
         if(job.stopped) break;
-        const item = {t: 'i', id: 'i' + newId(), x: x0, y: job.y + 24, w: wWorld, h: hWorld, a, doc: 1};
+        const item = {t: 'i', id: 'i' + newId(), x: x0, y: job.y + 24, w: wWorld, h: hWorld, a, doc: 1, pn: pages[k] - 1};   // (1.85) pn: its page in the file
+        if(rot) item.pr = rot;
         // turned pages: the PDF's line positions no longer fit, so their text is read later like a scan
         if(!rot && hasRealText(lines)) await savePtxt(a, 'pdf', lines);   // searchable right away; scans are read by Claude later
         if(pf.f.length) item.f = rotFields(pf.f, rot);
@@ -560,12 +561,41 @@ function pagesLabel(list){
   }
   return out.join(', ');
 }
-const Pdf = {abort: false, file: null, run: 0, page: null, n: 0, only: null};
+const Pdf = {abort: false, file: null, run: 0, page: null, n: 0, only: null, mode: 'page', orig: null, origName: ''};
+// (1.85) puts the writing in its own optional layer, which PDF readers can show or hide (OCG); returns the name to mark it with
+function pdfLayer(doc){
+  const {PDFName, PDFArray, PDFDict, PDFHexString} = PDFLib, ctx = doc.context;
+  const ref = ctx.register(ctx.obj({Type: 'OCG', Name: PDFHexString.fromText('Inkwell notes')}));
+  const key = PDFName.of('OCProperties');
+  let props = doc.catalog.lookupMaybe(key, PDFDict);
+  if(!props){ props = ctx.obj({OCGs: [], D: {ON: [], OFF: [], Order: []}}); doc.catalog.set(key, props); }
+  let list = props.lookupMaybe(PDFName.of('OCGs'), PDFArray);
+  if(!list){ list = ctx.obj([]); props.set(PDFName.of('OCGs'), list); }
+  list.push(ref);
+  let d = props.lookupMaybe(PDFName.of('D'), PDFDict);
+  if(!d){ d = ctx.obj({}); props.set(PDFName.of('D'), d); }
+  for(const k of ['ON', 'Order']){ let a = d.lookupMaybe(PDFName.of(k), PDFArray); if(!a){ a = ctx.obj([]); d.set(PDFName.of(k), a); } a.push(ref); }
+  return ref;
+}
+function pdfLayerStart(page, ref){
+  const {PDFName, PDFDict, PDFOperator, pushGraphicsState} = PDFLib, ctx = page.doc.context;
+  const {Resources} = page.node.normalizedEntries();
+  let pr = Resources.lookupMaybe(PDFName.of('Properties'), PDFDict);
+  if(!pr){ pr = ctx.obj({}); Resources.set(PDFName.of('Properties'), pr); }
+  pr.set(PDFName.of('InkwellNotes'), ref);
+  page.pushOperators(pushGraphicsState(), PDFOperator.of('BDC', [PDFName.of('OC'), PDFName.of('InkwellNotes')]));
+}
+// page coordinates for what is shown upright: origin and direction for a page shown turned by 0, 90, 180 or 270 degrees
+function pdfUpright(box, angle){
+  const {x, y, width: w, height: h} = box;
+  return angle === 90 ? [0, 1, -1, 0, x + w, y] : angle === 180 ? [-1, 0, 0, -1, x + w, y + h] : angle === 270 ? [0, -1, 1, 0, x, y + h] : [1, 0, 0, 1, x, y];
+}
 async function exportPdfFile(){
   if(!cur) return;
   finishEditing();
   if(!contentBox()){ toast('This page is empty'); return; }
-  Pdf.page = cur; Pdf.only = null; Pdf.n = 0;
+  Pdf.page = cur; Pdf.only = null; Pdf.n = 0; Pdf.mode = 'page'; Pdf.orig = null; Pdf.origName = '';
+  renderExportMode();
   $('exportTitle').textContent = 'Export as PDF'; $('exportParts').innerHTML = ''; $('exportActs').hidden = false;
   $('exportPick').hidden = true; $('exportPages').value = ''; $('exportPages').hidden = true;
   $('exportPick').querySelectorAll('[data-pick]').forEach(x => x.classList.toggle('on', x.dataset.pick === 'all'));
@@ -578,6 +608,7 @@ async function makePdf(){
   Pdf.abort = false; Pdf.file = null;
   const stop = () => Pdf.abort || run !== Pdf.run;
   $('exportSave').disabled = true; $('exportInfo').textContent = 'Making the PDF…';
+  const mode = Pdf.mode, writingOnly = mode !== 'page';
   const say = t => { if(run === Pdf.run) $('exportInfo').textContent = t; };
   const tick = () => new Promise(r => setTimeout(r, 0));
   const b = page0 === cur ? contentBox() : null;
@@ -586,16 +617,41 @@ async function makePdf(){
   try {
     await pdfLibs();
     if(stop()) return;
-    const {PDFDocument, LineCapStyle, pushGraphicsState, popGraphicsState, rectangle, clip, endPath} = PDFLib;
+    const {PDFDocument, LineCapStyle, pushGraphicsState, popGraphicsState, rectangle, clip, endPath, concatTransformationMatrix, PDFOperator} = PDFLib;
     const items = [...page0.items.values()];
-    const all = pdfSheets(items, withMargin(page0.bg, b));
-    Pdf.n = all.length;
-    $('exportPick').hidden = all.length < 2;
-    const pick = Pdf.only ? Pdf.only.filter(i => i < all.length) : null;
-    const sheets = pick && pick.length ? pick.map(i => all[i]) : all;
+    let all, pick = null, sheets, doc, layer = null, outside = 0;
+    if(mode === 'orig'){
+      // (1.85) the original file with the writing on top. Inkwell keeps pictures of imported pages, not the file, so it is chosen here
+      if(!Pdf.orig){ $('exportPick').hidden = true; say('Choose the PDF this page was imported from.'); return; }
+      const docs = items.filter(it => it.t === 'i' && it.doc && it.h > 0).sort((p, q) => p.y - q.y);
+      if(!docs.length){ say('This page has no imported PDF pages to write back into.'); return; }
+      try { doc = await PDFDocument.load(Pdf.orig); }
+      catch(e){ say(/encrypt/i.test(e.message || '') ? 'This PDF is locked, so nothing can be added to it.' : 'That file could not be read as a PDF.'); return; }
+      if(stop()) return;
+      const n = doc.getPageCount();
+      sheets = docs.map((d, i) => ({ya: d.y, yb: d.y + d.h, x0: d.x, cw: d.w, s: A4W / d.w, m: 0, W: A4W, H: d.h * A4W / d.w, doc: true, d, pn: Number.isInteger(d.pn) ? d.pn : i}));
+      const seen = new Set(), notFit = sheets.find(sh => {
+        if(sh.pn >= n || seen.has(sh.pn)) return true;
+        seen.add(sh.pn);
+        const pg = doc.getPage(sh.pn), bx = pg.getCropBox(), ang = (((pg.getRotation().angle + (sh.d.pr || 0)) % 360) + 360) % 360, sw = ang % 180 ? bx.height : bx.width, sh2 = ang % 180 ? bx.width : bx.height;
+        sh.page = pg; sh.ang = ang; sh.VW = sw; sh.VH = sh2;
+        return Math.abs(sh2 / sw - sh.d.h / sh.d.w) > 0.02;
+      });
+      if(notFit){ say(notFit.pn >= n || seen.has(notFit.pn) ? 'That does not look like the right PDF: the pages on this page do not match its pages.' : `That does not look like the right PDF: page ${notFit.pn + 1} has a different shape.`); return; }
+      all = sheets; Pdf.n = all.length; $('exportPick').hidden = true;
+      layer = pdfLayer(doc);
+      const inPage = q => docs.some(d => q[2] > d.x && q[0] < d.x + d.w && q[3] > d.y && q[1] < d.y + d.h);
+      outside = items.filter(it => !(it.t === 'i' && it.doc) && !it.mk && !(it.fl && it.c === 'paper') && !inPage(itemBox(it))).length;
+    } else {
+      all = pdfSheets(items, writingOnly ? b : withMargin(page0.bg, b));
+      Pdf.n = all.length;
+      $('exportPick').hidden = all.length < 2;
+      pick = Pdf.only ? Pdf.only.filter(i => i < all.length) : null;
+      sheets = pick && pick.length ? pick.map(i => all[i]) : all;
+      doc = await PDFDocument.create();
+      doc.setTitle(title); doc.setCreator('Inkwell'); doc.setProducer('Inkwell');
+    }
     const PW = 595.28, k = PW / A4W;
-    const doc = await PDFDocument.create();
-    doc.setTitle(title); doc.setCreator('Inkwell'); doc.setProducer('Inkwell');
     const box = it => itemBox(it);
     const reachAny = q => sheets.some(sh => q[3] >= sh.ya - 4 && q[1] <= sh.yb + 4);
     const sMax = Math.max(...sheets.map(sh => sh.s));
@@ -623,24 +679,36 @@ async function makePdf(){
       overlays.set(it.id, await doc.embedPng(await renderPng(d, it.w, it.h, sc)));
     }
     const pics = items.filter(it => it.t === 'i' && it.a), embedded = new Map();
-    const inks = [2, 1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && inkPass(it) === pass));
+    const inks = [2, 1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && inkPass(it) === pass && !(writingOnly && it.fl && it.c === 'paper')));
     const inkBoxes = new Map(inks.map(it => [it.id, box(it)]));
     for(let si = 0; si < sheets.length; si++){
       if(stop()) return;
       say(`Making page ${si + 1} of ${sheets.length}…`); await tick();
-      const sh = sheets[si], {ya, yb, s, m} = sh, PH = sh.H * k;
-      const X = wx => (m + (wx - sh.x0) * s) * k;
-      const Y = wy => PH - (m + (wy - ya) * s) * k;
+      const sh = sheets[si], {ya, yb, s, m} = sh;
+      const orig = mode === 'orig', sk = orig ? sh.VW / sh.d.w : s * k, PH = orig ? sh.VH : sh.H * k;
+      const X = orig ? wx => (wx - sh.d.x) * sk : wx => (m + (wx - sh.x0) * s) * k;
+      const Y = orig ? wy => PH - (wy - sh.d.y) * sk : wy => PH - (m + (wy - ya) * s) * k;
       const reach = (top, bottom) => bottom >= ya - 4 && top <= yb + 4;
-      const page = doc.addPage([PW, PH]);
-      page.pushOperators(pushGraphicsState(), rectangle(m * k, PH - (m + (yb - ya) * s) * k, (sh.W - 2 * m) * k, (yb - ya) * s * k), clip(), endPath());
-      const at = {x: X(0), y: Y(0), scale: s * k};
-      const d = paperPath(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
-      if(d) page.drawSvgPath(d, page0.bg.type === 'dots' ? {...at, borderColor: hexRgb('#AEBBC9'), borderWidth: 1.6, borderLineCap: LineCapStyle.Round} : {...at, borderColor: hexRgb('#D5DFEA'), borderWidth: 0.8});
-      const ml = marginLine(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
-      if(ml) page.drawSvgPath(ml.d, {...at, borderColor: hexRgb(ml.c), borderWidth: ml.w});
+      const page = orig ? sh.page : doc.addPage([PW, PH]);
+      if(orig){
+        pdfLayerStart(page, layer);
+        page.pushOperators(concatTransformationMatrix(...pdfUpright(page.getCropBox(), sh.ang)), rectangle(0, 0, sh.VW, sh.VH), clip(), endPath());
+      } else page.pushOperators(pushGraphicsState(), rectangle(m * k, PH - (m + (yb - ya) * s) * k, (sh.W - 2 * m) * k, (yb - ya) * s * k), clip(), endPath());
+      const at = {x: X(0), y: Y(0), scale: sk};
+      if(!writingOnly){
+        const d = paperPath(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
+        if(d) page.drawSvgPath(d, page0.bg.type === 'dots' ? {...at, borderColor: hexRgb('#AEBBC9'), borderWidth: 1.6, borderLineCap: LineCapStyle.Round} : {...at, borderColor: hexRgb('#D5DFEA'), borderWidth: 0.8});
+        const ml = marginLine(page0.bg, ya, yb, sh.x0, sh.x0 + sh.cw);
+        if(ml) page.drawSvgPath(ml.d, {...at, borderColor: hexRgb(ml.c), borderWidth: ml.w});
+      }
       for(const it of pics){
         if(!reach(it.y, it.y + it.h)) continue;
+        // only the writing: an imported page itself stays out, its filled-in form values stay in
+        if(writingOnly && it.doc){
+          const ov = overlays.get(it.id);
+          if(ov) page.drawImage(ov, {x: X(it.x), y: Y(it.y + it.h), width: it.w * sk, height: it.h * sk});
+          continue;
+        }
         let img = embedded.get(it.a);
         if(img === undefined){
           img = null;
@@ -654,7 +722,7 @@ async function makePdf(){
           } catch(e){ console.warn('pdf image', e); }
           embedded.set(it.a, img);
         }
-        const r = {x: X(it.x), y: Y(it.y + it.h), width: it.w * s * k, height: it.h * s * k};
+        const r = {x: X(it.x), y: Y(it.y + it.h), width: it.w * sk, height: it.h * sk};
         if(img) page.drawImage(img, opOf(it) < 1 ? {...r, opacity: opOf(it)} : r);
         const ov = overlays.get(it.id); if(ov) page.drawImage(ov, r);
       }
@@ -664,18 +732,21 @@ async function makePdf(){
       }
       for(const t of tops){
         if(!reach(t.b[1], t.b[3])) continue;
-        page.drawImage(t.png, {x: X(t.x), y: Y(t.y + t.h), width: t.w * s * k, height: t.h * s * k, opacity: opOf(t.it)});
+        page.drawImage(t.png, {x: X(t.x), y: Y(t.y + t.h), width: t.w * sk, height: t.h * sk, opacity: opOf(t.it)});
       }
+      if(orig) page.pushOperators(PDFOperator.of('EMC'));
       page.pushOperators(popGraphicsState());
     }
     say('Saving…'); await tick();
     const bytes = await doc.save();
     if(stop()) return;
-    const part = pick && pick.length ? (pick.length === 1 ? ` (page ${pick[0] + 1})` : ` (pages ${pagesLabel(pick).replace(/–/g, '-')})`) : '';
-    const name = ((title + part).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Inkwell page') + '.pdf';
+    const part = (pick && pick.length ? (pick.length === 1 ? ` (page ${pick[0] + 1})` : ` (pages ${pagesLabel(pick).replace(/–/g, '-')})`) : '') + (mode === 'ink' ? ' (only writing)' : '');
+    const base = mode === 'orig' ? Pdf.origName.replace(/\.pdf$/i, '') + ' (with notes)' : title + part;
+    const name = (base.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Inkwell page') + '.pdf';
     Pdf.file = new File([bytes], name, {type: 'application/pdf'});
     const mb = bytes.length / 1048576, size = `${mb < 0.1 ? '< 0.1' : mb.toFixed(1)} MB`;
-    say(pick && pick.length ? `Ready: page${pick.length === 1 ? '' : 's'} ${pagesLabel(pick)} of ${all.length}, ${size}.`
+    if(mode === 'orig') say(`Ready: your writing is on ${sheets.length} page${sheets.length === 1 ? '' : 's'} of the original PDF, as a layer called Inkwell notes, ${size}.` + (outside ? ` ${outside} thing${outside === 1 ? ' is' : 's are'} beside the pages and left out.` : ''));
+    else say(pick && pick.length ? `Ready: page${pick.length === 1 ? '' : 's'} ${pagesLabel(pick)} of ${all.length}, ${size}.`
       : `Ready: ${all.length} page${all.length === 1 ? '' : 's'}${all.some(sh => sh.doc) ? ' (the imported pages keep their numbers)' : ''}, ${size}.`);
     $('exportSave').disabled = false;
   } catch(e){
@@ -683,6 +754,21 @@ async function makePdf(){
     say('The PDF could not be made: ' + (e.message || e) + '. Try Print instead.');
   }
 }
+// (1.85) what goes in the file: the whole page, only the writing on a transparent background, or the writing into the original PDF
+function renderExportMode(){
+  $('exportMode').querySelectorAll('[data-m]').forEach(x => x.classList.toggle('on', x.dataset.m === Pdf.mode));
+  $('exportOrigWrap').hidden = Pdf.mode !== 'orig';
+  $('exportOrigName').textContent = Pdf.origName ? Pdf.origName : 'Inkwell keeps pictures of imported pages, so it needs the original file once.';
+  $('exportPrint').hidden = Pdf.mode !== 'page';
+}
+$('exportMode').addEventListener('click', e => {
+  const b = e.target.closest('[data-m]'); if(!b || b.dataset.m === Pdf.mode) return;
+  Pdf.mode = b.dataset.m; renderExportMode(); makePdf();
+});
+$('exportOrigFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if(!f) return;
+  Pdf.orig = await f.arrayBuffer(); Pdf.origName = f.name; renderExportMode(); makePdf();
+});
 // (1.66) "All pages" or "Only pages: 3, 5-7": the PDF is made again with just those
 $('exportPick').addEventListener('click', e => {
   const b = e.target.closest('[data-pick]'); if(!b) return;

@@ -626,6 +626,8 @@
 <div class="modal" id="exportDlg" hidden>
   <div class="dlg">
     <div class="dlg-head"><h3 id="exportTitle">Export as PDF</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="seg export-mode" id="exportMode"><button data-m="page" class="on">Whole page</button><button data-m="ink">Only my writing</button><button data-m="orig">Into original PDF</button></div>
+    <div class="export-orig" id="exportOrigWrap" hidden><label class="btn ghost">Choose the PDF<input type="file" id="exportOrigFile" accept="application/pdf,.pdf" hidden></label><span class="hint" id="exportOrigName"></span></div>
     <div class="export-pick" id="exportPick" hidden>
       <div class="seg"><button data-pick="all" class="on">All pages</button><button data-pick="some">Only some pages</button></div>
       <input id="exportPages" class="text-in" type="text" autocomplete="off" placeholder="Pages, e.g. 3 or 2-5, 8" aria-label="Pages to export" hidden>

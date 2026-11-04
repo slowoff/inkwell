@@ -1069,10 +1069,11 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
   .main[data-bar=left] .bar1,.main[data-bar=right] .bar1{position:static;justify-content:center;padding:6px 8px;gap:4px}
   .main[data-bar=right] .bar1{flex-direction:row-reverse}
   .main[data-bar=left] .bar1 #undo,.main[data-bar=left] .bar1 #redo,.main[data-bar=right] .bar1 #undo,.main[data-bar=right] .bar1 #redo{width:44px;height:44px;min-width:44px}
-  .main[data-bar=left] #barMore,.main[data-bar=left] #barHide,.main[data-bar=right] #barMore,.main[data-bar=right] #barHide{display:inline-flex;position:absolute;z-index:15;bottom:calc(6px + var(--sab));width:44px;height:44px;min-width:44px;margin:0;background:var(--panel)}
-  .main[data-bar=right] #barHide{right:calc(10px + var(--sar))}
+  .main[data-bar=left] #barMore,.main[data-bar=left] #sideBtn,.main[data-bar=right] #barMore,.main[data-bar=right] #sideBtn{display:inline-flex;position:absolute;z-index:15;bottom:calc(6px + var(--sab));width:44px;height:44px;min-width:44px;margin:0;background:var(--panel)}
+  .main[data-bar=right] #sideBtn{right:calc(10px + var(--sar))}
   .main[data-bar=right] #barMore{right:calc(58px + var(--sar))}
-  .main[data-bar=left] #barHide{left:10px}
+  .main[data-bar=left] #sideBtn{left:10px}
+  .main[data-bar=left] .bar-extra.open #barHide,.main[data-bar=right] .bar-extra.open #barHide{display:inline-flex}
   .main[data-bar=left] #barMore{left:58px}
   .main[data-bar=left] #barHide svg,.main[data-bar=left] #barShow svg{transform:scaleX(-1)}
   .main[data-bar=left] .bar-extra.open,.main[data-bar=right] .bar-extra.open{top:6px;z-index:16}

@@ -1332,7 +1332,12 @@ async function restoreVersion(v){
    ===================================================================== */
 /* (1.81) Settings -> Toolbar position (prefs.barPos, per device): both bars on top, bottom, left or right. CSS does the
    layout from #main's data-bar (a phone-sized window keeps it on top or bottom); the stage follows through its ResizeObserver. */
-function applyBarPos(){ const v = prefs.barPos; if(v && v !== 'top') $('main').dataset.bar = v; else delete $('main').dataset.bar; if(prefs.barCol) $('main').dataset.col = '1'; else delete $('main').dataset.col; barExtra(false); closePops(); }
+function applyBarPos(){ const v = prefs.barPos; if(v && v !== 'top') $('main').dataset.bar = v; else delete $('main').dataset.bar; if(prefs.barCol) $('main').dataset.col = '1'; else delete $('main').dataset.col;
+  // (1.83.2) on the side the sidebar button sits at the foot of the column and the hide button in the panel
+  const side = v === 'left' || v === 'right', bar = $('barExtra').parentElement;
+  if(side){ bar.append($('sideBtn')); $('barExtra').prepend($('barHide')); }
+  else { $('barExtra').prepend($('sideBtn')); bar.insertBefore($('barHide'), $('barExtra')); }
+  barExtra(false); closePops(); }
 function barCollapse(on){ prefs.barCol = on; savePrefs(); applyBarPos(); }
 $('barHide').addEventListener('click', () => barCollapse(true));
 $('barShow').addEventListener('click', () => barCollapse(false));

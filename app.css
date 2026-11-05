@@ -1117,3 +1117,7 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .export-orig{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .export-orig .btn{flex:none;cursor:pointer}
 .export-orig .hint{min-width:0;overflow-wrap:anywhere}
+/* (1.87) plain export first */
+.export-more{align-self:flex-start;color:var(--accent);font-size:13.5px;font-weight:600;height:36px;padding:0 2px;margin:2px 0}
+.export-opts{margin-bottom:6px}
+.export-orig #exportOrigOff{flex:none;margin-left:auto}

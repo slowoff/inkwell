@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.87', '2026-11-05', ['Movable export: choose Use my original PDF and the worksheet stays sharp with selectable text, with your writing movable on top']],
   ['1.86', '2026-11-05', ['Export as PDF: Movable saves a PDF and an SVG where every stroke, text box and formula stays a separate thing you can move in other apps. Typed text stays editable and imported pages stay fixed underneath']],
   ['1.85.1', '2026-11-04', ['Export as PDF: Transparent background leaves out the paper lines, margin line and graph backgrounds. Your writing and imported pages stay']],
   ['1.85', '2026-11-04', ['Export as PDF: Only my writing saves your ink and text on a transparent background','Into original PDF adds your writing to the original file as a layer you can show or hide. Choose the original PDF when asked']],

@@ -59,10 +59,10 @@ async def main():
         # red mark in the lower right of the second imported page (page 3 of the file)
         fx, fy = 0.75, 0.75; cx, cy = d1['x'] + d1['w'] * fx, d1['y'] + d1['h'] * fy
         await page.evaluate(ADD, [cx - 20, cy, .5, cx, cy, .5, cx + 20, cy, .5])
-        await page.evaluate("() => __inkwell.exportPdfFile()"); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        await page.evaluate("() => { __inkwell.exportPdfFile(); document.getElementById('exportMore').click(); }"); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
         # 0. whole page with a transparent background
         await page.evaluate("() => { const W = __inkwell; W.cur.bg = Object.assign({}, W.cur.bg, {type: 'grid', ml: 'blue', mx: 300}); W.addItems([{t: 's', id: 'fillp', c: 'paper', w: 1, hl: 0, fl: 1, p: [W.cur.items.size * 0 + 700, 100, .5, 900, 100, .5, 900, 300, .5, 700, 300, .5]}]); }")
-        await page.wait_for_timeout(200); await page.evaluate("() => __inkwell.exportPdfFile()"); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        await page.wait_for_timeout(200); await page.evaluate("() => { __inkwell.exportPdfFile(); document.getElementById('exportMore').click(); }"); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
         BLUE = """async () => { const W = window.__inkwell; if(!window.pdfjsLib) await W.loadScript('lib/pdf.min.js');
           const pdf = await pdfjsLib.getDocument({data: await W.Pdf.file.arrayBuffer()}).promise, pg = await pdf.getPage(1), ops = await pg.getOperatorList(); return {imgs: ops.fnArray.filter(f => f === pdfjsLib.OPS.paintImageXObject || f === pdfjsLib.OPS.paintJpegXObject).length, n: ops.fnArray.length, name: W.Pdf.file.name}; }"""
         full = await page.evaluate(BLUE)
@@ -73,7 +73,7 @@ async def main():
         await page.click('#exportMode [data-m=ink]'); await page.wait_for_timeout(300)
         check(await page.is_hidden('#exportClearWrap'), 'switch only for Whole page')
         await page.click('#exportDlg [data-close]'); await page.wait_for_timeout(200)
-        await page.evaluate("() => { const W = __inkwell; W.removeItems(['fillp']); W.exportPdfFile(); }"); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        await page.evaluate("() => { const W = __inkwell; W.removeItems(['fillp']); W.exportPdfFile(); document.getElementById('exportMore').click(); }"); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
         check(not await page.is_checked('#exportClear'), 'off again next time')
         # 1. only the writing
         await page.click('#exportMode [data-m=ink]'); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
@@ -85,7 +85,7 @@ async def main():
         # 2. into the original
         await page.click('#exportMode [data-m=orig]'); await page.wait_for_timeout(300)
         check(await page.evaluate("document.getElementById('exportSave').disabled") and 'Choose' in await page.inner_text('#exportInfo'), 'asks for the file first')
-        if os.environ.get('GSHOT'): await page.screenshot(path=os.environ['GSHOT'])
+        if os.environ.get('GSHOT'): await page.screenshot(path=os.environ['GSHOT'] + '-w.png')
         wrong = '/tmp/claude-0/wrong_test.pdf'; open(wrong, 'wb').write(make_pdf(npages=1, tag='OTHER'))
         await page.set_input_files('#exportOrigFile', wrong); await page.wait_for_timeout(1000)
         check('right PDF' in await page.inner_text('#exportInfo') and await page.evaluate("document.getElementById('exportSave').disabled"), 'a file with too few pages is refused')
@@ -106,7 +106,7 @@ async def main():
           const d = await PDFLib.PDFDocument.create(); const pg = d.addPage([400, 600]); pg.setRotation(PDFLib.degrees(90)); const bytes = await d.save(); window.__rot = Array.from(bytes);
           W.addItems([{t: 'i', id: 'irot', x: 0, y: 0, w: 600, h: 400, a: 'none', doc: 1, pn: 0}, {t: 's', id: 'srot', c: '#FF0000', w: 8, hl: 0, p: [440, 90, .5, 460, 90, .5, 480, 90, .5]}]); }""")
         open(rot, 'wb').write(bytes(await page.evaluate("window.__rot")))
-        await page.evaluate("() => __inkwell.exportPdfFile()"); await page.wait_for_timeout(600)
+        await page.evaluate("() => { __inkwell.exportPdfFile(); document.getElementById('exportMore').click(); }"); await page.wait_for_timeout(600)
         await page.click('#exportMode [data-m=orig]'); await page.wait_for_timeout(200)
         await page.set_input_files('#exportOrigFile', rot); await page.wait_for_timeout(800); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
         r = await page.evaluate(RENDER, {'layerOff': False}); q = r['pages'][0]

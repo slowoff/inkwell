@@ -61,6 +61,14 @@ async def main():
             {t: 'm', id: 'mx1', x: d.x + 60, y: d.y + 420, fs: 22, c: 'auto', tex: 'x^2 + 1'}]); }""", [cx, cy, d])
         await page.wait_for_timeout(600)
         await page.evaluate("() => __inkwell.exportPdfFile()"); await page.wait_for_timeout(1000); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        check(await page.is_hidden('#exportOpts') and await page.is_hidden('#exportMode') and await page.is_visible('#exportSave') and await page.inner_text('#exportSave') == 'Save PDF', 'plain export: just Save PDF, options tucked away')
+        if os.environ.get('GSHOT'): await page.screenshot(path=os.environ['GSHOT'] + '-plain.png')
+        await page.click('#exportMore'); await page.wait_for_timeout(100)
+        await page.click('#exportMode [data-m=ink]'); await page.wait_for_timeout(1200); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        await page.click('#exportMore'); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
+        fn = await page.evaluate("[__inkwell.Pdf.mode, __inkwell.Pdf.file.name]")
+        check(fn[0] == 'page' and 'only writing' not in fn[1] and await page.is_hidden('#exportOpts'), f'closing the options goes back to the plain export ({fn})')
+        await page.click('#exportMore'); await page.wait_for_timeout(100)
         await page.click('#exportMode [data-m=move]'); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file && __inkwell.Pdf.extra", timeout=30000)
         if os.environ.get('GSHOT'): await page.screenshot(path=os.environ['GSHOT'] + '-dlg.png')
         check(await page.inner_text('#exportSave') == 'Save both' and await page.is_hidden('#exportPick') and await page.is_hidden('#exportClearWrap'), 'dialog: Save both, no page or transparent choices')
@@ -82,6 +90,37 @@ async def main():
         check('Grüezi Titel' in s['text'] and s['tspans'] >= 4, f'real text with its lines ({s["text"]!r}, {s["tspans"]})')
         check(s['locked'] == 'true', 'imported pages marked locked')
         check(s['red'] > 20 and abs(s['cx'] - (cx + 40)) < 25 and abs(s['cy'] - (cy + 20)) < 40, f'ink in the right place ({s["red"]}, {s["cx"]}, {s["cy"]}, want {cx + 40}, {cy + 20})')
+        # with the original file
+        wrong = '/tmp/claude-0/mov_w.pdf'; cw = canvas.Canvas(wrong, pagesize=A4); cw.drawString(72, 700, 'x'); cw.showPage(); cw.save()
+        await page.set_input_files('#exportOrigFile', wrong); await page.wait_for_timeout(1000)
+        check('right PDF' in await page.inner_text('#exportInfo') and await page.evaluate("document.getElementById('exportSave').disabled"), 'wrong original refused')
+        await page.set_input_files('#exportOrigFile', P); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file && __inkwell.Pdf.extra", timeout=30000)
+        if os.environ.get('GSHOT'): await page.screenshot(path=os.environ['GSHOT'] + '-orig.png')
+        r = await page.evaluate(READ, {'mode': 0}); q = r['pages'][1]
+        tx = await page.evaluate("""async () => { const pdf = await pdfjsLib.getDocument({data: await __inkwell.Pdf.file.arrayBuffer()}).promise, o = []; for(let i = 1; i <= pdf.numPages; i++){ const pg = await pdf.getPage(i), t = await pg.getTextContent(), ops = await pg.getOperatorList({annotationMode: 0}); o.push({t: t.items.map(x => x.str).join(' '), imgs: ops.fnArray.filter(f => f === pdfjsLib.OPS.paintImageXObject || f === pdfjsLib.OPS.paintJpegXObject).length}); } return o; }""")
+        check(all(f'WORKSHEET {i + 1}' in tx[i]['t'] and tx[i]['imgs'] == 0 for i in range(2)), f'original text is real, no page pictures ({tx})')
+        types2 = [a['t'] for a in q['an']]
+        check(types2.count('Ink') == 3 and types2.count('FreeText') == 1 and types2.count('Stamp') == 1 and q['red'] == 0, f'writing still separate annotations ({types2}, {q["red"]})')
+        check('mov (movable)' in r['name'] and r['extra'] and r['extra'].endswith('.svg'), f'names ({r["name"]}, {r["extra"]})')
+        r = await page.evaluate(READ, {'mode': 1}); q = r['pages'][1]
+        check(q['red'] > 50 and abs(q['cx'] - .75) < .1 and abs(q['cy'] - .63) < .1, f'same spot on the original ({q["red"]}, {q["cx"]}, {q["cy"]})')
+        await page.click('#exportOrigOff'); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file && __inkwell.Pdf.extra", timeout=30000)
+        tx = await page.evaluate("""async () => { const pdf = await pdfjsLib.getDocument({data: await __inkwell.Pdf.file.arrayBuffer()}).promise, pg = await pdf.getPage(1), t = await pg.getTextContent(); return t.items.map(x => x.str).join(' '); }""")
+        check('WORKSHEET' not in tx, 'Remove goes back to the pictures')
+        # a page shown turned in the file: annotations land where they were written
+        rot = '/tmp/claude-0/mov_rot.pdf'
+        await page.click('#exportDlg [data-close]'); await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(300)
+        await page.evaluate("""async () => { const W = __inkwell; await W.loadScript('lib/pdf-lib.min.js');
+          const d = await PDFLib.PDFDocument.create(); const pg = d.addPage([400, 600]); pg.setRotation(PDFLib.degrees(90)); const bytes = await d.save(); window.__rot = Array.from(bytes);
+          W.addItems([{t: 'i', id: 'irot', x: 0, y: 0, w: 600, h: 400, a: 'none', doc: 1, pn: 0}, {t: 's', id: 'srot', c: '#FF0000', w: 8, hl: 0, p: [440, 90, .5, 460, 90, .5, 480, 90, .5]}]); }""")
+        open(rot, 'wb').write(bytes(await page.evaluate("window.__rot")))
+        await page.evaluate("() => { __inkwell.exportPdfFile(); document.getElementById('exportMore').click(); }"); await page.wait_for_timeout(800)
+        await page.click('#exportMode [data-m=move]'); await page.wait_for_timeout(1200)
+        await page.set_input_files('#exportOrigFile', rot); await page.wait_for_timeout(1200); await page.wait_for_function("__inkwell.Pdf.file && __inkwell.Pdf.extra", timeout=30000)
+        r = await page.evaluate(READ, {'mode': 1}); q = r['pages'][0]
+        check(q['w'] > q['h'] and q['red'] > 10 and abs(q['cx'] - .767) < .03 and abs(q['cy'] - .225) < .03, f'turned page: same spot ({q["red"]}, {q["cx"]}, {q["cy"]})')
+        await page.click('#exportDlg [data-close]'); await page.evaluate("async () => { const W = __inkwell; for(const d of [...W.docs.values()]) if(d.kind === 'page' && d.data.title === 'mov'){ await W.openPage(d.id); } }"); await page.wait_for_timeout(500)
+        await page.evaluate("() => { __inkwell.exportPdfFile(); document.getElementById('exportMore').click(); }"); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
         # other modes unchanged
         await page.click('#exportMode [data-m=page]'); await page.wait_for_timeout(1500); await page.wait_for_function("__inkwell.Pdf.file", timeout=30000)
         r = await page.evaluate(READ, {'mode': 0})

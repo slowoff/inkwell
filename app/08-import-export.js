@@ -561,7 +561,7 @@ function pagesLabel(list){
   }
   return out.join(', ');
 }
-const Pdf = {abort: false, file: null, run: 0, page: null, n: 0, only: null, mode: 'page', orig: null, origName: '', clear: false};
+const Pdf = {abort: false, file: null, run: 0, page: null, n: 0, only: null, mode: 'page', orig: null, origName: '', clear: false, extra: null};
 // (1.85) puts the writing in its own optional layer, which PDF readers can show or hide (OCG); returns the name to mark it with
 function pdfLayer(doc){
   const {PDFName, PDFArray, PDFDict, PDFHexString} = PDFLib, ctx = doc.context;
@@ -584,6 +584,111 @@ function pdfLayerStart(page, ref){
   if(!pr){ pr = ctx.obj({}); Resources.set(PDFName.of('Properties'), pr); }
   pr.set(PDFName.of('InkwellNotes'), ref);
   page.pushOperators(pushGraphicsState(), PDFOperator.of('BDC', [PDFName.of('OC'), PDFName.of('InkwellNotes')]));
+}
+/* (1.86) Movable export. In the PDF every stroke is an ink annotation, every text box a free-text annotation and every formula or
+   pasted picture a stamp, each with its own appearance, so PDF apps can move them one by one. Imported pages stay fixed page
+   content. The SVG holds the same things as separate objects for design apps. */
+function exportRuns(it){
+  const el = elMap.get(it.id); if(!el) return [];
+  const eb = el.getBoundingClientRect(), sc = eb.width / (el.offsetWidth || 1) || 1, out = [], rg = document.createRange(), liSeen = new Set();
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for(let n = walk.nextNode(); n; n = walk.nextNode()){
+    const pa = n.parentElement, cs = getComputedStyle(pa);
+    const m = /(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(cs.color), lum = m ? (+m[1] * 0.3 + +m[2] * 0.59 + +m[3] * 0.11) : 0;
+    const color = !m || lum > 200 ? '#18212B' : '#' + [m[1], m[2], m[3]].map(v => (+v).toString(16).padStart(2, '0')).join('');
+    let run = null;
+    const t = n.nodeValue;
+    for(let i = 0; i < t.length; i++){
+      rg.setStart(n, i); rg.setEnd(n, i + 1);
+      const r = rg.getClientRects()[0];
+      if(!r || !r.width && !/\S/.test(t[i])) continue;
+      const top = r.top;
+      if(!run || Math.abs(run.top - top) > 2){
+        run = {top, text: '', x: it.x + (r.left - eb.left) / sc, y: it.y + (r.top - eb.top + r.height * 0.8) / sc, size: parseFloat(cs.fontSize) || 17, bold: (parseInt(cs.fontWeight) || 400) >= 600, color};
+        // list markers are drawn by CSS, so they are not in the text
+        const li = pa.closest('li');
+        if(li && !liSeen.has(li)){ liSeen.add(li); run.text = li.closest('ul.check') ? (li.classList.contains('done') ? '[x] ' : '[ ] ') : '\u2022 '; }
+        out.push(run);
+      }
+      run.text += t[i] === '\t' ? '    ' : t[i];
+    }
+  }
+  return out.filter(r => /\S/.test(r.text));
+}
+function pdfAnnotAdd(doc, page, dict, ops, bbox, res){
+  const ctx = doc.context, {PDFHexString} = PDFLib;
+  const ap = ctx.register(ctx.formXObject(ops, {BBox: bbox, Resources: res || {}}));
+  page.node.addAnnot(ctx.register(ctx.obj({Type: 'Annot', F: 4, Rect: bbox, T: PDFHexString.fromText('Inkwell'), AP: {N: ap}, ...dict})));
+}
+const rgbOf = c => { const v = parseInt(String(c).slice(1), 16) || 0; return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
+function pdfInkAnnot(doc, page, it, X, Y, sk){
+  const {drawSvgPath, rgb} = PDFLib, c = inkColor(it.c, true), [r, g, b] = rgbOf(c), q = itemBox(it), o = (it.hl ? 0.4 : 1) * opOf(it);
+  const bbox = [X(q[0]) - 1, Y(q[3]) - 1, X(q[2]) + 1, Y(q[1]) + 1].map(v => Math.round(v * 100) / 100);
+  const line = []; let w = 2;
+  if(it.fl){ for(let i = 0; i < it.p.length; i += 3) line.push(X(it.p[i]), Y(it.p[i + 1])); }
+  else {
+    const {xs, ys, rs, n} = strokeShape(it), step = Math.max(1, Math.ceil(n / 400)); let sum = 0;
+    for(let i = 0; i < n; i += step){ line.push(X(xs[i]), Y(ys[i])); sum += rs[i]; }
+    if(n && (n - 1) % step) line.push(X(xs[n - 1]), Y(ys[n - 1]));
+    w = Math.max(0.2, 2 * sum / Math.max(1, Math.ceil(n / step)) * sk);
+  }
+  const ops = drawSvgPath(strokePath(it, true), {x: X(0), y: Y(0), scale: sk, color: rgb(r, g, b), graphicsState: 'GS0'});
+  pdfAnnotAdd(doc, page, {Subtype: 'Ink', InkList: [line.map(v => Math.round(v * 100) / 100)], C: [r, g, b], CA: o, BS: {W: Math.round(w * 100) / 100, S: 'S'}}, ops, bbox,
+    {ExtGState: {GS0: {ca: o, CA: o, ...(it.hl ? {BM: 'Multiply'} : {})}}});
+}
+function pdfImageAnnot(doc, page, img, x, y, w, h, o){
+  const {drawImage} = PDFLib, bbox = [x, y, x + w, y + h].map(v => Math.round(v * 100) / 100);
+  pdfAnnotAdd(doc, page, {Subtype: 'Stamp', Name: 'Inkwell', ...(o < 1 ? {CA: o} : {})}, drawImage('I0', {x, y, width: w, height: h, rotate: PDFLib.degrees(0), xSkew: PDFLib.degrees(0), ySkew: PDFLib.degrees(0), graphicsState: o < 1 ? 'GS0' : undefined}), bbox,
+    {XObject: {I0: img.ref}, ...(o < 1 ? {ExtGState: {GS0: {ca: o}}} : {})});
+}
+function pdfTextAnnot(doc, page, it, runs, fonts, X, Y, sk){
+  const {PDFHexString, beginText, endText, setFontAndSize, setTextMatrix, setFillingRgbColor, showText, degrees} = PDFLib;
+  const el = elMap.get(it.id), h = el ? el.offsetHeight : 20, w = el ? el.offsetWidth : (it.w || 100);
+  const bbox = [X(it.x), Y(it.y + h), X(it.x + w), Y(it.y)].map(v => Math.round(v * 100) / 100);
+  const enc = (font, t) => { try { return font.encodeText(t); } catch { return font.encodeText([...t].map(ch => { try { font.encodeText(ch); return ch; } catch { return '?'; } }).join('')); } };
+  const ops = [beginText()];
+  for(const r of runs){
+    const font = r.bold ? fonts.b : fonts.r, [cr, cg, cb] = rgbOf(r.color);
+    ops.push(setFillingRgbColor(cr, cg, cb), setFontAndSize(r.bold ? 'F1' : 'F0', r.size * sk), setTextMatrix(1, 0, 0, 1, X(r.x), Y(r.y)), showText(enc(font, r.text)));
+  }
+  ops.push(endText());
+  const size = runs.length ? Math.round(runs[0].size * sk * 10) / 10 : 12, [dr, dg, db] = rgbOf(runs.length ? runs[0].color : '#18212B');
+  pdfAnnotAdd(doc, page, {Subtype: 'FreeText', Contents: PDFHexString.fromText(runs.map((r, i) => (i && Math.abs(r.y - runs[i - 1].y) > 2 ? '\n' : '') + r.text).join('')), DA: PDFLib.PDFString.of(`/Helv ${size} Tf ${dr} ${dg} ${db} rg`)}, ops, bbox, {Font: {F0: fonts.r.ref, F1: fonts.b.ref, Helv: fonts.r.ref}});
+}
+const b64Of = bytes => { let s = ''; for(let i = 0; i < bytes.length; i += 32768) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768)); return btoa(s); };
+const typeOf = bytes => bytes[0] === 0x89 && bytes[1] === 0x50 ? 'image/png' : 'image/jpeg';
+// the page as one SVG: imported pages first (locked in apps that read the lock), then every other thing as its own object
+async function movableSvg(items, inks, tops, b){
+  const x0 = b[0] - 12, y0 = b[1] - 12, w = b[2] - b[0] + 24, h = b[3] - b[1] + 24, parts = [], LIMIT = 60 * 1048576;
+  let total = 0, skipped = 0;
+  const image = async (it, attr) => {
+    let rec = await IDB.get('assets', it.a); if(!rec) rec = await Sync.fetchAsset(it.a);
+    if(!rec) return;
+    const bytes = new Uint8Array(await rec.blob.arrayBuffer());
+    if(total + bytes.length > LIMIT){ skipped++; return; }
+    total += bytes.length;
+    parts.push(`<image ${attr} x="${r1(it.x)}" y="${r1(it.y)}" width="${r1(it.w)}" height="${r1(it.h)}" preserveAspectRatio="none" href="data:${typeOf(bytes)};base64,${b64Of(bytes)}"${opOf(it) < 1 ? ` opacity="${opOf(it)}"` : ''}/>`);
+  };
+  const pics = items.filter(it => it.t === 'i' && it.a).sort((p, q) => (q.doc ? 1 : 0) - (p.doc ? 1 : 0));
+  let n = 0;
+  for(const it of pics) await image(it, it.doc ? `id="imported-page-${++n}" sodipodi:insensitive="true"` : `id="picture-${++n}"`);
+  n = 0;
+  for(const it of inks){
+    const o = (it.hl ? 0.4 : 1) * opOf(it);
+    parts.push(`<path id="stroke-${++n}" d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true))}"${o < 1 ? ` fill-opacity="${+o.toFixed(3)}"` : ''}${it.hl ? ' style="mix-blend-mode:multiply"' : ''}/>`);
+  }
+  n = 0;
+  for(const t of tops){
+    if(!t.bytes) continue;
+    parts.push(`<image id="formula-${++n}" x="${r1(t.x)}" y="${r1(t.y)}" width="${r1(t.w)}" height="${r1(t.h)}" href="data:image/png;base64,${b64Of(t.bytes)}"/>`);
+  }
+  n = 0;
+  for(const it of items.filter(i => i.t === 'x')){
+    const runs = exportRuns(it); if(!runs.length) continue;
+    parts.push(`<text id="text-${++n}" font-family="Helvetica, Arial, sans-serif"${opOf(it) < 1 ? ` opacity="${opOf(it)}"` : ''}>` + runs.map(r => `<tspan x="${r1(r.x)}" y="${r1(r.y)}" font-size="${r1(r.size)}" fill="${r.color}"${r.bold ? ' font-weight="700"' : ''}>${esc(r.text)}</tspan>`).join('') + '</text>');
+  }
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" viewBox="${r1(x0)} ${r1(y0)} ${r1(w)} ${r1(h)}" width="${r1(w)}" height="${r1(h)}">\n` + parts.join('\n') + '\n</svg>\n';
+  return {svg, skipped};
 }
 // page coordinates for what is shown upright: origin and direction for a page shown turned by 0, 90, 180 or 270 degrees
 function pdfUpright(box, angle){
@@ -608,7 +713,8 @@ async function makePdf(){
   Pdf.abort = false; Pdf.file = null;
   const stop = () => Pdf.abort || run !== Pdf.run;
   $('exportSave').disabled = true; $('exportInfo').textContent = 'Making the PDF…';
-  const mode = Pdf.mode, writingOnly = mode !== 'page', noPaper = writingOnly || Pdf.clear;
+  const mode = Pdf.mode, movable = mode === 'move', writingOnly = mode === 'ink' || mode === 'orig', noPaper = writingOnly || movable || Pdf.clear;
+  Pdf.extra = null;
   const say = t => { if(run === Pdf.run) $('exportInfo').textContent = t; };
   const tick = () => new Promise(r => setTimeout(r, 0));
   const b = page0 === cur ? contentBox() : null;
@@ -645,8 +751,8 @@ async function makePdf(){
     } else {
       all = pdfSheets(items, noPaper ? b : withMargin(page0.bg, b));
       Pdf.n = all.length;
-      $('exportPick').hidden = all.length < 2;
-      pick = Pdf.only ? Pdf.only.filter(i => i < all.length) : null;
+      $('exportPick').hidden = all.length < 2 || movable;
+      pick = Pdf.only && !movable ? Pdf.only.filter(i => i < all.length) : null;
       sheets = pick && pick.length ? pick.map(i => all[i]) : all;
       doc = await PDFDocument.create();
       doc.setTitle(title); doc.setCreator('Inkwell'); doc.setProducer('Inkwell');
@@ -657,7 +763,7 @@ async function makePdf(){
     const sMax = Math.max(...sheets.map(sh => sh.s));
     // text boxes and formulas: rendered once each, placed on every sheet they reach
     const tops = [];
-    const texts = items.filter(it => (it.t === 'x' || it.t === 'm') && elMap.get(it.id) && reachAny(box(it)));
+    const texts = items.filter(it => (it.t === 'm' || (it.t === 'x' && !movable)) && elMap.get(it.id) && reachAny(box(it)));
     for(let i = 0; i < texts.length; i++){
       if(stop()) return;
       if(i % 4 === 0){ say(`Preparing text ${i + 1} of ${texts.length}…`); await tick(); }
@@ -666,8 +772,8 @@ async function makePdf(){
       const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.opacity = ''; c.style.transform = ''; c.style.zoom = '';
       if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
       const sc = Math.max(1, Math.min(sMax * 2.5, Math.sqrt(12e6 / (w * h))));
-      const png = await doc.embedPng(await renderPng(c, w, h, sc));
-      tops.push({it, png, x: it.x, y: it.y, w: w + 2, h: h + 2, b: [it.x, it.y, it.x + w, it.y + h]});
+      const pngBytes = await renderPng(c, w, h, sc), png = await doc.embedPng(pngBytes);
+      tops.push({it, png, bytes: movable ? pngBytes : null, x: it.x, y: it.y, w: w + 2, h: h + 2, b: [it.x, it.y, it.x + w, it.y + h]});
     }
     // form values on imported pages: one transparent overlay per page picture
     const overlays = new Map();
@@ -681,6 +787,9 @@ async function makePdf(){
     const pics = items.filter(it => it.t === 'i' && it.a), embedded = new Map();
     const inks = [2, 1, 0].flatMap(pass => items.filter(it => it.t === 's' && !it.mk && inkPass(it) === pass && !(noPaper && it.fl && it.c === 'paper')));
     const inkBoxes = new Map(inks.map(it => [it.id, box(it)]));
+    // movable: each thing goes on one sheet only, the one its middle is on, so it is not there twice to move
+    const fonts = movable ? {r: await doc.embedFont(PDFLib.StandardFonts.Helvetica), b: await doc.embedFont(PDFLib.StandardFonts.HelveticaBold)} : null;
+    const sheetOf = q => { const m = (q[1] + q[3]) / 2; let best = 0, bd = Infinity; sheets.forEach((sh, i) => { const d = m < sh.ya ? sh.ya - m : m > sh.yb ? m - sh.yb : 0; if(d < bd){ bd = d; best = i; } }); return best; };
     for(let si = 0; si < sheets.length; si++){
       if(stop()) return;
       say(`Making page ${si + 1} of ${sheets.length}…`); await tick();
@@ -702,7 +811,7 @@ async function makePdf(){
         if(ml) page.drawSvgPath(ml.d, {...at, borderColor: hexRgb(ml.c), borderWidth: ml.w});
       }
       for(const it of pics){
-        if(!reach(it.y, it.y + it.h)) continue;
+        if(!reach(it.y, it.y + it.h) || (movable && !it.doc)) continue;
         // only the writing: an imported page itself stays out, its filled-in form values stay in
         if(writingOnly && it.doc){
           const ov = overlays.get(it.id);
@@ -726,29 +835,49 @@ async function makePdf(){
         if(img) page.drawImage(img, opOf(it) < 1 ? {...r, opacity: opOf(it)} : r);
         const ov = overlays.get(it.id); if(ov) page.drawImage(ov, r);
       }
-      for(const it of inks){
+      if(!movable) for(const it of inks){
         const q = inkBoxes.get(it.id); if(!reach(q[1], q[3])) continue;
         page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true)), opacity: (it.hl ? 0.4 : 1) * opOf(it), ...(it.hl && PDFLib.BlendMode ? {blendMode: PDFLib.BlendMode.Multiply} : {})});
       }
-      for(const t of tops){
+      if(!movable) for(const t of tops){
         if(!reach(t.b[1], t.b[3])) continue;
         page.drawImage(t.png, {x: X(t.x), y: Y(t.y + t.h), width: t.w * sk, height: t.h * sk, opacity: opOf(t.it)});
       }
       if(orig) page.pushOperators(PDFOperator.of('EMC'));
       page.pushOperators(popGraphicsState());
+      if(movable){
+        for(const it of pics){
+          if(it.doc || sheetOf(box(it)) !== si) continue;
+          let rec = await IDB.get('assets', it.a); if(!rec) rec = await Sync.fetchAsset(it.a);
+          if(!rec) continue;
+          const by = new Uint8Array(await rec.blob.arrayBuffer()), img = by[0] === 0x89 && by[1] === 0x50 ? await doc.embedPng(by) : await doc.embedJpg(by);
+          pdfImageAnnot(doc, page, img, X(it.x), Y(it.y + it.h), it.w * sk, it.h * sk, opOf(it));
+        }
+        for(const it of inks) if(sheetOf(inkBoxes.get(it.id)) === si) pdfInkAnnot(doc, page, it, X, Y, sk);
+        for(const t of tops) if(sheetOf(t.b) === si) pdfImageAnnot(doc, page, t.png, X(t.x), Y(t.y + t.h), t.w * sk, t.h * sk, opOf(t.it));
+        for(const it of items) if(it.t === 'x' && sheetOf(box(it)) === si){ const runs = exportRuns(it); if(runs.length) pdfTextAnnot(doc, page, it, runs, fonts, X, Y, sk); }
+      }
     }
     say('Saving…'); await tick();
     const bytes = await doc.save();
     if(stop()) return;
-    const part = (pick && pick.length ? (pick.length === 1 ? ` (page ${pick[0] + 1})` : ` (pages ${pagesLabel(pick).replace(/–/g, '-')})`) : '') + (mode === 'ink' ? ' (only writing)' : Pdf.clear ? ' (transparent)' : '');
+    const part = (pick && pick.length ? (pick.length === 1 ? ` (page ${pick[0] + 1})` : ` (pages ${pagesLabel(pick).replace(/–/g, '-')})`) : '') + (mode === 'ink' ? ' (only writing)' : movable ? ' (movable)' : Pdf.clear ? ' (transparent)' : '');
     const base = mode === 'orig' ? Pdf.origName.replace(/\.pdf$/i, '') + ' (with notes)' : title + part;
     const name = (base.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Inkwell page') + '.pdf';
     Pdf.file = new File([bytes], name, {type: 'application/pdf'});
     const mb = bytes.length / 1048576, size = `${mb < 0.1 ? '< 0.1' : mb.toFixed(1)} MB`;
-    if(mode === 'orig') say(`Ready: your writing is on ${sheets.length} page${sheets.length === 1 ? '' : 's'} of the original PDF, as a layer called Inkwell notes, ${size}.` + (outside ? ` ${outside} thing${outside === 1 ? ' is' : 's are'} beside the pages and left out.` : ''));
+    if(movable){
+      say('Making the SVG…'); await tick();
+      const out = await movableSvg(items, inks, tops, b);
+      if(stop()) return;
+      Pdf.extra = new File([out.svg], name.replace(/\.pdf$/i, '.svg'), {type: 'image/svg+xml'});
+      const smb = Pdf.extra.size / 1048576;
+      say(`Ready: a PDF (${size}) and an SVG (${smb < 0.1 ? '< 0.1' : smb.toFixed(1)} MB). Every stroke, text box and formula moves on its own.` + (out.skipped ? ` ${out.skipped} imported page${out.skipped === 1 ? ' is' : 's are'} left out of the SVG to keep it from getting too big.` : ''));
+    } else if(mode === 'orig') say(`Ready: your writing is on ${sheets.length} page${sheets.length === 1 ? '' : 's'} of the original PDF, as a layer called Inkwell notes, ${size}.` + (outside ? ` ${outside} thing${outside === 1 ? ' is' : 's are'} beside the pages and left out.` : ''));
     else say(pick && pick.length ? `Ready: page${pick.length === 1 ? '' : 's'} ${pagesLabel(pick)} of ${all.length}, ${size}.`
       : `Ready: ${all.length} page${all.length === 1 ? '' : 's'}${all.some(sh => sh.doc) ? ' (the imported pages keep their numbers)' : ''}, ${size}.`);
     $('exportSave').disabled = false;
+    $('exportSave').textContent = Pdf.extra ? 'Save both' : 'Save PDF';
   } catch(e){
     console.warn('pdf export', e);
     say('The PDF could not be made: ' + (e.message || e) + '. Try Print instead.');
@@ -794,14 +923,17 @@ $('exportPages').addEventListener('input', pagesTyped);
 $('exportPages').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('exportPages').blur(); } });
 async function savePdfFile(){
   const f = Pdf.file; if(!f) return;
+  const list = Pdf.extra ? [f, Pdf.extra] : [f];
   // iPad / phone: the share sheet (Save to Files, Mail, …); computer: a normal download
-  if(matchMedia('(pointer: coarse)').matches && navigator.canShare && navigator.canShare({files: [f]})){
-    try { await navigator.share({files: [f], title: f.name}); return; }
+  if(matchMedia('(pointer: coarse)').matches && navigator.canShare && navigator.canShare({files: list})){
+    try { await navigator.share({files: list, title: f.name}); return; }
     catch(e){ if(e.name === 'AbortError') return; console.warn('share', e); }
   }
-  const u = URL.createObjectURL(f), a = document.createElement('a');
-  a.href = u; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(u), 60000);
+  list.forEach((file, i) => setTimeout(() => {
+    const u = URL.createObjectURL(file), a = document.createElement('a');
+    a.href = u; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(u), 60000);
+  }, i * 400));
 }
 $('exportSave').addEventListener('click', savePdfFile);
 $('exportPrint').addEventListener('click', () => { Pdf.abort = true; hideModal('exportDlg'); exportPdf(); });

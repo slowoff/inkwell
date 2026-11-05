@@ -348,7 +348,7 @@ function fieldParts(it, ox, oy){
       const fs = mark ? fh * 0.8 : fieldFont(f, it);
       const align = mark ? 'center' : f.al === 1 ? 'center' : f.al === 2 ? 'right' : 'left';
       const lay = mark || !(f.ml || f.k === 'ls') ? `display:flex;align-items:center;justify-content:${mark ? 'center' : align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start'};white-space:pre` : `white-space:pre-wrap;text-align:${align}`;
-      out.push({box: fbox, h: `<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:${!mark && f.c ? f.c : '#111'};${!mark ? fieldCss(f) : ''}${lay}">${esc(txt)}</div>`});
+      out.push({box: fbox, h: `<div style="position:absolute;left:${fx}px;top:${fy}px;width:${fw}px;height:${fh}px;overflow:hidden;box-sizing:border-box;padding:0 ${fs * 0.15}px;font:${fs}px/1.15 Helvetica,Arial,sans-serif;color:${!mark && f.c ? esc(f.c) : '#111'};${!mark ? fieldCss(f) : ''}${lay}">${esc(txt)}</div>`});
     }
   return out;
 }
@@ -412,7 +412,7 @@ async function exportPdf(){
     const q = itemBox(it);
     const fo = (pass === 1 ? 0.4 : 1) * opOf(it);
     // (1.62) highlights blend into the page (multiply), like on screen
-    inks.push({a: q[1], b: q[3], hl: pass === 1, h: `<path d="${strokePath(it, true)}" fill="${inkColor(it.c, true)}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
+    inks.push({a: q[1], b: q[3], hl: pass === 1, h: `<path d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true))}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
   }
   const tops = [];
   for(const it of cur.items.values()){
@@ -648,7 +648,7 @@ function pdfImageAnnot(doc, page, img, x, y, w, h, o, M){
     {XObject: {I0: img.ref}, ...(o < 1 ? {ExtGState: {GS0: {ca: o}}} : {})}, M);
 }
 function pdfTextAnnot(doc, page, it, runs, fonts, X, Y, sk, M){
-  const {PDFHexString, beginText, endText, setFontAndSize, setTextMatrix, setFillingRgbColor, showText, degrees} = PDFLib;
+  const {PDFHexString, beginText, endText, setFontAndSize, setTextMatrix, setFillingRgbColor, showText} = PDFLib;
   const el = elMap.get(it.id), h = el ? el.offsetHeight : 20, w = el ? el.offsetWidth : (it.w || 100);
   const bbox = [X(it.x), Y(it.y + h), X(it.x + w), Y(it.y)].map(v => Math.round(v * 100) / 100);
   const enc = (font, t) => { try { return font.encodeText(t); } catch { return font.encodeText([...t].map(ch => { try { font.encodeText(ch); return ch; } catch { return '?'; } }).join('')); } };
@@ -665,36 +665,39 @@ const b64Of = bytes => { let s = ''; for(let i = 0; i < bytes.length; i += 32768
 const typeOf = bytes => bytes[0] === 0x89 && bytes[1] === 0x50 ? 'image/png' : 'image/jpeg';
 // the page as one SVG: imported pages first (locked in apps that read the lock), then every other thing as its own object
 async function movableSvg(items, inks, tops, b){
-  const x0 = b[0] - 12, y0 = b[1] - 12, w = b[2] - b[0] + 24, h = b[3] - b[1] + 24, parts = [], LIMIT = 60 * 1048576;
-  let total = 0, skipped = 0;
-  const image = async (it, attr) => {
-    let rec = await IDB.get('assets', it.a); if(!rec) rec = await Sync.fetchAsset(it.a);
-    if(!rec) return;
-    const bytes = new Uint8Array(await rec.blob.arrayBuffer());
-    if(total + bytes.length > LIMIT){ skipped++; return; }
-    total += bytes.length;
-    parts.push(`<image ${attr} x="${r1(it.x)}" y="${r1(it.y)}" width="${r1(it.w)}" height="${r1(it.h)}" preserveAspectRatio="none" href="data:${typeOf(bytes)};base64,${b64Of(bytes)}"${opOf(it) < 1 ? ` opacity="${opOf(it)}"` : ''}/>`);
-  };
+  // (1.88) written piece by piece into a Blob, so the page pictures are not all held in memory as text at once; a long document's
+  // pages stay out of the SVG (a page like that could run an iPad out of memory)
+  const x0 = b[0] - 12, y0 = b[1] - 12, w = b[2] - b[0] + 24, h = b[3] - b[1] + 24, parts = [], LIMIT = 25 * 1048576, MAX_PAGES = 12;
+  let total = 0, skipped = 0, n = 0;
+  const add = t => parts.push(new Blob([t + '\n']));
+  add(`<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" viewBox="${r1(x0)} ${r1(y0)} ${r1(w)} ${r1(h)}" width="${r1(w)}" height="${r1(h)}">`);
   const pics = items.filter(it => it.t === 'i' && it.a).sort((p, q) => (q.doc ? 1 : 0) - (p.doc ? 1 : 0));
-  let n = 0;
-  for(const it of pics) await image(it, it.doc ? `id="imported-page-${++n}" sodipodi:insensitive="true"` : `id="picture-${++n}"`);
+  const tooMany = pics.filter(it => it.doc).length > MAX_PAGES;
+  for(const it of pics){
+    if(it.doc && tooMany){ skipped++; continue; }
+    let rec = await IDB.get('assets', it.a); if(!rec) rec = await Sync.fetchAsset(it.a);
+    if(!rec) continue;
+    if(total + rec.blob.size > LIMIT){ skipped++; continue; }
+    total += rec.blob.size;
+    const bytes = new Uint8Array(await rec.blob.arrayBuffer()), attr = it.doc ? `id="imported-page-${++n}" sodipodi:insensitive="true"` : `id="picture-${++n}"`;
+    add(`<image ${attr} x="${r1(it.x)}" y="${r1(it.y)}" width="${r1(it.w)}" height="${r1(it.h)}" preserveAspectRatio="none" href="data:${typeOf(bytes)};base64,${b64Of(bytes)}"${opOf(it) < 1 ? ` opacity="${opOf(it)}"` : ''}/>`);
+  }
   n = 0;
   for(const it of inks){
     const o = (it.hl ? 0.4 : 1) * opOf(it);
-    parts.push(`<path id="stroke-${++n}" d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true))}"${o < 1 ? ` fill-opacity="${+o.toFixed(3)}"` : ''}${it.hl ? ' style="mix-blend-mode:multiply"' : ''}/>`);
+    add(`<path id="stroke-${++n}" d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true))}"${o < 1 ? ` fill-opacity="${+o.toFixed(3)}"` : ''}${it.hl ? ' style="mix-blend-mode:multiply"' : ''}/>`);
   }
   n = 0;
   for(const t of tops){
-    if(!t.bytes) continue;
-    parts.push(`<image id="formula-${++n}" x="${r1(t.x)}" y="${r1(t.y)}" width="${r1(t.w)}" height="${r1(t.h)}" href="data:image/png;base64,${b64Of(t.bytes)}"/>`);
+    if(t.bytes) add(`<image id="formula-${++n}" x="${r1(t.x)}" y="${r1(t.y)}" width="${r1(t.w)}" height="${r1(t.h)}" href="data:image/png;base64,${b64Of(t.bytes)}"/>`);
   }
   n = 0;
   for(const it of items.filter(i => i.t === 'x')){
     const runs = exportRuns(it); if(!runs.length) continue;
-    parts.push(`<text id="text-${++n}" font-family="Helvetica, Arial, sans-serif"${opOf(it) < 1 ? ` opacity="${opOf(it)}"` : ''}>` + runs.map(r => `<tspan x="${r1(r.x)}" y="${r1(r.y)}" font-size="${r1(r.size)}" fill="${r.color}"${r.bold ? ' font-weight="700"' : ''}>${esc(r.text)}</tspan>`).join('') + '</text>');
+    add(`<text id="text-${++n}" font-family="Helvetica, Arial, sans-serif"${opOf(it) < 1 ? ` opacity="${opOf(it)}"` : ''}>` + runs.map(r => `<tspan x="${r1(r.x)}" y="${r1(r.y)}" font-size="${r1(r.size)}" fill="${r.color}"${r.bold ? ' font-weight="700"' : ''}>${esc(r.text)}</tspan>`).join('') + '</text>');
   }
-  const svg = `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" viewBox="${r1(x0)} ${r1(y0)} ${r1(w)} ${r1(h)}" width="${r1(w)}" height="${r1(h)}">\n` + parts.join('\n') + '\n</svg>\n';
-  return {svg, skipped};
+  add('</svg>');
+  return {parts, skipped};
 }
 // page coordinates for what is shown upright: origin and direction for a page shown turned by 0, 90, 180 or 270 degrees
 function pdfUpright(box, angle){
@@ -878,7 +881,7 @@ async function makePdf(){
       say('Making the SVG…'); await tick();
       const out = await movableSvg(items, inks, tops, b);
       if(stop()) return;
-      Pdf.extra = new File([out.svg], name.replace(/\.pdf$/i, '.svg'), {type: 'image/svg+xml'});
+      Pdf.extra = new File(out.parts, name.replace(/\.pdf$/i, '.svg'), {type: 'image/svg+xml'});
       const smb = Pdf.extra.size / 1048576;
       say(`Ready: a PDF (${size}) and an SVG (${smb < 0.1 ? '< 0.1' : smb.toFixed(1)} MB). Every stroke, text box and formula moves on its own.` + (useOrig ? ' The PDF uses your original file, so the worksheet stays sharp.' : '') + (outside ? ` ${outside} thing${outside === 1 ? ' is' : 's are'} beside the pages and left out of the PDF.` : '') + (out.skipped ? ` ${out.skipped} imported page${out.skipped === 1 ? ' is' : 's are'} left out of the SVG to keep it from getting too big.` : ''));
     } else if(mode === 'orig') say(`Ready: your writing is on ${sheets.length} page${sheets.length === 1 ? '' : 's'} of the original PDF, as a layer called Inkwell notes, ${size}.` + (outside ? ` ${outside} thing${outside === 1 ? ' is' : 's are'} beside the pages and left out.` : ''));
@@ -942,9 +945,16 @@ async function savePdfFile(){
   const f = Pdf.file; if(!f) return;
   const list = Pdf.extra ? [f, Pdf.extra] : [f];
   // iPad / phone: the share sheet (Save to Files, Mail, …); computer: a normal download
-  if(matchMedia('(pointer: coarse)').matches && navigator.canShare && navigator.canShare({files: list})){
-    try { await navigator.share({files: list, title: f.name}); return; }
-    catch(e){ if(e.name === 'AbortError') return; console.warn('share', e); }
+  if(matchMedia('(pointer: coarse)').matches && navigator.canShare){
+    // (1.88) a device that cannot share both at once gets the PDF, and the SVG with a second tap (no double download in a home-screen app)
+    const send = navigator.canShare({files: list}) ? list : navigator.canShare({files: [f]}) ? [f] : null;
+    if(send){
+      try {
+        await navigator.share({files: send, title: f.name});
+        if(send.length < list.length){ Pdf.file = Pdf.extra; Pdf.extra = null; $('exportSave').textContent = 'Save SVG'; $('exportInfo').textContent = 'PDF done. Tap once more for the SVG.'; }
+        return;
+      } catch(e){ if(e.name === 'AbortError') return; console.warn('share', e); }
+    }
   }
   list.forEach((file, i) => setTimeout(() => {
     const u = URL.createObjectURL(file), a = document.createElement('a');

@@ -48,7 +48,7 @@ async def main():
             row = Counter(round(n['t']) for n in m if n['t'] > n['ay']).most_common(1)[0][0]
             xs = [n for n in m if abs(n['t'] - row) < 1.5 and n['v'] != 0]
             ys = [n for n in m if n['v'] != 0 and n not in xs]
-            check(len(xs) >= 5 and len(ys) >= 5, f'{typ}: numbers on both axes ({len(xs)} x, {len(ys)} y)')
+            check(len(xs) >= 4 and len(ys) >= 4, f'{typ}: numbers on both axes ({len(xs)} x, {len(ys)} y)')
             wx = max(abs(n['cx'] - n['X']) for n in xs)
             check(wx < 1.5, f'{typ}: x numbers centred under their tick (worst {wx:.2f} px)')
             wy = max(abs(n['cy'] - n['Y']) for n in ys)

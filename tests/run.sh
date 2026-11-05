@@ -15,7 +15,7 @@ set -u
 cd "$(dirname "$0")/.."
 T0=$(date +%s)
 export INKWELL_PORT="${INKWELL_PORT:-8766}"
-python3 -m http.server "$INKWELL_PORT" >/dev/null 2>&1 &
+python3 tests/serve.py "$INKWELL_PORT" >/dev/null 2>&1 &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null' EXIT
 # wait until the local server answers (a slow runner may need more than a second)

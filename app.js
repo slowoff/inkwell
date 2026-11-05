@@ -49,6 +49,7 @@ try {
   for(let i = 0; i < FILES.length; i++){
     const n = ERRS.length;
     const s = document.createElement('script');
+    s.nonce = 'inkwell-app';   // (1.88) the only inline scripts the page's security rule allows
     s.textContent = texts[i] + '\n//# sourceURL=' + new URL(FILES[i], location.href).href;
     document.head.appendChild(s);   // an inline script runs right here, before the next line
     if(ERRS.length > n) ERRS[n] = FILES[i] + ': ' + ERRS[n];

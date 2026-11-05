@@ -1121,3 +1121,10 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .export-more{align-self:flex-start;color:var(--accent);font-size:13.5px;font-weight:600;height:36px;padding:0 2px;margin:2px 0}
 .export-opts{margin-bottom:6px}
 .export-orig #exportOrigOff{flex:none;margin-left:auto}
+/* (1.88) */
+.save-warn{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + var(--sat));z-index:45;width:min(560px,calc(100vw - 24px));padding:10px 14px;border-radius:10px;background:var(--danger);color:#fff;font-size:14px;font-weight:600;line-height:1.35;box-shadow:var(--shadow)}
+.save-warn[hidden]{display:none}
+.problems{margin:0;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.45 var(--f-mono);max-height:60vh}
+.it-text table,.am.bot table{border-collapse:collapse}
+.it-text th,.it-text td{border:1px solid var(--line);padding:3px 7px;text-align:left;vertical-align:top}
+.it-text th{font-weight:600}

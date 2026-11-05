@@ -231,13 +231,25 @@ const Sync = {
       }
       // an answer that is neither an error nor a result must not count as uploaded
       if(odd) throw new Error('unexpected answer from the server (' + status + ')');
-      return {ok: data ? data.ok : [], conflict: (data && data.conflict) || [], error};
+      return {ok: data ? data.ok : [], conflict: (data && data.conflict) || [], error, status};
+    };
+    // (1.88) a batch the server could not finish in time (it stops at 8 s) was sent again the same way each time, so it could
+    // stay stuck: it is now halved until the parts get through
+    const slow = r => r.error && (r.error.code === '57014' || r.status >= 500 || /time.?out|timed out|gateway/i.test(String(r.error.message || '')));
+    const putSplit = async rows => {
+      const r = await put(rows);
+      if(r === 'retry' || rows.length < 2 || !slow(r)) return r;
+      const mid = rows.length >> 1, a = await putSplit(rows.slice(0, mid));
+      if(a === 'retry') return a;
+      const b = await putSplit(rows.slice(mid));
+      if(b === 'retry') return b;
+      return {ok: a.ok.concat(b.ok), conflict: a.conflict.concat(b.conflict), error: a.error || b.error};
     };
     const flush = async () => {
       if(!batch.length) return;
       const rows = [];
       for(const d of batch) rows.push({id: d.id, kind: d.kind, data: d.data ?? null, deleted: !!d.deleted, updated_at: d.updated, exp: await this.expOf(d)});
-      let res = await put(rows);
+      let res = await putSplit(rows);
       if(res === 'retry') return 'retry';
       let {ok, conflict, error} = res;
       // (1.36) the server refused a doc (notes limit reached, or one doc too big): upload the others one by one,
@@ -255,7 +267,8 @@ const Sync = {
         }
         error = null;
       }
-      if(error) throw error;
+      // (1.88) what got through in a split batch counts as uploaded even if another part failed
+      if(error && !ok.length) throw error;
       conflicts.push(...conflict);
       const ts = new Map(ok.map(r => [r.id, r.server_ts]));
       for(const d of batch){
@@ -277,6 +290,7 @@ const Sync = {
           if(cur && cur.crec && cur.crec.id === d.id && cur.crec.updated === d.updated) cur.crec.dirty = 0;
         }
       }
+      if(error) throw error;
       batch = []; size = 0;
     };
     for(const d of dirty){
@@ -680,11 +694,31 @@ const GD = {
         if(!r.ok || !j.id) throw new Error('Google Drive (' + r.status + ')');
         LSset('inkwell.gdNotes', {id: j.id, uid: Sync.user.id, sig, saved: Date.now()});
         this.notesStamp = seen;
+        await this.saveDaily(body, t).catch(e => console.warn('gdrive daily copy', e));
         if(!$('settingsDlg').hidden) renderGD();
         return;
       }
     } catch(e){ console.warn('gdrive notes', e); LSset('inkwell.gdNotes', {...st, fail: Date.now()}); }
     finally { this.notesBusy = false; }
+  },
+  // (1.88) "Inkwell notes.json" is overwritten all the time, so a bad state would replace the good copy within minutes. Once a day
+  // the same copy also goes to "Inkwell notes (Mon).json": seven files that overwrite themselves week by week, nothing is deleted.
+  async saveDaily(body, t){
+    const now = new Date(), day = now.toDateString(), k = 'inkwell.gdDaily', st = LSget(k, null) || {};
+    if(st.day === day && st.uid === Sync.user.id) return;
+    const name = `Inkwell notes (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][now.getDay()]}).json`, H = {Authorization: 'Bearer ' + t.at};
+    const q = `name='${name}' and trashed=false` + (t.folder ? ` and '${t.folder}' in parents` : '');
+    const l = await fetch(GD_FILES + '?fields=files(id)&q=' + encodeURIComponent(q), {headers: H});
+    const id = ((await l.json().catch(() => ({}))).files || [])[0];
+    let r;
+    if(id) r = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + encodeURIComponent(id.id) + '?uploadType=media&fields=id', {method: 'PATCH', headers: {...H, 'Content-Type': 'application/json'}, body});
+    else {
+      const b = 'inkwell' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+      const meta = JSON.stringify({name, mimeType: 'application/json', description: 'A daily copy of your Inkwell notes. Settings → Restore backup can read it.', parents: t.folder ? [t.folder] : undefined});
+      r = await fetch(GD_UPLOAD, {method: 'POST', headers: {...H, 'Content-Type': 'multipart/related; boundary=' + b},
+        body: `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${b}--`});
+    }
+    if(r.ok) LSset(k, {day, uid: Sync.user.id});
   },
   // (1.35) once a day: are all Drive pictures still in the folder? (deleted or in Drive's bin -> they would vanish from pages)
   // (1.72) one check at a time: at the start of each day the server logs showed 4-5 of them within 2 seconds (several

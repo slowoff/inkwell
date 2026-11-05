@@ -391,7 +391,7 @@ const CLEAN_DROP = new Set('SCRIPT STYLE IFRAME FRAME FRAMESET OBJECT EMBED APPL
 const CLEAN_ATTR = new Set(['class', 'style', 'colspan', 'rowspan', 'color', 'face', 'size', 'align', 'valign', 'dir', 'title', 'start', 'type']);
 const HTML_NS = 'http://www.w3.org/1999/xhtml';
 function cleanStyle(n){
-  const keep = (n.getAttribute('style') || '').split(';').filter(d => d.trim() && !/url\s*\(|expression\s*\(|javascript:|behaviou?r\s*:|-moz-binding|^\s*position\s*:/i.test(d));
+  const keep = (n.getAttribute('style') || '').split(';').filter(d => d.trim() && !/\\|url\s*\(|expression\s*\(|javascript:|behaviou?r\s*:|-moz-binding|^\s*position\s*:/i.test(d));
   if(keep.length) n.setAttribute('style', keep.join(';')); else n.removeAttribute('style');
 }
 function cleanNode(parent){
@@ -699,7 +699,7 @@ async function saveContent(){
     refreshPageItem(c.id);
   }
 }
-const saveContentSoon = debounce(() => saveContent(), 700);
+const saveContentSoon = debounce(() => saveContent().catch(e => console.warn('save', e)), 700);   // (1.88) SaveWatch shows and retries a failed save
 async function flushSaves(){
   savePrefs.flush();   // (1.50) a settings change made just before the app closes was lost (saved 300 ms later)
   if(editing) syncEditingHTML();

@@ -99,7 +99,8 @@ const IDB = {
   put(store, val, key){
     if(store === 'docs') this.stamp++;
     if(this.mem){ this.mem[store].set(key !== undefined ? key : val.id, structuredClone(val)); return Promise.resolve(); }
-    return this.req(store, 'readwrite', s => key !== undefined ? s.put(val, key) : s.put(val));
+    const p = this.req(store, 'readwrite', s => key !== undefined ? s.put(val, key) : s.put(val));
+    return store === 'docs' || store === 'assets' ? p.then(v => { SaveWatch.ok(); return v; }, e => { SaveWatch.fail(e); throw e; }) : p;
   },
   del(store, key){ if(store === 'docs') this.stamp++; if(this.mem){ this.mem[store].delete(key); return Promise.resolve(); } return this.req(store, 'readwrite', s => s.delete(key)); },
   all(store){ if(this.mem) return Promise.resolve([...this.mem[store].values()]); return this.req(store, 'readonly', s => s.getAll()); },
@@ -144,13 +145,45 @@ const pagesOf = sec => [...docs.values()].filter(d => d.kind === 'page' && live(
 const templates = () => [...docs.values()].filter(d => d.kind === 'tmpl' && live(d)).sort((a, b) => (a.data.name || '').localeCompare(b.data.name || ''));
 const getDoc = id => { const d = docs.get(id); return live(d) ? d : null; };
 
+/* (1.88) A write on the device that fails (storage full or blocked) used to show nothing: the writing stayed on screen and was
+   gone after a reload. Now a warning stays up, what could not be written is kept in memory and tried again until it works. */
+const SaveWatch = {
+  waiting: new Map(), timer: 0, shown: false,
+  fail(e){
+    console.warn('save failed', e);
+    if(!this.shown){
+      this.shown = true;
+      let el = $('saveWarn');
+      if(!el){ el = document.createElement('div'); el.id = 'saveWarn'; el.className = 'save-warn'; el.setAttribute('role', 'alert'); document.body.appendChild(el); }
+      el.textContent = 'Your latest changes are not saved: this device\'s storage is full or blocked. Keep Inkwell open and free up space. It keeps trying.';
+      el.hidden = false;
+    }
+    if(!this.timer) this.timer = setTimeout(() => this.retry(), 10000);
+  },
+  ok(){
+    if(!this.shown || this.waiting.size) return;
+    this.shown = false;
+    const el = $('saveWarn'); if(el) el.hidden = true;
+    toast('Saved again');
+  },
+  async retry(){
+    this.timer = 0;
+    for(const [id, rec] of [...this.waiting]){
+      try { await IDB.req('docs', 'readwrite', s => s.put(rec)); if(this.waiting.get(id) === rec) this.waiting.delete(id); }
+      catch(e){ this.fail(e); return; }
+    }
+    if(this.waiting.size === 0 && this.shown){ Sync.soon(); this.ok(); }
+    else if(this.shown) this.timer = setTimeout(() => this.retry(), 10000);
+  }
+};
 async function writeDoc(rec){
   rec.updated = Math.max(Date.now(), (rec.updated || 0) + 1);
   rec.dirty = 1;
   rec.deleted = !!rec.deleted;
   if(inMap(rec.kind)) docs.set(rec.id, rec);
   searchCache = null;
-  await IDB.put('docs', rec);
+  try { await IDB.put('docs', rec); SaveWatch.waiting.delete(rec.id); }
+  catch(e){ SaveWatch.waiting.set(rec.id, rec); throw e; }
   Sync.soon();
   return rec;
 }

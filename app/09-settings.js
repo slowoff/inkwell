@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.88', '2026-11-05', ['A warning now stays up if changes cannot be saved on this device, and Inkwell keeps trying','Uploads that take too long are split up instead of getting stuck','Drive now also keeps a copy of your notes for each day of the week','Tables from Claude become real tables on the page','The Claude panel opens beside a toolbar on the side','Settings shows Problems when something goes wrong','Security fixes']],
   ['1.87', '2026-11-05', ['Movable export: choose Use my original PDF and the worksheet stays sharp with selectable text, with your writing movable on top']],
   ['1.86', '2026-11-05', ['Export as PDF: Movable saves a PDF and an SVG where every stroke, text box and formula stays a separate thing you can move in other apps. Typed text stays editable and imported pages stay fixed underneath']],
   ['1.85.1', '2026-11-04', ['Export as PDF: Transparent background leaves out the paper lines, margin line and graph backgrounds. Your writing and imported pages stay']],
@@ -834,6 +835,10 @@ function renderChangelog(){
   $('changelog').innerHTML = CHANGELOG.filter(e => e[2].length).map(([v, d, items]) => `<section><h4>${esc(v)}<small>${esc(day(d))}</small></h4><ul>${items.map(t => `<li>${esc(t)}</li>`).join('')}</ul></section>`).join('');
 }
 // (1.47.1) the change log opens in its own window on top of Settings (it was cut off at the bottom of Settings)
+// (1.88) errors the app noticed (window.__inkwellErrors) can be read on the iPad
+function renderProblems(){ const e = window.__inkwellErrors || []; $('problemsBtn').hidden = !e.length; $('problemsBtn').textContent = `Problems (${e.length})`; }
+$('problemsBtn').addEventListener('click', () => { $('problemsList').textContent = (window.__inkwellErrors || []).join('\n'); showModal('problemsDlg'); });
+addEventListener('securitypolicyviolation', e => { const E = window.__inkwellErrors; if(E && E.length < 50 && window.__inkwellBooted) E.push('Blocked by the security rule: ' + e.violatedDirective + ' ' + String(e.blockedURI).slice(0, 80)); });
 $('logBtn').addEventListener('click', () => {
   if(!$('changelog').innerHTML) renderChangelog();
   $('logVer').textContent = $('verInfo').textContent;

@@ -489,7 +489,7 @@ function continueHere(){
   if(!it){ toast('Nothing written on this page yet'); return; }
   const b = itemBox(it);
   const z = cam.z;
-  const vw = W / z, vh = H / z;
+  const vw = W / z;
   // horizontal: keep the view if the spot already fits, otherwise centre it
   const left = -cam.ox / z;
   let tx = cam.ox;
@@ -1379,7 +1379,7 @@ function applyBarPos(){ const v = prefs.barPos; if(v && v !== 'top') $('main').d
   const side = v === 'left' || v === 'right', bar = $('barExtra').parentElement;
   if(side){ bar.append($('sideBtn')); $('barExtra').prepend($('barHide')); }
   else { $('barExtra').prepend($('sideBtn')); bar.insertBefore($('barHide'), $('barExtra')); }
-  barExtra(false); closePops(); }
+  barExtra(false); closePops(); if(typeof askClearBar === 'function') askClearBar(); }
 function barCollapse(on){ prefs.barCol = on; savePrefs(); applyBarPos(); }
 $('barHide').addEventListener('click', () => barCollapse(true));
 $('barShow').addEventListener('click', () => barCollapse(false));

@@ -134,6 +134,15 @@ async function pickModel(key: string, messages: any[], fast: string, smart: stri
   } catch { return smart; }
 }
 
+// (1.88) chats resend everything each turn, pictures too. A cache mark on the newest message lets the next turn read all that for a
+// tenth of the price (too little text for a cache: Anthropic ignores the mark and charges normally).
+const cached = (list: any[]) => list.map((m, i) => {
+  if (i !== list.length - 1 || !Array.isArray(m?.content) || !m.content.length) return m;
+  const content = m.content.slice(), last = content.length - 1;
+  content[last] = { ...content[last], cache_control: { type: "ephemeral" } };
+  return { ...m, content };
+});
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors(req) });
   if (req.method !== "POST") return fail(req, 405, "method");
@@ -181,7 +190,7 @@ Deno.serve(async (req) => {
       max_tokens: job ? job.max : 2500,
       stream: true,
       system: job ? job.system : MODES[body.mode || "tutor"] || MODES.tutor,
-      messages: job ? messages.slice(-1) : messages,
+      messages: job ? messages.slice(-1) : cached(messages),
     }),
   });
   if (!r.ok || !r.body) {

@@ -28,7 +28,7 @@ async def main():
         await page.mouse.click(st[0] + 200, st[1] + 200); await page.wait_for_timeout(300)
         await page.keyboard.type('Ich gehe in die Schulle und das Hasu ist ruhig ')
         async def bar_for(w):
-            for _ in range(60):
+            for _ in range(240):
                 await page.evaluate(PUT, w); await page.wait_for_timeout(250)
                 f = await page.evaluate(FIRST)
                 if f: return f

@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'nonce-inkwell-app' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://www.googleapis.com https://oauth2.googleapis.com https://login.microsoftonline.com https://graph.microsoft.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Inkwell</title>
@@ -274,7 +275,7 @@
 
 <!-- dialogs -->
 <div class="modal" id="importDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Import</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div class="import-pick" id="importPick">
       <p>Choose a PDF, a Word file (.docx) or an image.</p>
@@ -293,7 +294,7 @@
 </div>
 
 <div class="modal" id="scanDlg" hidden>
-  <div class="dlg scan-dlg">
+  <div role="dialog" aria-modal="true" class="dlg scan-dlg">
     <div class="dlg-head"><h3>Scan paper</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div class="import-pick" id="scanPick">
       <p id="scanPickMsg">Lay the sheet on a darker table, take the photo from above, and Inkwell straightens it.</p>
@@ -315,7 +316,7 @@
 </div>
 
 <div class="modal" id="mathDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Formula</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div class="math-keys" id="mathKeys"></div>
     <textarea id="mathIn" rows="3" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="\frac{a+b}{2} = x^2"></textarea>
@@ -326,7 +327,7 @@
 </div>
 
 <div class="modal" id="linkDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3 id="linkTitle">Link to page</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <input type="search" id="linkSearch" class="text-in" placeholder="Search pages" autocomplete="off">
     <div class="link-list" id="linkList"></div>
@@ -334,7 +335,7 @@
 </div>
 
 <div class="modal" id="tmplDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Save as template</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <label class="field"><span>Template name</span><input type="text" id="tmplName" class="text-in" autocomplete="off"></label>
     <p class="hint">Saves the paper, text, formulas, ink and imported pages on this page. New pages made from it start as a copy.</p>
@@ -343,7 +344,7 @@
 </div>
 
 <div class="modal" id="settingsDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Settings</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="set-h">Sync</p>
     <div id="setNoConfig" hidden>
@@ -420,12 +421,18 @@
     <div class="set-row clean-row"><span class="hint" id="cleanInfo">Images nothing uses any more</span><button class="btn ghost" id="cleanBtn">Free up space</button></div>
     <div class="set-row clean-row"><span class="hint">Bring over your OneNote notebooks</span><button class="btn ghost" id="onBtn">Import from OneNote</button></div>
     <hr>
-    <div class="set-row"><span class="ver-wrap"><span class="hint" id="verInfo">Inkwell</span><button class="link-btn ver-log" id="logBtn">See changes</button></span><button class="btn ghost" id="updBtn">Check for update</button></div>
+    <div class="set-row"><span class="ver-wrap"><span class="hint" id="verInfo">Inkwell</span><button class="link-btn ver-log" id="logBtn">See changes</button><button class="link-btn ver-log" id="problemsBtn" hidden>Problems</button></span><button class="btn ghost" id="updBtn">Check for update</button></div>
   </div>
 </div>
 
+<div class="modal" id="problemsDlg" hidden>
+  <div role="dialog" aria-modal="true" class="dlg log-dlg">
+    <div class="dlg-head"><div class="log-title"><h3>Problems</h3><p>What went wrong since Inkwell opened. Send a screenshot if something does not work.</p></div><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <pre class="problems" id="problemsList"></pre>
+  </div>
+</div>
 <div class="modal" id="logDlg" hidden>
-  <div class="dlg log-dlg">
+  <div role="dialog" aria-modal="true" class="dlg log-dlg">
     <div class="dlg-head"><div class="log-title"><h3>What's new</h3><p id="logVer"></p></div><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div class="changelog" id="changelog"></div>
   </div>
@@ -433,7 +440,7 @@
 
 <textarea id="pasteCatch" aria-hidden="true" tabindex="-1" style="position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;resize:none"></textarea>
 <div class="modal" id="shotDlg" hidden>
-  <div class="dlg shot-dlg">
+  <div role="dialog" aria-modal="true" class="dlg shot-dlg">
     <div class="dlg-head"><h3>Picture of the box</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint">Copying straight to the clipboard was not allowed here. Press and hold the picture, then Copy or Save.</p>
     <img id="shotImg" alt="Picture of the selected box">
@@ -442,7 +449,7 @@
 </div>
 
 <div class="modal" id="tsDlg" hidden>
-  <div class="dlg ts-dlg">
+  <div role="dialog" aria-modal="true" class="dlg ts-dlg">
     <div class="dlg-head"><h3>Text from the page</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint">Select part of it to copy or put only that part, or change it first.</p>
     <textarea id="tsText" spellcheck="false"></textarea>
@@ -451,7 +458,7 @@
 </div>
 
 <div class="modal" id="graphDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Graph</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div class="seg" id="gType"><button data-v="q1">x / y</button><button data-v="q4">4 quadrants</button><button data-v="3d">x / y / z</button></div>
     <div class="g-grid">
@@ -492,7 +499,7 @@
 </div>
 
 <div class="modal" id="gAddDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3 id="gaTitle">Add formula to the graph</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div id="gaListWrap" hidden><div class="ga-list" id="gaList"></div></div>
     <label class="field"><span>Function <em>e.g. 2x+1, 0.5*9.81*x^2, sin(x)</em></span><input type="text" class="text-in" id="gaFn" placeholder="y = …" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"></label>
@@ -527,7 +534,7 @@
 </div>
 
 <div class="modal" id="practiceDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Practice</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint">Tick the pages with your learning objectives, exercises and notes, or add files. Claude gives you one exercise at a time and checks your answers: type them, or scan your handwritten work.</p>
     <select id="pracNb" class="text-in" aria-label="Notebook"></select>
@@ -541,7 +548,7 @@
 </div>
 
 <div class="modal" id="onenoteDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Import from OneNote</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <ol class="on-track" id="onTrack"><li data-s="setup">Set up</li><li data-s="signin">Sign in</li><li data-s="pick">Import</li></ol>
     <div class="on-step" id="onSetup" hidden>
@@ -588,7 +595,7 @@
 </div>
 
 <div class="modal" id="trashDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Recently deleted</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint">Deleted pages, sections, notebooks and templates stay here for 30 days, then they are removed for good.</p>
     <div class="trash-list" id="trashList"></div>
@@ -597,7 +604,7 @@
 </div>
 
 <div class="modal" id="histDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Page history</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint">Inkwell keeps the page as it was before each time you work on it, and before changes from another device are merged in. Restoring can be undone.</p>
     <div class="trash-list" id="histList"></div>
@@ -605,7 +612,7 @@
 </div>
 
 <div class="modal" id="cleanupDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Clean up</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint" id="cuInfo"></p>
     <div class="seg" id="cuSort"><button data-v="big">Biggest first</button><button data-v="old">Oldest first</button></div>
@@ -615,7 +622,7 @@
 </div>
 
 <div class="modal" id="backupDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3>Download backup</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <p class="hint" id="backupInfo"></p>
     <div class="export-parts" id="backupParts"></div>
@@ -624,7 +631,7 @@
 </div>
 
 <div class="modal" id="exportDlg" hidden>
-  <div class="dlg">
+  <div role="dialog" aria-modal="true" class="dlg">
     <div class="dlg-head"><h3 id="exportTitle">Export as PDF</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <div class="export-pick" id="exportPick" hidden>
       <div class="seg"><button data-pick="all" class="on">All pages</button><button data-pick="some">Only some pages</button></div>

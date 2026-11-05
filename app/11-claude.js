@@ -37,6 +37,7 @@ const Ask = {
     if(pos){ p.style.left = clamp(pos.x, 4, innerWidth - 120) + 'px'; p.style.top = clamp(pos.y, 4, innerHeight - 60) + 'px'; p.style.right = 'auto'; p.style.bottom = 'auto'; }
     this.renderMode();
     if(!this.msgs.length) this.empty();
+    askClearBar();
   },
   close(){ $('askPanel').hidden = true; if(this.ctrl) this.ctrl.abort(); },
   empty(){
@@ -337,7 +338,7 @@ const Ask = {
       });
       if(!res.ok){
         let j = {}; try { j = await res.json(); } catch {}
-        const why = {not_allowed: 'This account is not allowed to use Claude yet. Your email has to be added to ASK_ALLOWED_EMAILS in Supabase (Edge Functions → Secrets).', no_key: 'Claude is not set up yet: the Anthropic API key is missing in Supabase (Edge Functions → Secrets → ANTHROPIC_API_KEY).', too_big: 'That was too much at once. Start a new chat (+) and scan a smaller part.', limit_reached: j.message || 'This month\'s Claude limit is used up.'}[j.error];
+        const why = {not_allowed: 'Claude is not available on this account. Everything else in Inkwell works as usual.', no_key: 'Claude is not set up yet: the Anthropic API key is missing in Supabase (Edge Functions → Secrets → ANTHROPIC_API_KEY).', too_big: 'That was too much at once. Start a new chat (+) and scan a smaller part.', limit_reached: j.message || 'This month\'s Claude limit is used up.'}[j.error];
         throw new Error(why || (res.status === 404 ? 'The Claude helper is not installed on the server yet.' : (j.message || j.error || 'Server error ' + res.status)));
       }
       const used = res.headers.get('x-ask-model') || '';
@@ -436,6 +437,16 @@ function askGraph(json){
   svg += `<clipPath id="${id}"><rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/></clipPath><g clip-path="url(#${id})">${ink}</g>`;
   const keys = lines.some(l => l.label) ? `<div class="gr-keys">${lines.map((l, i) => l.label ? `<span><i class="gr-k${i % 6}"></i>${esc(String(l.label))}</span>` : '').join('')}</div>` : '';
   return `<figure class="graph">${head}<svg viewBox="0 0 ${W} ${H}" role="img">${svg}</svg>${keys}</figure>`;
+}
+// (1.88) the Claude panel opens beside a toolbar on the side, not over it
+function askClearBar(){
+  const p = $('askPanel'), side = innerWidth >= 761 && $('main').dataset.bar;
+  if(p.hidden || (side !== 'left' && side !== 'right') || $('main').dataset.col) return;
+  const r = p.getBoundingClientRect(), t = $('toolbar').getBoundingClientRect();
+  if(side === 'right' && r.right > t.left - 6) p.style.left = Math.max(4, t.left - 6 - r.width) + 'px';
+  else if(side === 'left' && r.left < t.right + 6) p.style.left = t.right + 6 + 'px';
+  else return;
+  p.style.top = r.top + 'px'; p.style.right = 'auto'; p.style.bottom = 'auto';
 }
 function renderMd(src){
   const graphs = [];
@@ -799,6 +810,18 @@ function answerBlocks(md){
     if(m){ blocks.push({t: 'm', tex: m[1]}); continue; }
     const inl = x => mdInline(x.replace(/\\\(([\s\S]+?)\\\)/g, (_, t) => '\u0002' + t + '\u0002').replace(/\$([^$\n]+?)\$/g, (_, t) => '\u0002' + t + '\u0002')).replace(/\u0002([^\u0002]*)\u0002/g, (_, t) => texPlain(t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')));
     const lines = p.split('\n');
+    // (1.88) a Markdown table becomes a real table in the text box, not lines with | in them
+    const tRow = l => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => inl(c.trim()));
+    const tRule = l => l.includes('-') && l.includes('|') && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(l);
+    const tAt = lines.findIndex((l, i) => l.includes('|') && !tRule(l) && lines[i + 1] && tRule(lines[i + 1]));
+    if(tAt >= 0){
+      if(tAt) blocks.push({t: 'x', html: '<p>' + lines.slice(0, tAt).map(inl).join('<br>') + '</p>'});
+      const head = tRow(lines[tAt]); let e = tAt + 2; const body = [];
+      while(e < lines.length && lines[e].includes('|')) body.push(tRow(lines[e++]));
+      blocks.push({t: 'x', html: '<table><thead><tr>' + head.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>' + body.map(r => '<tr>' + head.map((_, i) => `<td>${r[i] || ''}</td>`).join('') + '</tr>').join('') + '</tbody></table>'});
+      if(e < lines.length) blocks.push({t: 'x', html: '<p>' + lines.slice(e).map(inl).join('<br>') + '</p>'});
+      continue;
+    }
     if(lines.every(l => /^\s*([-*•]|\d+[.)])\s+/.test(l) || /^\s{2,}/.test(l))){
       const ordered = /^\s*\d/.test(lines[0]);
       const items = []; for(const l of lines){ const mm = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(l); if(mm) items.push(mm[1]); else if(items.length) items[items.length - 1] += ' ' + l.trim(); }

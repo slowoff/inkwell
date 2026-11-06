@@ -957,6 +957,7 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 #paperPop #linkXY:checked{background:var(--accent)}
 #paperPop #linkXY:checked::after{transform:translateX(14px)}
 #paperPop #mlOn{border-top:1px solid var(--line);margin-top:2px;padding:10px 4px 0;height:46px;color:var(--fg);font-size:14px;justify-content:space-between;flex-direction:row-reverse}
+#paperPop #hexSnap{padding:0 4px;height:36px;margin-top:0}
 #paperPop #paperDefault{margin-top:2px}
 .ml-row{padding:0 0 0 0}
 #morePop{gap:0;min-width:250px}

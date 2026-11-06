@@ -301,6 +301,58 @@ function rdp(P, eps){
   if(dm > eps){ const l = rdp(P.slice(0, idx + 1), eps), r = rdp(P.slice(idx), eps); return l.slice(0, -1).concat(r); }
   return [a, b];
 }
+/* (1.89) Hex paper, "Straighten lines": when the pen lifts, a stroke made of straight pieces becomes straight, and its ends and
+   corners land on the nearest corner of a hexagon, so bonds, zig-zag chains and rings sit exactly on the paper.
+   Curves and small writing stay as drawn. An end far from any corner stays where it is. A line over a bond that is already
+   there is only straightened, so the second line of a double bond stays beside the first. */
+const HexLine = {
+  corner(x, y, s){
+    let best = null, bd = Infinity;
+    const see = (a, b) => { const d = Math.hypot(a - x, b - y); if(d < bd){ bd = d; best = [a, b]; } };
+    hexEdges(s, x - s, y - s, x + s, y + s, (x1, y1, x2, y2) => { see(x1, y1); see(x2, y2); });
+    return bd <= 0.5 * s ? best : null;
+  },
+  fit(p, s, z){
+    const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i + 1]]);
+    let len = 0; for(let i = 1; i < P.length; i++) len += dist(P[i - 1], P[i]);
+    if(len < 0.6 * s) return null;   // too small to be a bond (the second line of a double bond is a little shorter): writing
+    const V = rdp(P, Math.max(0.22 * s, 3 / z));
+    while(V.length > 2 && dist(V[0], V[1]) < 0.3 * s) V.shift();   // the little hook when the pen lands or lifts
+    while(V.length > 2 && dist(V[V.length - 1], V[V.length - 2]) < 0.3 * s) V.pop();
+    if(V.length > 15) return null;
+    for(let i = 1; i < V.length; i++) if(dist(V[i - 1], V[i]) < 0.45 * s) return null;
+    // a curve cut into pieces stays close to them only at the corners: on average it is further off than a shaky line
+    let off = 0;
+    for(const q of P){
+      let m = Infinity;
+      for(let i = 1; i < V.length; i++) m = Math.min(m, segDist2(q[0], q[1], V[i - 1][0], V[i - 1][1], V[i][0], V[i][1]));
+      off += Math.sqrt(m);
+    }
+    if(off / P.length > Math.max(0.08 * s, 2 / z)) return null;
+    const out = [];
+    for(const v of V){
+      const c = HexLine.corner(v[0], v[1], s) || v;
+      if(!out.length || dist(out[out.length - 1], c) > 0.01) out.push(c);
+    }
+    if(out.length < 2) return V;
+    if(out.length === 2 && HexLine.taken(out[0], out[1], s)) return V;
+    return out;
+  },
+  // is there already a line along a to b?
+  taken(a, b, s){
+    const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]), r = 0.15 * s;
+    return [...cur.items.values()].some(it => {
+      if(it.t !== 's' || it.hl) return false;
+      const g = geoOf(it).b;
+      if(g[2] < x0 || g[0] > x1 || g[3] < y0 || g[1] > y1) return false;
+      return [0.25, 0.5, 0.75].every(t => {
+        const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t, p = it.p;
+        for(let i = 3; i < p.length; i += 3) if(segDist2(x, y, p[i - 3], p[i - 2], p[i], p[i + 1]) <= r * r) return true;
+        return false;
+      });
+    });
+  }
+};
 function cleanCorners(V){
   // remove vertices that are almost straight (closed polygon)
   let changedAny = true;

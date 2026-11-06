@@ -1238,6 +1238,8 @@ function renderPaper(){
   $('fxWrap').hidden = oneSize;
   $('fyWrap').hidden = bg.type === 'blank';
   $('linkXY').parentElement.hidden = oneSize;
+  $('hexSnap').hidden = bg.type !== 'hex';
+  $('hexSnap').classList.toggle('on', !!prefs.hexSnap);
   $('fyLbl').firstChild.textContent = bg.type === 'lined' ? 'Line height ' : bg.type === 'hex' ? 'Bond length ' : 'Height ';
   $('fx').value = (bg.sx / MM).toFixed(1); $('fy').value = (bg.sy / MM).toFixed(1);
   $('fxVal').textContent = (bg.sx / MM).toFixed(1) + ' mm'; $('fyVal').textContent = (bg.sy / MM).toFixed(1) + ' mm';
@@ -1254,6 +1256,7 @@ $('paperType').addEventListener('click', e => { const b = e.target.closest('[dat
 $('fx').addEventListener('input', () => { const v = +$('fx').value * MM; setBg($('linkXY').checked ? {sx: v, sy: v} : {sx: v}); });
 $('fy').addEventListener('input', () => { const v = +$('fy').value * MM; setBg($('linkXY').checked && cur.bg.type !== 'lined' && cur.bg.type !== 'hex' ? {sx: v, sy: v} : {sy: v}); });
 $('linkXY').addEventListener('change', () => { if(!cur) return; if($('linkXY').checked) setBg({sy: cur.bg.sx}); note(onOff('Square cells', $('linkXY').checked)); });
+$('hexSnap').addEventListener('click', () => { prefs.hexSnap = !prefs.hexSnap; savePrefs(); renderPaper(); note(onOff('Straighten lines', prefs.hexSnap)); });
 function mlRemember(){ const b = cur.bg; prefs.mlLast = {ml: b.ml, mw: b.mw, mx: b.mx}; savePrefs(); }
 // (1.75) margin line. Off = the fields are gone, so the page's data is the same as before it was ever turned on
 $('mlOn').addEventListener('click', () => {

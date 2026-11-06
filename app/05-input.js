@@ -577,6 +577,10 @@ function endTool(e){
       const list = HLS.snap(a.pts, a.w).map(b => Object.assign({}, it, {id: 's' + newId(), w: b.w, p: b.p}));
       if(list.length){ addItems(list); return; }
     }
+    if(handwriting && prefs.hexSnap && cur.bg.type === 'hex'){
+      const V = HexLine.fit(a.pts, cur.bg.sy, cam.z);
+      if(V){ it.p = densify(V, false, a.isPen ? midPressure(a.pts) : shapePr()); addItems([it]); return; }
+    }
     addItems([it]);
     if(handwriting) WA.stroke(it);   // reference line: notes which line is being written (never moves ink)
     if(handwriting) Scribe.add(it);

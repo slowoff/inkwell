@@ -75,6 +75,7 @@ const DEFAULT_PREFS = {
   ruler: {on: false, cx: null, cy: null, a: 0},
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
   theme: 'auto',   // 'auto' follows the iPad, or 'light' / 'dark'
+  hexSnap: false,  // (1.89) Hex paper: lines drawn with the pen become straight and their ends and corners land on the honeycomb
   snapHold: 550,   // ms the pen must rest before a stroke is straightened; 0 = off
   leftEdge: false, // true: the page stops at its left edge (endless only up, down and right)
   zMax: 8,         // highest zoom (1 = 100 %); set from Settings with "Use current zoom" or (1.70) by holding the zoom %

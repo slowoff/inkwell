@@ -179,6 +179,30 @@ async def main():
         a2, b2 = pick_edge(h2['c'], h2['s'])
         P = await pen(off_a_bit(a2, b2))
         check(math.hypot(P[0][0] - a2[0], P[0][1] - a2[1]) < 0.6 and math.hypot(P[-1][0] - b2[0], P[-1][1] - b2[1]) < 0.6, 'turned honeycomb: lands on its new corners')
+        # the eraser takes the drawing and leaves the honeycomb
+        count = "() => { const a = [...__inkwell.cur.items.values()].filter(i => i.t === 's'); return {grid: a.filter(i => i.g).length, ink: a.filter(i => !i.g).length, ne: a.filter(i => i.g).every(i => i.ne === 1)}; }"
+        c0 = await page.evaluate(count)
+        check(c0['ink'] == 1 and c0['ne'], f'honeycomb marked, one drawn line on it ({c0})')
+        cam = await page.evaluate("[__inkwell.cam.ox, __inkwell.cam.oy, __inkwell.cam.z]")
+        for mode in ('stroke', 'area'):
+            await page.evaluate(f"() => {{ __inkwell.setTool('eraser'); __inkwell.prefs.eraser.mode = '{mode}'; }}")
+            P0 = await page.evaluate("() => { const a = [...__inkwell.cur.items.values()].filter(i => i.t === 's' && !i.g)[0]; return a ? [a.p[0], a.p[1], a.p[a.p.length - 3], a.p[a.p.length - 2]] : null; }")
+            if not P0:
+                P0 = (await pen(off_a_bit(a2, b2)))
+                await page.evaluate(f"() => {{ __inkwell.setTool('eraser'); __inkwell.prefs.eraser.mode = '{mode}'; }}")
+                P0 = [P0[0][0], P0[0][1], P0[-1][0], P0[-1][1]]
+            sx, sy = st[0] + cam[0] + (P0[0] + P0[2]) / 2 * cam[2], st[1] + cam[1] + (P0[1] + P0[3]) / 2 * cam[2]
+            await page.mouse.move(sx - 14, sy - 14); await page.mouse.down(); await page.mouse.move(sx + 14, sy + 14, steps=8); await page.mouse.up(); await page.wait_for_timeout(120)
+            c1 = await page.evaluate(count)
+            check(c1['grid'] == c0['grid'], f'eraser ({mode}) leaves the honeycomb ({c1})')
+            lines = await page.evaluate("() => [...__inkwell.cur.items.values()].filter(i => i.t === 's' && i.g).reduce((m, i) => m + i.p.length, 0)")
+            if mode == 'stroke': L0 = lines
+            check(lines == L0, f'eraser ({mode}) cut nothing out of it')
+            if mode == 'stroke': check(c1['ink'] == 0, 'the drawn line is gone')
+        await page.evaluate("() => { const a = [...__inkwell.cur.items.values()].filter(i => i.t === 's' && i.g).map(i => i.id); __inkwell.setTool('lasso'); __inkwell.selectIds(a); }"); await page.wait_for_timeout(100)
+        await page.click('#selDel'); await page.wait_for_timeout(120)
+        check((await page.evaluate(count))['grid'] == 0, 'Select + delete still removes it')
+        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(100)
         # other grouped shapes are not honeycombs
         no = await page.evaluate("""() => { const W = __inkwell, mk = (id, pts) => { const p = []; for(const q of pts) p.push(q[0], q[1], .5); return {t: 's', id, g: 'gg', c: 'auto', w: 2, p}; };
           const rows = []; for(let i = 0; i < 5; i++) rows.push(mk('r' + i, [[0, i * 40], [200, i * 40]])); for(let i = 0; i < 6; i++) rows.push(mk('c' + i, [[i * 40, 0], [i * 40, 160]]));

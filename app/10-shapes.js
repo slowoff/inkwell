@@ -170,7 +170,7 @@ function shapePolys(shape, b, w){
 }
 function shapeItems(shape, b){
   const w = penWidth(), polys = shapePolys(shape, b, w), g = polys.length > 1 ? 'g' + newId() : null;
-  return polys.map(([V, closed]) => { const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}; if(g) it.g = g; if(shape === 'honeycomb') it.sq = 1; return it; });
+  return polys.map(([V, closed]) => { const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}; if(g) it.g = g; if(shape === 'honeycomb'){ it.sq = 1; it.ne = 1; } return it; });   // ne: the eraser leaves it alone, like a graph; Select + delete removes it
 }
 function insertShape(shape, b){
   const items = shapeItems(shape, b);

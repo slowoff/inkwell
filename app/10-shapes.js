@@ -111,6 +111,7 @@ function shapePolys(shape, b, w){
     for(let i = 0; i < (full ? n : n + 1); i++){ const t = a0 + sw * i / n; V.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); }
     return [[V, full]];
   }
+  if(shape === 'honeycomb') return honeycombPolys(b);
   if(shape === 'grid'){
     // (1.69) outer frame + inner row and column lines; a tap makes cells of 56 × 36 screen px around the tap
     const [nr, nc] = gridRC();
@@ -177,6 +178,64 @@ function insertShape(shape, b){
   addItems(items);
   setTool('lasso'); selectIds(items.map(it => it.id));
 }
+/* (1.90) Honeycomb maker: rows × columns of regular hexagons (same pointy-top look as Hex paper), as large as fit in the box and
+   centred in it. Each edge once, joined into long lines, so a big honeycomb stays a small number of strokes. */
+function honeycombPolys(b){
+  const [nr, nc] = hcRC();
+  let L, T, R, B;
+  const fw = Math.sqrt(3) * (nc + (nr > 1 ? 0.5 : 0)), fh = 1.5 * nr + 0.5;   // size in units of one side
+  if(b.tap){ const s0 = 22 / cam.z; L = b.x0 - fw * s0 / 2; T = b.y0 - fh * s0 / 2; R = L + fw * s0; B = T + fh * s0; }
+  else { L = Math.min(b.x0, b.x1); T = Math.min(b.y0, b.y1); R = Math.max(b.x0, b.x1); B = Math.max(b.y0, b.y1); }
+  if((R - L) * cam.z < 4 || (B - T) * cam.z < 4) return [];
+  const s = Math.min((R - L) / fw, (B - T) / fh), w = Math.sqrt(3) * s;
+  const ox = L + ((R - L) - fw * s) / 2, oy = T + ((B - T) - fh * s) / 2;
+  const key = (r, i) => r + ':' + i;
+  // corners by whole-number grid position, so shared edges match exactly: x in half widths, y in half sides
+  const edges = new Map(), at = new Map();
+  const add = (a, b) => {
+    const k = a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]) ? key(key(a[0], a[1]), key(b[0], b[1])) : key(key(b[0], b[1]), key(a[0], a[1]));
+    if(edges.has(k)) return;
+    edges.set(k, [a, b]);
+    for(const q of [a, b]){ const c = key(q[0], q[1]); if(!at.has(c)) at.set(c, []); at.get(c).push(k); }
+  };
+  for(let r = 0; r < nr; r++) for(let c = 0; c < nc; c++){
+    const x = 2 * c + (r & 1), y = 3 * r;   // left edge of the cell, top of its top corner
+    const P = [[x + 1, y], [x + 2, y + 1], [x + 2, y + 3], [x + 1, y + 4], [x, y + 3], [x, y + 1]];
+    P.forEach((q, i) => add(q, P[(i + 1) % 6]));
+  }
+  const place = q => [ox + q[0] * w / 2, oy + q[1] * s / 2];
+  const out = [], used = new Set();
+  for(const [k0, e0] of edges){
+    if(used.has(k0)) continue;
+    used.add(k0);
+    const chain = [e0[0], e0[1]];
+    for(;;){
+      const end = chain[chain.length - 1], next = at.get(key(end[0], end[1])).find(k => !used.has(k));
+      if(!next) break;
+      used.add(next);
+      const e = edges.get(next);
+      chain.push(e[0][0] === end[0] && e[0][1] === end[1] ? e[1] : e[0]);
+    }
+    out.push([chain.map(place), false]);
+  }
+  return out;
+}
+function hcRC(){
+  const g = prefs.honeycomb && typeof prefs.honeycomb === 'object' ? prefs.honeycomb : {};
+  const f = (v, d) => { v = Math.round(+v); return v >= 1 && v <= GRID_MAX ? v : d; };
+  return [f(g.r, 3), f(g.c, 4)];
+}
+function renderHc(){
+  const [r, c] = hcRC();
+  $('hcR').textContent = r; $('hcC').textContent = c; $('hcSize').textContent = r + ' × ' + c;
+  for(const st of $('hcSteps').querySelectorAll('.stepper')){
+    const v = st.dataset.k === 'r' ? r : c;
+    st.querySelector('[data-d="-1"]').disabled = v <= 1; st.querySelector('[data-d="1"]').disabled = v >= GRID_MAX;
+  }
+}
+function showHcPanel(on){
+  $('hcPanel').hidden = !on; $('hcOpen').classList.toggle('on', on); $('hcOpen').setAttribute('aria-expanded', on ? 'true' : 'false');
+}
 // (1.69) Grid maker: rows × columns remembered per device in prefs.grid = {r, c} (1–30 each, default 3 × 4)
 const GRID_MAX = 30;
 function gridRC(){
@@ -212,8 +271,23 @@ $('gridDraw').addEventListener('click', () => {
   const [r, c] = gridRC();
   startPick({kind: 'shape', shape: 'grid'}, `Drag a box on the page for a grid of ${r} × ${c}. Tap for a standard size.`);
 });
-renderGrid();
-$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); renderGrid(); showGridPanel(false); openPop('shapePop', e.currentTarget); });
+$('hcSteps').addEventListener('click', e => {
+  const bt = e.target.closest('button[data-d]'); if(!bt || bt.disabled) return;
+  const [r, c] = hcRC(), k = bt.closest('.stepper').dataset.k, d = +bt.dataset.d;
+  prefs.honeycomb = {r: k === 'r' ? clamp(r + d, 1, GRID_MAX) : r, c: k === 'c' ? clamp(c + d, 1, GRID_MAX) : c};
+  savePrefs(); renderHc();
+});
+$('hcOpen').addEventListener('click', () => {
+  showHcPanel($('hcPanel').hidden);
+  if(!$('shapePop').hidden) openPopAgain('shapePop', $('shapeBtn'));
+});
+$('hcDraw').addEventListener('click', () => {
+  closePops();
+  const [r, c] = hcRC();
+  startPick({kind: 'shape', shape: 'honeycomb'}, `Drag a box on the page for a honeycomb of ${r} × ${c}. Tap for a standard size.`);
+});
+renderGrid(); renderHc();
+$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); renderGrid(); renderHc(); showGridPanel(false); showHcPanel(false); openPop('shapePop', e.currentTarget); });
 $('shapeGrid').addEventListener('click', e => {
   const b = e.target.closest('button[data-shape]'); if(!b) return;
   closePops();

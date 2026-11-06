@@ -527,10 +527,10 @@ body.scanning .note{bottom:calc(76px + var(--sab) + var(--up,0px))}
 /* 1.69: Grid maker (button + rows/columns steppers) in the Shapes popover */
 .grid-maker{display:flex;flex-direction:column;gap:6px}
 .grid-panel{display:flex;flex-direction:column;gap:8px;padding:2px 0 4px}
-#gridOpen.on{background:var(--accent-soft);color:var(--accent)}
-#gridOpen.on .grid-n{color:inherit}
-#gridOpen{display:flex;align-items:center;justify-content:center}
-#gridOpen .grid-n{margin-left:8px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
+#gridOpen.on,#hcOpen.on{background:var(--accent-soft);color:var(--accent)}
+#gridOpen.on .grid-n,#hcOpen.on .grid-n{color:inherit}
+#gridOpen,#hcOpen{display:flex;align-items:center;justify-content:center}
+#gridOpen .grid-n,#hcOpen .grid-n{margin-left:8px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
 .grid-steps{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .gstep{display:flex;flex-direction:column;gap:3px;font-size:12.5px;color:var(--muted);min-width:0}
 .stepper{display:flex;align-items:center;justify-content:space-between;background:var(--well);border-radius:9px}
@@ -973,7 +973,7 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 #compassOpen{border-top:0}
 #shapePop svg{flex:none}
 #compassOpen svg,#gridOpen svg,#graphOpen svg{margin-right:6px}
-#gridOpen .grid-n{margin-left:auto}
+#gridOpen .grid-n,#hcOpen .grid-n{margin-left:auto}
 .shape-grid{padding-bottom:6px;border-bottom:1px solid var(--line)}
 #snapShapes{border-top:1px solid var(--line);padding:6px 8px 0;height:44px;color:var(--fg);font-size:14px;justify-content:space-between;flex-direction:row-reverse;width:100%}
 .assist-pop{gap:4px;width:270px}

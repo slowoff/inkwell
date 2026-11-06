@@ -68,7 +68,7 @@ function finishLasso(a){
   }
   const wp = [];
   for(let i = 0; i < poly.length; i += 2) wp.push(...toWorld(poly[i], poly[i+1]));
-  const ids = [];
+  const ids = [], whole = new Set();
   // (1.53) Box mode: the rectangle (world) can also be copied as a picture
   let area = null;
   if(a.box && a.b1){ const [ax, ay] = toWorld(a.sx, a.sy), [bx, by] = toWorld(a.b1[0], a.b1[1]); area = [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)]; }
@@ -80,7 +80,7 @@ function finishLasso(a){
       const p = it.p, n = p.length / 3, step = Math.max(1, Math.floor(n / 40)) * 3;
       let inside = 0, tot = 0;
       for(let i = 0; i < p.length; i += step){ tot++; if(pip(p[i], p[i+1], wp)) inside++; }
-      if(tot && inside / tot >= 0.35) ids.push(it.id);
+      if(tot && inside / tot >= 0.35){ ids.push(it.id); if(inside / tot >= 0.95) whole.add(it.id); }
     } else {
       // boxes (pictures, imported pages, text, formulas) must be mostly inside the loop (1.41.1): before, a loop
       // around writing in the middle of an imported page caught the whole page because its centre was inside
@@ -89,10 +89,18 @@ function finishLasso(a){
       for(const fx of [0.1, 0.5, 0.9]) for(const fy of [0.1, 0.5, 0.9]) if(pip(b[0] + (b[2] - b[0]) * fx, b[1] + (b[3] - b[1]) * fy, wp)) n++;
       // centre inside counts only when the loop is about as big as the item (a loose oval around it)
       const fits = (b[2] - b[0]) * 0.7 <= lw && (b[3] - b[1]) * 0.7 <= lh;
-      if(n >= 6 || (fits && pip((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, wp))) ids.push(it.id);
+      if(n >= 6 || (fits && pip((b[0] + b[2]) / 2, (b[1] + b[3]) / 2, wp))){ ids.push(it.id); if(n === 9) whole.add(it.id); }
     }
   }
-  if(ids.length) selectIds(ids); else clearSel();
+  // (1.90.2) a honeycomb or graph (ne) is one group, so catching a bit of it took all of it, and writing on it could not be selected
+  // on its own: it only comes along when the loop goes around all of it
+  const groupOf = new Map();
+  for(const it of cur.items.values()) if(it.g){ if(!groupOf.has(it.g)) groupOf.set(it.g, []); groupOf.get(it.g).push(it); }
+  const pick = ids.filter(id => {
+    const it = cur.items.get(id), mates = it.g ? groupOf.get(it.g) : [it];
+    return !mates.some(m => m.ne) || mates.every(m => whole.has(m.id));
+  });
+  if(pick.length) selectIds(pick); else clearSel();
   TS.find(wp, lb, area);   // (1.52) text of imported pages inside the loop; (1.53) box area
 }
 /* Groups: items with the same optional field g move, select and resize as one piece */

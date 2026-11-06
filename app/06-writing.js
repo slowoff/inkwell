@@ -303,19 +303,28 @@ function rdp(P, eps){
 }
 /* (1.89) Hex paper, "Straighten lines": when the pen lifts, a stroke made of straight pieces becomes straight, and its ends and
    corners land on the nearest corner of a hexagon, so bonds, zig-zag chains and rings sit exactly on the paper.
-   Curves and small writing stay as drawn. An end far from any corner stays where it is. A line over a bond that is already
-   there is only straightened, so the second line of a double bond stays beside the first. */
+   Curves and writing stay as drawn: every end and corner must start near a hexagon corner, and a single line must be about a
+   bond long (Rafael, 1.90.2: strict, so digits and letters are not caught). A line over a bond that is already there is only
+   straightened, so the second line of a double bond stays beside the first. Hex paper under an imported page does not count:
+   it cannot be seen there. */
 const HexLine = {
   corner(x, y, s, host){
     if(host){
       let best = null, bd = Infinity;
       for(const q of host.corners){ const d = Math.hypot(q[0] - x, q[1] - y); if(d < bd){ bd = d; best = q; } }
-      return bd <= 0.5 * s ? best : null;
+      return bd <= 0.4 * s ? best : null;
     }
     let best = null, bd = Infinity;
     const see = (a, b) => { const d = Math.hypot(a - x, b - y); if(d < bd){ bd = d; best = [a, b]; } };
     hexEdges(s, x - s, y - s, x + s, y + s, (x1, y1, x2, y2) => { see(x1, y1); see(x2, y2); });
-    return bd <= 0.5 * s ? best : null;
+    return bd <= 0.4 * s ? best : null;
+  },
+  // most of the stroke lies on an imported page or picture
+  onPicture(p){
+    const R = paperRects(); if(!R.length) return false;
+    let n = 0, m = 0;
+    for(let i = 0; i < p.length; i += 3){ m++; if(onPaperAt(R, p[i], p[i + 1])) n++; }
+    return n * 2 >= m;
   },
   fit(p, s, z, host){
     const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i + 1]]);
@@ -325,7 +334,7 @@ const HexLine = {
     while(V.length > 2 && dist(V[0], V[1]) < 0.3 * s) V.shift();   // the little hook when the pen lands or lifts
     while(V.length > 2 && dist(V[V.length - 1], V[V.length - 2]) < 0.3 * s) V.pop();
     if(V.length > 15) return null;
-    for(let i = 1; i < V.length; i++) if(dist(V[i - 1], V[i]) < 0.45 * s) return null;
+    for(let i = 1; i < V.length; i++) if(dist(V[i - 1], V[i]) < 0.6 * s) return null;
     // a curve cut into pieces stays close to them only at the corners: on average it is further off than a shaky line
     let off = 0;
     for(const q of P){
@@ -337,17 +346,29 @@ const HexLine = {
     if(HexLine.round(P, V) > Math.max(0.07 * s, 1 / z)) return null;
     const out = [];
     for(const v of V){
-      const c = HexLine.corner(v[0], v[1], s, host) || v;
+      const c = HexLine.corner(v[0], v[1], s, host);
+      if(!c) return null;
       if(!out.length || dist(out[out.length - 1], c) > 0.01) out.push(c);
     }
-    if(out.length < 2) return V;
-    if(out.length === 2 && HexLine.taken(out[0], out[1], s, host)) return V;
+    if(out.length < 2) return null;
+    if(out.length === 2){
+      if(HexLine.taken(out[0], out[1], s, host)) return V;
+      if(dist(V[0], V[V.length - 1]) < 0.7 * s) return null;
+    }
     return out;
   },
   /* (1.90.1) A honeycomb from Shapes works like Hex paper. It is recognised from its strokes (one group, or one closed
      stroke) and not from a mark stored on them, so it still works after it is moved, turned or evenly resized, and on
      honeycombs made before this. */
   shape(items){
+    const memo = HexLine.seen.get(items[0]);
+    if(memo && memo.n === items.length) return memo.h;
+    const h = HexLine.measure(items);
+    HexLine.seen.set(items[0], {n: items.length, h});   // strokes never change in place: moving one makes a new item
+    return h;
+  },
+  seen: new WeakMap(),
+  measure(items){
     const pieces = [], corners = new Map(), ids = new Set();
     const add = q => { const k = Math.round(q[0] * 2) + ':' + Math.round(q[1] * 2); if(!corners.has(k)) corners.set(k, q); };
     for(const it of items){
@@ -377,9 +398,10 @@ const HexLine = {
     for(let i = 0; i < p.length; i += 3){ x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); }
     const groups = new Map();
     for(const it of cur.items.values()){
-      if(it.t !== 's' || it.hl || it.mk) continue;
-      if(it.g){ if(!groups.has(it.g)) groups.set(it.g, []); groups.get(it.g).push(it); }
-      else if(it.p.length >= 18){ const b = geoOf(it).b; if(!(b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) groups.set(it.id, [it]); }
+      if(it.t !== 's' || !it.sq || !it.ne) continue;   // honeycombs from Shapes; one with a single cell has no group
+      const k = it.g || it.id;
+      if(!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(it);
     }
     let best = null, most = 0;
     for(const items of groups.values()){
@@ -393,6 +415,23 @@ const HexLine = {
       if(h){ best = h; most = n / m; }
     }
     return best;
+  },
+  // (1.90.2) honeycombs made with 1.90 had no marks yet: they get them when their page opens
+  adopt(){
+    const groups = new Map();
+    for(const it of cur.items.values()){
+      if(it.t === 's' && it.g && !it.hl){ if(!groups.has(it.g)) groups.set(it.g, []); groups.get(it.g).push(it); }
+      else if(it.g && it.t !== 's') groups.set(it.g, null);
+    }
+    let hit = false;
+    for(const items of groups.values()){
+      if(!items || items.some(i => i.ne || i.sq || i.fl || i.c !== items[0].c || i.w !== items[0].w)) continue;
+      const h = HexLine.shape(items);
+      if(!h || h.corners.length < 10) continue;
+      for(const i of items) cur.items.set(i.id, Object.assign({}, i, {sq: 1, ne: 1}));
+      hit = true;
+    }
+    if(hit){ invalidate(0, 1, 0); saveContentSoon(); }
   },
   // a round shape cut into pieces bulges to the same side on every piece; a shaky line or zig-zag does not.
   // Returns how far it bulges on average (0 = not round).
@@ -441,7 +480,7 @@ function cleanCorners(V){
 function recognize(P){
   const n = P.length;
   let L = 0; for(let i = 1; i < n; i++) L += dist(P[i-1], P[i]);
-  if(L < 24 / cam.z) return null;
+  if(L < 36 / cam.z) return null;   // (1.90.2; was 24) a slowly written 1 or l rested inside the stillness circle and became a line
   const a = P[0], b = P[n - 1], chord = dist(a, b);
   let maxDev = 0; for(const q of P) maxDev = Math.max(maxDev, Math.sqrt(segDist2(q[0], q[1], a[0], a[1], b[0], b[1])));
   if(chord > 0.75 * L && maxDev < Math.max(11 / cam.z, chord * 0.1)) return {kind: 'line', pts: [a, b]};   // (1.73.1) more forgiving; 1.73: 0.8 / 8 px / 7.5 %, before: 0.85 / 6 px / 6 %

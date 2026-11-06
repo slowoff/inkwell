@@ -944,7 +944,7 @@ const HW = {
   cells(items){
     const m = new Map();
     for(const it of items){
-      if(!it || it.t !== 's' || it.hl || !it.p || it.p.length < 6) continue;
+      if(!it || it.t !== 's' || it.hl || it.ne || !it.p || it.p.length < 6) continue;   // (1.90.2) not the lines of a honeycomb or graph
       const b = strokeBox(it), key = Math.floor((b[0] + b[2]) / 2 / HW_CW) + ',' + Math.floor((b[1] + b[3]) / 2 / HW_CH);
       if(!m.has(key)) m.set(key, []);
       m.get(key).push(it);

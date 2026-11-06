@@ -99,8 +99,20 @@ async def main():
             P = pts(r['p'])
             far = max(min(math.hypot(q[0] - s[0], q[1] - s[1]) for q in P) for s in shape)
             check(far < 2.5, f'{name} stays as drawn ({far:.1f})')
-        r = await draw(page, [(100, 800), (600, 805)], wob=1.5)
-        check(dev(pts(r['p'])) < 0.01, 'long line straight')
+        la, lb = v(12, 1), v(12, 8)
+        r = await draw(page, [(la[0] + 4, la[1] + 3), (lb[0] - 3, lb[1] + 4)], wob=1.5)
+        P = pts(r['p']); check(dev(P) < 0.01 and near(P[0], la) and near(P[-1], lb), 'long line lands corner to corner')
+        # strict: writing stays. A digit-sized line, and a long line with its ends away from the corners
+        cc = v(10, 8); r = await draw(page, [(cc[0] + 16, cc[1] + 8), (cc[0] + 19, cc[1] + 34)], wob=0.8, step=3)
+        check(dev(pts(r['p'])) > 0.3, 'a 1 away from the corners stays as drawn')
+        c2 = v(10, 2); r = await draw(page, [(c2[0] + 3, c2[1] + 2), (c2[0] + 3, c2[1] + 26)], wob=0.8, step=3)
+        check(dev(pts(r['p'])) > 0.3, 'a short line starting at a corner stays as drawn (under a bond)')
+        await page.evaluate("async () => { const W = __inkwell, bl = await (await fetch('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMB/6X2l6kAAAAASUVORK5CYII=')).blob(), a = await W.saveAsset(bl); W.addItems([{t: 'i', id: 'pg1', x: 500, y: 60, w: 300, h: 400, a, doc: 1}]); }")
+        await page.wait_for_timeout(200)
+        A3, B3 = v(4, 8), v(4, 8, False)
+        r = await draw(page, [(A3[0] + 3, A3[1] + 3), (B3[0] - 3, B3[1] + 3)])
+        check(not near(pts(r['p'])[0], A3), 'on an imported page nothing snaps, the paper is hidden there')
+        await page.evaluate("__inkwell.undo(); __inkwell.undo()"); await page.wait_for_timeout(100)
         # the same with the default bond (5 mm, about 19 px) and a shaky hand: a bond still lands, a circle stays
         await page.evaluate("""() => { const W = __inkwell; W.cur.bg = Object.assign({}, W.cur.bg, {sy: 18.9}); }""")
         s2 = 18.9; w2 = math.sqrt(3) * s2

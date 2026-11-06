@@ -38,6 +38,7 @@ async function openPage(id, opts = {}){
   worldBack.innerHTML = ''; worldFront.innerHTML = ''; elMap.clear(); geo.clear();
   for(const it of cur.items.values()) if(it.t !== 's') itemEl(it);
   refreshPaper();
+  HexLine.adopt();
   const saved = LSget('inkwell.cam.' + id, null);
   if(saved && isFinite(saved.z)) Object.assign(cam, saved);
   else { cam.z = 1; cam.ox = W > 900 ? 56 : 20; cam.oy = 28; }

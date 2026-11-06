@@ -579,7 +579,7 @@ function endTool(e){
     }
     if(handwriting && prefs.hexSnap){
       const host = HexLine.host(a.pts);   // (1.90.1) inside a honeycomb from Shapes: its own corners, also on other paper
-      const V = host ? HexLine.fit(a.pts, host.s, cam.z, host) : cur.bg.type === 'hex' ? HexLine.fit(a.pts, cur.bg.sy, cam.z) : null;
+      const V = host ? HexLine.fit(a.pts, host.s, cam.z, host) : cur.bg.type === 'hex' && !HexLine.onPicture(a.pts) ? HexLine.fit(a.pts, cur.bg.sy, cam.z) : null;
       if(V){ it.p = densify(V, false, a.isPen ? midPressure(a.pts) : shapePr()); it.sq = 1; addItems([it]); return; }
     }
     addItems([it]);

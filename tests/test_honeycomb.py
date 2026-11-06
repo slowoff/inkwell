@@ -100,7 +100,7 @@ async def main():
         shot = await page.screenshot()
         if os.environ.get('SHOT_DIR'): open(os.environ['SHOT_DIR'] + '/hc_sharp.png', 'wb').write(shot)
         await page.evaluate("__inkwell.flushSaves()"); await page.wait_for_timeout(500)
-        red = await page.evaluate("""async () => { const W = __inkwell, id = W.cur.id; await W.flushSaves(); await W.openPage(id); await new Promise(r => setTimeout(r, 400));
+        red = await page.evaluate("""async () => { const W = __inkwell, id = W.cur.id; await W.flushSaves(); await W.newPage(); await new Promise(r => setTimeout(r, 200)); await W.openPage(id); await new Promise(r => setTimeout(r, 400));
           const a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g); return {all: a.length && a.every(i => i.sq === 1), lines: a.reduce((m, i) => m + (W.strokePath(i, true).match(/L/g) || []).length, 0)}; }""")
         check(red['all'] and red['lines'] == sq['lines'], f"same after saving and opening again ({red['lines']} vs {sq['lines']})")
         # --- 1.90.1: Straighten lines inside a honeycomb, on grid paper ---
@@ -199,10 +199,41 @@ async def main():
             if mode == 'stroke': L0 = lines
             check(lines == L0, f'eraser ({mode}) cut nothing out of it')
             if mode == 'stroke': check(c1['ink'] == 0, 'the drawn line is gone')
-        await page.evaluate("() => { const a = [...__inkwell.cur.items.values()].filter(i => i.t === 's' && i.g).map(i => i.id); __inkwell.setTool('lasso'); __inkwell.selectIds(a); }"); await page.wait_for_timeout(100)
+        # Select tool: a loop around writing on it takes the writing only; a loop around all of it takes it
+        P = await pen(off_a_bit(a2, b2))
+        ci = (P[0][0] + P[-1][0]) / 2, (P[0][1] + P[-1][1]) / 2
+        await page.evaluate("__inkwell.setTool('lasso')"); await page.evaluate("__inkwell.prefs.lassoMode = 'free'")
+        to = lambda x, y: (st[0] + cam[0] + x * cam[2], st[1] + cam[1] + y * cam[2])
+        rr = 0.9 * h2['s']
+        loop = [to(ci[0] + rr * math.cos(i / 16 * 6.283), ci[1] + rr * math.sin(i / 16 * 6.283)) for i in range(17)]
+        await page.mouse.move(*loop[0]); await page.mouse.down()
+        for q in loop[1:]: await page.mouse.move(*q)
+        await page.mouse.up(); await page.wait_for_timeout(150)
+        pk = await page.evaluate("() => { const W = __inkwell; return (W.sel ? W.sel.ids : []).map(id => !!W.cur.items.get(id).g); }")
+        check(len(pk) == 1 and not pk[0], f'loop around writing on it takes only the writing ({pk})')
+        await page.evaluate("__inkwell.setTool('pen'); __inkwell.setTool('lasso')")
+        box = await page.evaluate("() => { let b = [1e9, 1e9, -1e9, -1e9]; for(const i of __inkwell.cur.items.values()) if(i.t === 's' && i.g) for(let k = 0; k < i.p.length; k += 3){ b = [Math.min(b[0], i.p[k]), Math.min(b[1], i.p[k + 1]), Math.max(b[2], i.p[k]), Math.max(b[3], i.p[k + 1])]; } return b; }")
+        wide = await page.evaluate("[__inkwell.cam.ox, __inkwell.cam.oy, __inkwell.cam.z]")
+        await page.evaluate("() => { const W = __inkwell; W.cam.z = 0.6; W.cam.ox = 200; W.cam.oy = 60; W.invalidate(); }"); await page.wait_for_timeout(120)
+        cam2 = await page.evaluate("[__inkwell.cam.ox, __inkwell.cam.oy, __inkwell.cam.z]")
+        to2 = lambda x, y: (st[0] + cam2[0] + x * cam2[2], st[1] + cam2[1] + y * cam2[2])
+        rect = [to2(box[0] - 30, box[1] - 30), to2(box[2] + 30, box[1] - 30), to2(box[2] + 30, box[3] + 30), to2(box[0] - 30, box[3] + 30), to2(box[0] - 30, box[1] - 30)]
+        await page.mouse.move(*rect[0]); await page.mouse.down()
+        for i in range(4):
+            for k in range(1, 7): await page.mouse.move(rect[i][0] + (rect[i + 1][0] - rect[i][0]) * k / 6, rect[i][1] + (rect[i + 1][1] - rect[i][1]) * k / 6)
+        await page.mouse.up(); await page.wait_for_timeout(150)
+        sl = await page.evaluate("() => { const W = __inkwell; return [(W.sel ? W.sel.ids : []).filter(id => W.cur.items.get(id).g).length, [...W.cur.items.values()].filter(i => i.t === 's' && i.g).length]; }")
+        check(sl[0] == sl[1] and sl[1] > 0, f'loop around all of it takes it ({sl})')
+        await page.evaluate("() => { const W = __inkwell, a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g).map(i => i.id); W.setTool('lasso'); W.selectIds(a); }"); await page.wait_for_timeout(100)
         await page.click('#selDel'); await page.wait_for_timeout(120)
         check((await page.evaluate(count))['grid'] == 0, 'Select + delete still removes it')
         await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(100)
+        # a honeycomb made with 1.90 (no marks) gets them when its page opens
+        adopted = await page.evaluate("""async () => { const W = __inkwell, id = W.cur.id;
+          W.replaceItems([...W.cur.items.values()].filter(i => i.t === 's' && i.g).map(i => { const c = Object.assign({}, i); delete c.sq; delete c.ne; return c; }));
+          await W.flushSaves(); await W.newPage(); await new Promise(r => setTimeout(r, 200)); await W.openPage(id); await new Promise(r => setTimeout(r, 300));
+          const a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g); return a.length && a.every(i => i.sq === 1 && i.ne === 1); }""")
+        check(adopted, 'older honeycomb gets sharp corners and eraser protection when its page opens')
         # other grouped shapes are not honeycombs
         no = await page.evaluate("""() => { const W = __inkwell, mk = (id, pts) => { const p = []; for(const q of pts) p.push(q[0], q[1], .5); return {t: 's', id, g: 'gg', c: 'auto', w: 2, p}; };
           const rows = []; for(let i = 0; i < 5; i++) rows.push(mk('r' + i, [[0, i * 40], [200, i * 40]])); for(let i = 0; i < 6; i++) rows.push(mk('c' + i, [[i * 40, 0], [i * 40, 160]]));

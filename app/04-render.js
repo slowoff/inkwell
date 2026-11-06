@@ -28,10 +28,25 @@ function refreshPaper(){
 function geoOf(it){
   let g = geo.get(it.id);
   if(g && g.it === it) return g;
-  g = {it, path: strokePath(it, false), b: strokeBox(it)};
+  // (1.88.1) the outline is only built when the stroke is first drawn: before, opening a page built one for every stroke
+  // on it, seen or not, and kept them all in memory
+  g = {it, b: strokeBox(it), _path: null, get path(){ if(!this._path){ this._path = strokePath(this.it, false); geoPaths++; } return this._path; }};
   geo.set(it.id, g);
   return g;
 }
+let geoPaths = 0;
+// a long page: forget the outlines far from the view again (they are rebuilt when the page comes back)
+function geoTrim(){
+  if(geoPaths <= GEO_KEEP) return;
+  const v = viewRect(), mx = v[2] - v[0], my = v[3] - v[1];
+  let n = 0;
+  for(const g of geo.values()){
+    if(!g._path) continue;
+    if(g.b[2] < v[0] - mx || g.b[0] > v[2] + mx || g.b[3] < v[1] - my || g.b[1] > v[3] + my) g._path = null; else n++;
+  }
+  geoPaths = n;
+}
+const GEO_KEEP = 3000;
 
 /* Colours: 'auto' ink is black on light paper and white on dark paper */
 let tokens = {};
@@ -97,8 +112,19 @@ tMove.id = 'tMove'; tMove.className = 't-move'; tMove.hidden = true; tMove.title
 tMove.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5V4a1.5 1.5 0 0 1 3 0v7.5"/><path d="M14 11.5V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M17 9.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-1.2a6 6 0 0 1-4.6-2.2L4.6 15.6a1.6 1.6 0 0 1 2.4-2.1L8 14.6"/></svg>';
 stage.appendChild(tMove);
 
+/* (1.88.1) The paper, highlighter and ink layers are bigger than the screen by MX/MY on each side, so a pan can simply slide
+   them (the graphics chip does that, nothing has to be drawn). See moveInk. */
+let MX = 0, MY = 0;
+const LAYER_MAX_PX = 14e6;   // iPad Safari refuses canvases above about 16.7 million pixels
+function setMargins(){
+  let k = 1;
+  while(k > 0.05 && (W + 2 * k * W * 0.1) * (H + 2 * k * H * 0.35) * dpr * dpr > LAYER_MAX_PX) k *= 0.8;
+  if((W + 2 * k * W * 0.1) * (H + 2 * k * H * 0.35) * dpr * dpr > LAYER_MAX_PX) k = 0;
+  MX = Math.round(W * 0.1 * k); MY = Math.round(H * 0.35 * k);
+}
 const toWorld = (sx, sy) => [(sx - cam.ox) / cam.z, (sy - cam.oy) / cam.z];
 const viewRect = () => [-cam.ox / cam.z, -cam.oy / cam.z, (W - cam.ox) / cam.z, (H - cam.oy) / cam.z];
+const layerRect = () => [(-MX - cam.ox) / cam.z, (-MY - cam.oy) / cam.z, (W + MX - cam.ox) / cam.z, (H + MY - cam.oy) / cam.z];
 const pt = e => [e.clientX - SR.left, e.clientY - SR.top];
 
 // (1.58.11) iPadOS 26 bug: a Home Screen app gets a viewport that is short by about the status bar height, which left
@@ -122,10 +148,15 @@ function resize(){
   const r = stage.getBoundingClientRect();
   SR = r; W = r.width; H = r.height;
   dpr = Math.min(window.devicePixelRatio || 1, 2);
-  for(const c of [bgCv, hlmCv, inkCv, liveCv]){
-    c.width = Math.max(1, Math.round(W * dpr)); c.height = Math.max(1, Math.round(H * dpr));
-    c.style.width = W + 'px'; c.style.height = H + 'px';
+  setMargins();
+  liveCv.width = Math.max(1, Math.round(W * dpr)); liveCv.height = Math.max(1, Math.round(H * dpr));
+  liveCv.style.width = W + 'px'; liveCv.style.height = H + 'px';
+  for(const c of [bgCv, hlmCv, inkCv]){
+    c.width = Math.max(1, Math.round((W + 2 * MX) * dpr)); c.height = Math.max(1, Math.round((H + 2 * MY) * dpr));
+    c.style.width = W + 2 * MX + 'px'; c.style.height = H + 2 * MY + 'px';
+    c.style.transform = `translate(${-MX}px,${-MY}px)`;
   }
+  inkAt.ok = false; inkAt.xf = false; bgAt.ok = false;
   if(W > 0 && H > 0 && !rulerVisible()) centerRuler(false);
   renderRuler();
   invalidate();
@@ -134,7 +165,7 @@ new ResizeObserver(resize).observe(stage);
 addEventListener('resize', fitScreen);
 addEventListener('scroll', () => { SR = stage.getBoundingClientRect(); }, true);
 
-let rafId = 0, need = {bg: 0, ink: 0, over: 0}, frontZ = 1, frameZoomTxt = '';
+let rafId = 0, need = {bg: 0, ink: 0, over: 0, move: 0, boxes: []}, frontZ = 1, frontTimer = 0, frameZoomTxt = '';
 let backZ = 1, backTimer = 0;
 // place an element of the back layer (imported page, picture) at the settled zoom backZ
 function backXf(el, it){
@@ -155,6 +186,18 @@ function invalidate(bg = 1, ink = 1, over = 1){
   need.bg |= bg; need.ink |= ink; need.over |= over;
   if(!rafId) rafId = requestAnimationFrame(frame);
 }
+// (1.88.1) the camera moved and nothing on the page changed: the ink already drawn can be reused (see moveInk)
+function invalidateMove(){
+  need.over = 1; need.move = 1;
+  if(!rafId) rafId = requestAnimationFrame(frame);
+}
+function settleFront(){
+  frontTimer = 0;
+  if(frontZ === cam.z) return;
+  frontZ = cam.z;
+  for(const el of worldFront.children) frontXf(el);
+  worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
+}
 function frame(){
   rafId = 0;
   if(prefs.leftEdge && cur) clampLeft();
@@ -166,16 +209,27 @@ function frame(){
   if(cam.z !== backZ){ clearTimeout(backTimer); backTimer = setTimeout(settleBack, 150); }
   // Typed text, formulas and tape are scaled one by one instead of as one big layer: iPad Safari
   // rasterises a big scaled layer at 1x and then stretches it, so text went blurry when zoomed in.
-  worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
-  if(cam.z !== frontZ){ frontZ = cam.z; for(const el of worldFront.children) frontXf(el); }
+  // (1.88.1) During a pinch the whole layer is stretched and the text boxes are set one by one when the zoom stops, like the pictures.
+  if(cam.z !== frontZ && need.move && !need.ink){
+    worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px) scale(${cam.z / frontZ})`;
+    clearTimeout(frontTimer); frontTimer = setTimeout(settleFront, 150);
+  } else {
+    worldFront.style.transform = `translate(${cam.ox}px,${cam.oy}px)`;
+    if(cam.z !== frontZ){ frontZ = cam.z; for(const el of worldFront.children) frontXf(el); }
+  }
   const zt = Math.round(cam.z * 100) + '%';
   if(zt !== frameZoomTxt){ frameZoomTxt = zt; $('zoomPct').textContent = zt; }   // (1.72) only when it changes
   // (1.69) each step on its own: before, one step that threw left the rest undone on every later frame too (the
   // ink was cleared but never drawn again until the app was restarted)
-  const n = need; need = {bg: 0, ink: 0, over: 0};
+  const n = need; need = {bg: 0, ink: 0, over: 0, move: 0, boxes: []};
   const step = (f, what) => { try { f(); } catch(e){ frameError(e, what); } };
   if(n.bg) step(drawBg, 'bg');
+  else if(n.move) step(moveBg, 'bg');
   if(n.ink) step(drawInk, 'ink');
+  else {
+    if(n.boxes.length) step(() => inkBoxes(n.boxes), 'ink');
+    if(n.move) step(moveInk, 'ink');
+  }
   if(n.over) step(() => { positionOverlays(); imgSoon(); renderSlider(); }, 'over');
   if(act || WA.linger()) step(drawLive, 'live');   // the reference line follows the page while it is still showing
 }
@@ -186,28 +240,39 @@ function frameError(e, what){
     try { (window.__inkwellErrors = window.__inkwellErrors || []).push('frame ' + what + ': ' + (e && e.message || e)); } catch(_){}
   }
 }
+const bgAt = {ox: 0, oy: 0, z: 0, ok: false};
+// how far (in CSS px, whole device pixels) the camera is from where a layer was drawn
+const slideOf = at => [Math.round((cam.ox - at.ox) * dpr) / dpr, Math.round((cam.oy - at.oy) * dpr) / dpr];
+function moveBg(){
+  if(!bgAt.ok || cam.z !== bgAt.z) return drawBg();
+  const [dx, dy] = slideOf(bgAt);
+  if(Math.abs(dx) > MX || Math.abs(dy) > MY) return drawBg();
+  bgCv.style.transform = `translate(${dx - MX}px,${dy - MY}px)`;
+}
 function drawBg(){
   bgCtx.setTransform(1, 0, 0, 1, 0, 0);
   bgCtx.clearRect(0, 0, bgCv.width, bgCv.height);
+  bgAt.ox = cam.ox; bgAt.oy = cam.oy; bgAt.z = cam.z; bgAt.ok = true;
+  bgCv.style.transform = `translate(${-MX}px,${-MY}px)`;
   if(!cur) return;
   drawPaperLines();
   const col = ML_COLORS[cur.bg.ml];
   if(col){
     // (1.75) stays the same width on screen at any zoom, like the paper lines
     const lw = cur.bg.mw === 'thick' ? 3 : 1.5, X = Math.round(mlX(cur.bg) * cam.z + cam.ox);
-    bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    bgCtx.fillStyle = col; bgCtx.fillRect(X - lw / 2, 0, lw, H);
+    bgCtx.setTransform(dpr, 0, 0, dpr, dpr * MX, dpr * MY);
+    bgCtx.fillStyle = col; bgCtx.fillRect(X - lw / 2, -MY, lw, H + 2 * MY);
   }
 }
 function drawPaperLines(){
   const bg = cur.bg;
   if(bg.type === 'blank') return;
-  bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  bgCtx.setTransform(dpr, 0, 0, dpr, dpr * MX, dpr * MY);
   let kx = 1, ky = 1;
   while(bg.sx * kx * cam.z < 7) kx *= 2;
   while(bg.sy * ky * cam.z < 7) ky *= 2;
   const stepX = bg.sx * kx, stepY = bg.sy * ky;
-  const v = viewRect();
+  const v = layerRect();
   const x0 = Math.floor(v[0] / stepX) * stepX, y0 = Math.floor(v[1] / stepY) * stepY;
   if(bg.type === 'hex'){
     // (1.73) chemistry hexagons; zoomed far out the cells double in size so the lines never turn into a grey wash
@@ -231,8 +296,8 @@ function drawPaperLines(){
   }
   bgCtx.strokeStyle = tokens.rule; bgCtx.lineWidth = 1;
   bgCtx.beginPath();
-  for(let y = y0; y <= v[3]; y += stepY){ const Y = Math.round(y * cam.z + cam.oy) + 0.5; bgCtx.moveTo(0, Y); bgCtx.lineTo(W, Y); }
-  if(bg.type === 'grid') for(let x = x0; x <= v[2]; x += stepX){ const X = Math.round(x * cam.z + cam.ox) + 0.5; bgCtx.moveTo(X, 0); bgCtx.lineTo(X, H); }
+  for(let y = y0; y <= v[3]; y += stepY){ const Y = Math.round(y * cam.z + cam.oy) + 0.5; bgCtx.moveTo(-MX, Y); bgCtx.lineTo(W + MX, Y); }
+  if(bg.type === 'grid') for(let x = x0; x <= v[2]; x += stepX){ const X = Math.round(x * cam.z + cam.ox) + 0.5; bgCtx.moveTo(X, -MY); bgCtx.lineTo(X, H + MY); }
   bgCtx.stroke();
 }
 /* (1.69) Ink self-check. Rafael's iPad sometimes showed none of his ink after moving around the page while every
@@ -249,7 +314,7 @@ const InkCheck = {
     const p = it.p, m = p.length / 3; if(m < 1) return;
     // (1.72) the point on the drawn centre line: the raw recorded point can lie beside the ink on sharp little
     // zigzags (the drawing smooths them), which at high zoom made a false "ink lost" and replaced the layers for nothing
-    const [px, py] = shapePoint(p, Math.floor(m / 2)), x = Math.round((px * cam.z + cam.ox) * dpr), y = Math.round((py * cam.z + cam.oy) * dpr);
+    const [px, py] = shapePoint(p, Math.floor(m / 2)), x = Math.round((px * inkAt.z + inkAt.ox + MX) * dpr), y = Math.round((py * inkAt.z + inkAt.oy + MY) * dpr);
     if(x >= 1 && y >= 1 && x < inkCv.width - 1 && y < inkCv.height - 1) this.probes.push([x, y]);
   },
   soon(){ clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), 450); },
@@ -293,15 +358,16 @@ function watchCanvas(c){
 for(const c of [bgCv, hlmCv, inkCv, liveCv]) watchCanvas(c);
 // (1.62) does this highlight blend into the page (multiply)? fills = boxes of filled shapes on the page
 const hlMultiply = (paper, b, fills) => (paper || !isDark()) && !fills.some(f => f[0] < b[2] && f[2] > b[0] && f[1] < b[3] && f[3] > b[1]);
-function drawInk(){
-  inkCtx.setTransform(1, 0, 0, 1, 0, 0);
-  inkCtx.clearRect(0, 0, inkCv.width, inkCv.height);
-  if(hlmUsed){ hlmCtx.setTransform(1, 0, 0, 1, 0, 0); hlmCtx.clearRect(0, 0, hlmCv.width, hlmCv.height); hlmUsed = false; }
-  if(!cur) return;
-  inkCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
-  hlmCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
-  const v = viewRect(), pages = paperRects(), fills = [];
-  InkCheck.probes = [];
+// the camera the ink and highlighter layers were last drawn with
+const inkAt = {ox: 0, oy: 0, z: 0, ok: false, t: 0, xf: false, full: 0, moves: 0, scales: 0, slides: 0, parts: 0};
+let inkScratch = null, inkSettleT = 0;
+function setInkXf(v){ inkCv.style.transform = v; hlmCv.style.transform = v; }
+// draw the strokes that touch one of the boxes (world units); the marks of "Mark for later" go on top
+function paintInk(boxes, probe){
+  const tr = [dpr * inkAt.z, 0, 0, dpr * inkAt.z, dpr * (inkAt.ox + MX), dpr * (inkAt.oy + MY)];
+  inkCtx.setTransform(...tr); hlmCtx.setTransform(...tr);
+  const pages = paperRects(), fills = [];
+  const seen = b => boxes.some(v => !(b[2] < v[0] || b[0] > v[2] || b[3] < v[1] || b[1] > v[3]));
   for(const pass of [2, 1, 0]){
     for(const it of cur.items.values()){
       if(it.t !== 's' || inkPass(it) !== pass) continue;
@@ -309,28 +375,137 @@ function drawInk(){
       try {
         const g = geoOf(it);
         if(pass === 2) fills.push(g.b);
-        if(g.b[2] < v[0] || g.b[0] > v[2] || g.b[3] < v[1] || g.b[1] > v[3]) continue;
+        if(!seen(g.b)) continue;
         const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
         const ctx = pass === 1 && hlMultiply(paper, g.b, fills) ? hlmCtx : inkCtx;
         if(ctx === hlmCtx) hlmUsed = true;
         ctx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
         ctx.fillStyle = inkColor(it.c, false, paper);
         ctx.fill(g.path);
-        if(pass === 0) InkCheck.note(it);
+        if(probe && pass === 0) InkCheck.note(it);
       } catch(e){ frameError(e, 'stroke ' + it.id); }
     }
   }
-  if(InkCheck.probes.length) InkCheck.soon();
   inkCtx.globalAlpha = 1; hlmCtx.globalAlpha = 1;
   // one small bookmark at the top right of every marked spot
-  inkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  inkCtx.setTransform(dpr, 0, 0, dpr, dpr * MX, dpr * MY);
   inkCtx.fillStyle = MARK_C;
   for(const g of clusterMarks([...cur.items.values()])){
     const b = g.b;
-    if(b[2] < v[0] || b[0] > v[2] || b[3] < v[1] || b[1] > v[3]) continue;
-    const x = b[2] * cam.z + cam.ox - 4, y = b[1] * cam.z + cam.oy - 8;
+    if(!boxes.some(v => !(b[2] < v[0] - 40 / inkAt.z || b[0] > v[2] + 40 / inkAt.z || b[3] < v[1] - 40 / inkAt.z || b[1] > v[3] + 40 / inkAt.z))) continue;
+    const x = b[2] * inkAt.z + inkAt.ox - 4, y = b[1] * inkAt.z + inkAt.oy - 8;
     inkCtx.beginPath(); inkCtx.moveTo(x, y); inkCtx.lineTo(x + 10, y); inkCtx.lineTo(x + 10, y + 14); inkCtx.lineTo(x + 5, y + 10.5); inkCtx.lineTo(x, y + 14); inkCtx.closePath(); inkCtx.fill();
   }
+  // (1.88.1) an empty blending layer over the whole page still has to be blended on every frame: left out while it is empty
+  const show = hlmUsed ? '' : 'none';
+  if(hlmCv.style.display !== show) hlmCv.style.display = show;
+}
+function drawInk(){
+  clearTimeout(inkSettleT); inkSettleT = 0;
+  inkAt.xf = false;
+  setInkXf(`translate(${-MX}px,${-MY}px)`);
+  inkCtx.setTransform(1, 0, 0, 1, 0, 0);
+  inkCtx.clearRect(0, 0, inkCv.width, inkCv.height);
+  if(hlmUsed){ hlmCtx.setTransform(1, 0, 0, 1, 0, 0); hlmCtx.clearRect(0, 0, hlmCv.width, hlmCv.height); hlmUsed = false; }
+  inkAt.ok = !!cur;
+  if(!cur) return;
+  inkAt.ox = cam.ox; inkAt.oy = cam.oy; inkAt.z = cam.z; inkAt.t = performance.now(); inkAt.full++;
+  InkCheck.probes = [];
+  paintInk([layerRect()], true);
+  if(InkCheck.probes.length) InkCheck.soon();
+}
+// redraw only these parts of the layers (device pixels: [x, y, w, h]), with everything that touches them, in the right order
+function paintRects(rects, probe){
+  const b = r => [(r[0] / dpr - MX - inkAt.ox) / inkAt.z - 8 / inkAt.z, (r[1] / dpr - MY - inkAt.oy) / inkAt.z - 8 / inkAt.z, ((r[0] + r[2]) / dpr - MX - inkAt.ox) / inkAt.z + 8 / inkAt.z, ((r[1] + r[3]) / dpr - MY - inkAt.oy) / inkAt.z + 8 / inkAt.z];
+  for(const ctx of [inkCtx, hlmCtx]){
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for(const r of rects) ctx.clearRect(r[0], r[1], r[2], r[3]);
+    ctx.beginPath();
+    for(const r of rects) ctx.rect(r[0], r[1], r[2], r[3]);
+    ctx.clip();
+  }
+  try { paintInk(rects.map(b), probe); }
+  finally { inkCtx.restore(); hlmCtx.restore(); }
+}
+// (1.88.1) strokes added or removed: only their part of the layers. The layers are bigger than the screen now, and drawing
+// all of it after every stroke would have made writing slower.
+function inkBoxes(boxes){
+  if(!cur || !inkAt.ok || cam.z !== inkAt.z || inkAt.xf) return drawInk();
+  const w = inkCv.width, h = inkCv.height, rects = [];
+  if(boxes.length > 12) boxes = [boxes.reduce((a, b) => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])])];
+  for(const q of boxes){
+    const x0 = Math.max(0, Math.floor(dpr * (q[0] * inkAt.z + inkAt.ox + MX)) - 2), y0 = Math.max(0, Math.floor(dpr * (q[1] * inkAt.z + inkAt.oy + MY)) - 2);
+    const x1 = Math.min(w, Math.ceil(dpr * (q[2] * inkAt.z + inkAt.ox + MX)) + 2), y1 = Math.min(h, Math.ceil(dpr * (q[3] * inkAt.z + inkAt.oy + MY)) + 2);
+    if(x1 > x0 && y1 > y0) rects.push([x0, y0, x1 - x0, y1 - y0]);
+  }
+  if(!rects.length) return;
+  paintRects(rects, true);
+  inkAt.parts++;
+  if(InkCheck.probes.length) InkCheck.soon();
+}
+/* (1.88.1) Moving around a page. Every frame of a pan used to clear the ink layer and fill every stroke on screen again, which
+   is what made pages with a lot of writing lag: the code itself takes about 3 ms, turning the strokes into pixels far longer.
+   Now the picture already drawn is reused:
+   - pan: the layers are bigger than the screen (MX, MY) and just slide, by whole device pixels so they stay sharp. Only when
+     the edge gets near is the picture moved back and the strip that came into view drawn. Through a helper canvas and not
+     onto itself: Safari has had trouble with a canvas drawing itself in some composite modes.
+   - pinch: the layers are stretched with CSS, and drawn again when the zoom stops, or sooner if empty edges would show.
+   When the page stops, the camera settles on the same whole device pixel, so nothing has to be drawn again. Any change to the
+   page goes through invalidate() or inkBoxes() as before. */
+function shiftLayer(cv, ctx, dx, dy){
+  if(inkScratch.width !== cv.width || inkScratch.height !== cv.height){ inkScratch.width = cv.width; inkScratch.height = cv.height; }
+  const sc = inkScratch.getContext('2d');
+  sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(0, 0, cv.width, cv.height); sc.drawImage(cv, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(inkScratch, dx, dy);
+}
+function moveInk(){
+  if(!cur || !inkAt.ok) return drawInk();
+  inkSettle();
+  if(cam.z !== inkAt.z || inkAt.xf){
+    const k = cam.z / inkAt.z, tx = cam.ox - k * (inkAt.ox + MX), ty = cam.oy - k * (inkAt.oy + MY);
+    const gaps = tx > 0 || ty > 0 || tx + (W + 2 * MX) * k < W || ty + (H + 2 * MY) * k < H;
+    if((gaps || k > 1.6) && performance.now() - inkAt.t > 160) return drawInk();
+    inkAt.xf = true;
+    setInkXf(`translate(${tx}px,${ty}px) scale(${k})`);
+    inkAt.scales++;
+    return;
+  }
+  const [sx, sy] = slideOf(inkAt);
+  if(Math.abs(sx) <= MX * 0.7 && Math.abs(sy) <= MY * 0.7){
+    setInkXf(`translate(${sx - MX}px,${sy - MY}px)`);
+    inkAt.slides++;
+    return;
+  }
+  const w = inkCv.width, h = inkCv.height, dx = Math.round(sx * dpr), dy = Math.round(sy * dpr);
+  if(Math.abs(dx) * 2 >= w || Math.abs(dy) * 2 >= h) return drawInk();
+  if(!inkScratch) inkScratch = document.createElement('canvas');
+  shiftLayer(inkCv, inkCtx, dx, dy);
+  if(hlmUsed) shiftLayer(hlmCv, hlmCtx, dx, dy);
+  inkAt.ox += sx; inkAt.oy += sy; inkAt.moves++;
+  setInkXf(`translate(${-MX}px,${-MY}px)`);
+  InkCheck.probes = InkCheck.probes.map(q => [q[0] + dx, q[1] + dy]).filter(q => q[0] >= 1 && q[1] >= 1 && q[0] < w - 1 && q[1] < h - 1);
+  const rects = [];
+  if(dx > 0) rects.push([0, 0, dx, h]); else if(dx < 0) rects.push([w + dx, 0, -dx, h]);
+  if(dy > 0) rects.push([0, 0, w, dy]); else if(dy < 0) rects.push([0, h + dy, w, -dy]);
+  if(rects.length) paintRects(rects, false);
+}
+function inkSettle(){
+  clearTimeout(inkSettleT);
+  inkSettleT = setTimeout(() => {
+    inkSettleT = 0;
+    if(inkScratch){ inkScratch.width = inkScratch.height = 1; inkScratch = null; }   // back to the canvas memory used at rest
+    if(!cur) return;
+    if(inkAt.xf || cam.z !== inkAt.z) invalidate(1, 1, 0);
+    else {
+      // settle on the whole device pixel the layers are at, so the ink and the pictures line up exactly
+      const [sx, sy] = slideOf(inkAt), nx = inkAt.ox + sx, ny = inkAt.oy + sy;
+      if(!act && (nx !== cam.ox || ny !== cam.oy)){ cam.ox = nx; cam.oy = ny; invalidateMove(); }   // the frame after this finds nothing to change, so this ends
+      if(InkCheck.probes.length) InkCheck.soon();
+    }
+    geoTrim();
+  }, 120);
 }
 
 /* Imported pages/photos: only the ones on or near the screen hold a decoded picture.
@@ -645,12 +820,26 @@ function contentBox(){
 /* =====================================================================
    Edits and undo
    ===================================================================== */
+// (1.88.1) the parts of the ink layers a change touches; null = draw everything (pictures change the ink colour on them,
+// filled shapes change how highlights blend, marks group with marks elsewhere)
+function dirtyBoxes(pairs){
+  const out = [];
+  for(const [id, it] of pairs){
+    for(const x of [cur.items.get(id), it]){
+      if(!x || x.t === 'x' || x.t === 'm' || x.t === 'tp') continue;
+      if(x.t !== 's' || x.mk || inkPass(x) === 2) return null;
+      out.push(geoOf(x).b);
+    }
+  }
+  return out;
+}
 function setItems(pairs){
+  const dirty = dirtyBoxes(pairs);
   for(const [id, it] of pairs){
     if(it){ if(!cur.items.has(id)) freshItems.set(id, Date.now()); cur.items.set(id, it); if(it.t !== 's') itemEl(it); cur.lastId = id; }
     else { cur.items.delete(id); geo.delete(id); dropEl(id); freshItems.delete(id); }
   }
-  changed();
+  changed(dirty);
 }
 function commit(before, after){
   cur.undo.push({b: before, a: after});
@@ -675,7 +864,12 @@ function redo(){
   setItems(op.a); cur.undo.push(op); clearSel(); updUndo();
 }
 function updUndo(){ $('undo').disabled = !cur || !cur.undo.length; $('redo').disabled = !cur || !cur.redo.length; }
-function changed(){ if(cur) cur.lx = undefined; slPages = null; lastLocalEdit = Date.now(); invalidate(0, 1, 1); saveContentSoon(); refreshPaper(); markBadgeSoon(); hwSoon(); }
+function changed(dirty){
+  if(cur) cur.lx = undefined;
+  slPages = null; lastLocalEdit = Date.now();
+  if(dirty){ need.boxes.push(...dirty); invalidate(0, 0, 1); } else invalidate(0, 1, 1);
+  saveContentSoon(); refreshPaper(); markBadgeSoon(); hwSoon();
+}
 
 async function saveContent(){
   if(!cur) return;

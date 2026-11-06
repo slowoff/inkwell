@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.88.1', '2026-11-06', ['Moving around a page is much smoother, especially on pages with a lot of writing','Zooming with two fingers is smoother too; the page sharpens when you stop','Finishing a stroke no longer redraws the whole page']],
   ['1.88', '2026-11-05', ['A warning now stays up if changes cannot be saved on this device, and Inkwell keeps trying','Uploads that take too long are split up instead of getting stuck','Drive now also keeps a copy of your notes for each day of the week','Tables from Claude become real tables on the page','The Claude panel opens beside a toolbar on the side','Settings shows Problems when something goes wrong','Security fixes']],
   ['1.87', '2026-11-05', ['Movable export: choose Use my original PDF and the worksheet stays sharp with selectable text, with your writing movable on top']],
   ['1.86', '2026-11-05', ['Export as PDF: Movable saves a PDF and an SVG where every stroke, text box and formula stays a separate thing you can move in other apps. Typed text stays editable and imported pages stay fixed underneath']],

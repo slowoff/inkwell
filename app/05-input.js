@@ -122,7 +122,7 @@ function onMove(e){
       stage.classList.add('panning');
     }
     if(gesture.kind === 'pan'){
-      cam.ox += sx - gesture.lx; cam.oy += sy - gesture.ly; gesture.lx = sx; gesture.ly = sy; invalidate();
+      cam.ox += sx - gesture.lx; cam.oy += sy - gesture.ly; gesture.lx = sx; gesture.ly = sy; invalidateMove();
       if(gesture.x0 != null && panWakes(gesture.x0, sy - gesture.y0, sx - gesture.x0)) wakeSlider();
     }
     else if(gesture.kind === 'pinch') pinchMove();
@@ -130,7 +130,7 @@ function onMove(e){
     return;
   }
   if(gesture && gesture.kind === 'mousepan' && e.pointerId === gesture.id){
-    cam.ox += sx - gesture.x; cam.oy += sy - gesture.y; gesture.x = sx; gesture.y = sy; invalidate(); if(Math.abs(cam.oy - gesture.oy0) > 40) wakeSlider(); return;
+    cam.ox += sx - gesture.x; cam.oy += sy - gesture.y; gesture.x = sx; gesture.y = sy; invalidateMove(); if(Math.abs(cam.oy - gesture.oy0) > 40) wakeSlider(); return;
   }
   if(gesture && gesture.kind === 'mouseruler' && e.pointerId === gesture.id){
     prefs.ruler.cx = gesture.r.cx + sx - gesture.x; prefs.ruler.cy = gesture.r.cy + sy - gesture.y; renderRuler(); return;
@@ -208,7 +208,7 @@ function pinchMove(){
   if(zLocked() && Math.abs(Math.log(want / gesture.z0)) > 0.25) zLockSay();
   const z = zLocked() ? gesture.z0 : clamp(want, Z_MIN, zMax());
   cam.z = z; cam.ox = cx - gesture.wc[0] * z; cam.oy = cy - gesture.wc[1] * z;
-  invalidate();
+  invalidateMove();
 }
 /* (1.70) Zoom lock (double-tap the zoom %): no zooming by pinch, Ctrl+wheel, trackpad, Fit or the 100 % tap */
 const zLocked = () => prefs.zLock === true;
@@ -218,7 +218,7 @@ function zoomAt(sx, sy, z){
   z = clamp(z, Z_MIN, zMax());
   const [wx, wy] = toWorld(sx, sy);
   cam.z = z; cam.ox = sx - wx * z; cam.oy = sy - wy * z;
-  invalidate(); saveCamSoon();
+  invalidateMove(); saveCamSoon();
 }
 const ZOOM_STEP = 1.04;   // 4 % per mouse-wheel click
 stage.addEventListener('wheel', e => {
@@ -241,7 +241,7 @@ stage.addEventListener('wheel', e => {
       zoomAt(sx, sy, cam.z * Math.pow(ZOOM_STEP, -Math.sign(e.deltaY) * n));
     } else zoomAt(sx, sy, cam.z * Math.exp(-dy * 0.0085));
   }
-  else { cam.ox -= dx; cam.oy -= dy; invalidate(); saveCamSoon(); if(Math.abs(dy) > Math.abs(dx)) wakeSlider(); }
+  else { cam.ox -= dx; cam.oy -= dy; invalidateMove(); saveCamSoon(); if(Math.abs(dy) > Math.abs(dx)) wakeSlider(); }
 }, {passive: false});
 let gz0 = 1;
 stage.addEventListener('gesturestart', e => { gz0 = cam.z; e.preventDefault(); });

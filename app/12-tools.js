@@ -46,9 +46,10 @@ function renderSlider(){
   const i = slDrag ? slDrag.i : sliderIndexAt(), n = pages.length;
   const track = $('pgTrack'), th = track.clientHeight;
   const y = n > 1 ? i / (n - 1) * th : 0;
-  $('pgThumb').style.transform = `translateY(${y}px)`;
-  $('pgLabel').textContent = `${i + 1} / ${n}`;
-  $('pgLabel').style.transform = `translateY(${y}px)`;
+  // (1.88.1) only when it changed: this runs on every frame of a pan, and writing the label makes the browser lay it out again
+  if(el._y !== y){ el._y = y; $('pgThumb').style.transform = $('pgLabel').style.transform = `translateY(${y}px)`; }
+  const lbl = `${i + 1} / ${n}`;
+  if(el._lbl !== lbl){ el._lbl = lbl; $('pgLabel').textContent = lbl; }
   // violet ticks where pages have "later" marks
   const key = n + ':' + [...markCounts.entries()].join() + ':' + (cur.items.size);
   if(el._ticks !== key){

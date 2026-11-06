@@ -329,6 +329,7 @@ const HexLine = {
       off += Math.sqrt(m);
     }
     if(off / P.length > Math.max(0.08 * s, 2 / z)) return null;
+    if(HexLine.round(P, V) > Math.max(0.07 * s, 1 / z)) return null;
     const out = [];
     for(const v of V){
       const c = HexLine.corner(v[0], v[1], s) || v;
@@ -337,6 +338,21 @@ const HexLine = {
     if(out.length < 2) return V;
     if(out.length === 2 && HexLine.taken(out[0], out[1], s)) return V;
     return out;
+  },
+  // a round shape cut into pieces bulges to the same side on every piece; a shaky line or zig-zag does not.
+  // Returns how far it bulges on average (0 = not round).
+  round(P, V){
+    if(V.length < 3) return 0;
+    let sum = 0, sign = 0, i = P.indexOf(V[0]);
+    for(let k = 1; k < V.length; k++){
+      const a = V[k - 1], b = V[k], L = dist(a, b) || 1, end = P.indexOf(b, i);
+      let m = 0, n = 0;
+      for(; i < end; i++){ m += ((b[0] - a[0]) * (P[i][1] - a[1]) - (b[1] - a[1]) * (P[i][0] - a[0])) / L; n++; }
+      m /= n || 1;
+      if(sign && Math.sign(m) !== sign) return 0;
+      sign = Math.sign(m); sum += Math.abs(m);
+    }
+    return sum / (V.length - 1);
   },
   // is there already a line along a to b?
   taken(a, b, s){

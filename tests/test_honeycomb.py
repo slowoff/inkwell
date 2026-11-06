@@ -81,6 +81,110 @@ async def main():
         check(await page.inner_text('#hcSize') == '4 × 3', 'size remembered after reload')
         check(await page.inner_text('#gridSize') == '3 × 4', 'Grid size untouched')
         await page.evaluate("document.getElementById('shapePop').hidden = true")
+        # --- 1.90.2: sharp corners, also after saving (points rounded to quarter pixels) ---
+        await page.evaluate("""async () => { const W = __inkwell; await W.newPage(); W.cam.z = 3; W.cam.ox = 40; W.cam.oy = 40; W.prefs.pen.c = 'auto'; W.invalidate(); }"""); await page.wait_for_timeout(200)
+        await openmenu(page); await page.click('#hcOpen'); await page.click('#hcDraw'); await page.wait_for_timeout(60)
+        await page.mouse.move(st[0] + 60, st[1] + 60); await page.mouse.down(); await page.mouse.move(st[0] + 620, st[1] + 660, steps=4); await page.mouse.up(); await page.wait_for_timeout(200)
+        sq = await page.evaluate("""() => { const W = __inkwell, a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g);
+          // run it through the save format
+          const again = a.map(i => { let q = i; const enc = W.strokePath(q, true); return {sq: i.sq, n: (enc.match(/L/g) || []).length}; });
+          return {all: a.every(i => i.sq === 1), pts: a.reduce((m, i) => m + i.p.length / 3, 0), lines: again.reduce((m, q) => m + q.n, 0), ends: a.length}; }""")
+        check(sq['all'], 'honeycomb strokes are marked sharp')
+        check(sq['lines'] < sq['pts'] / 2, f"drawn as straight pieces between corners, not many small ones ({sq['lines']} lines for {sq['pts']} points)")
+        ends = await page.evaluate("""() => { const W = __inkwell, k = q => Math.round(q[0]) + ':' + Math.round(q[1]), c = new Map();
+          for(const i of W.cur.items.values()) if(i.t === 's' && i.g){ const n = i.p.length; if(Math.hypot(i.p[0] - i.p[n - 3], i.p[1] - i.p[n - 2]) < .5) continue; for(const q of [[i.p[0], i.p[1]], [i.p[n - 3], i.p[n - 2]]]) c.set(k(q), (c.get(k(q)) || 0) + 1); }
+          // every line end must be at a point where three lines meet: one line passing through, one ending
+          const pass = new Map(); for(const i of W.cur.items.values()) if(i.t === 's' && i.g) for(let j = 3; j < i.p.length - 3; j += 3){ const e = k([i.p[j], i.p[j + 1]]); if(c.has(e)) pass.set(e, 1); }
+          return {endsAt: c.size, bad: [...c.keys()].filter(e => !pass.has(e)).length}; }""")
+        check(ends['bad'] <= 6, f'line ends only where lines meet ({ends})')
+        shot = await page.screenshot()
+        if os.environ.get('SHOT_DIR'): open(os.environ['SHOT_DIR'] + '/hc_sharp.png', 'wb').write(shot)
+        await page.evaluate("__inkwell.flushSaves()"); await page.wait_for_timeout(500)
+        red = await page.evaluate("""async () => { const W = __inkwell, id = W.cur.id; await W.flushSaves(); await W.openPage(id); await new Promise(r => setTimeout(r, 400));
+          const a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g); return {all: a.length && a.every(i => i.sq === 1), lines: a.reduce((m, i) => m + (W.strokePath(i, true).match(/L/g) || []).length, 0)}; }""")
+        check(red['all'] and red['lines'] == sq['lines'], f"same after saving and opening again ({red['lines']} vs {sq['lines']})")
+        # --- 1.90.1: Straighten lines inside a honeycomb, on grid paper ---
+        await page.keyboard.press('Escape')
+        await page.evaluate("""async () => { const W = __inkwell; await W.newPage(); W.setTool('pen'); W.prefs.hexSnap = false; W.cam.z = 1; W.cam.ox = 40; W.cam.oy = 40; W.invalidate(); }""")
+        await page.wait_for_timeout(300)
+        await page.evaluate("document.getElementById('shapePop').hidden = false")
+        await page.evaluate("document.getElementById('shapePop').hidden = true")
+        await openmenu(page); await page.click('#hcOpen'); await page.wait_for_timeout(80)
+        check(await page.is_visible('#hexSnap2'), 'Straighten lines switch beside Draw honeycomb')
+        await page.click('#hcDraw'); await page.wait_for_timeout(80)
+        await page.mouse.move(st[0] + 60, st[1] + 60); await page.mouse.down(); await page.mouse.move(st[0] + 460, st[1] + 560, steps=5); await page.mouse.up(); await page.wait_for_timeout(200)
+        CORNERS = """() => { const W = __inkwell, a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g), h = W.HexLine.shape(a); return h && {s: h.s, c: h.corners}; }"""
+        h = await page.evaluate(CORNERS)
+        check(bool(h) and 38 <= len(h['c']) <= 50 and abs(h['s'] - 400 / (3.5 * math.sqrt(3))) < 1.5, f"honeycomb recognised from its strokes ({h and len(h['c'])} corners, side {h and h['s']:.1f})")
+        S = h['s']; C = h['c']
+        async def pen(world, wob=1.2):
+            import random
+            rnd = random.Random(4)
+            await page.evaluate("__inkwell.setTool('pen')")
+            cam = await page.evaluate("[__inkwell.cam.ox, __inkwell.cam.oy, __inkwell.cam.z]")
+            sc = lambda x, y: (st[0] + cam[0] + x * cam[2], st[1] + cam[1] + y * cam[2])
+            path = []
+            for a, b_ in zip(world, world[1:]):
+                n = max(3, int(math.hypot(b_[0] - a[0], b_[1] - a[1]) / 6))
+                path += [(a[0] + (b_[0] - a[0]) * i / n, a[1] + (b_[1] - a[1]) * i / n) for i in range(n)]
+            path.append(world[-1])
+            x, y = sc(*path[0]); await page.mouse.move(x, y); await page.mouse.down()
+            for q in path[1:]:
+                x, y = sc(q[0] + rnd.uniform(-wob, wob), q[1] + rnd.uniform(-wob, wob)); await page.mouse.move(x, y)
+            await page.mouse.up(); await page.wait_for_timeout(120)
+            r = await page.evaluate("() => { const a = [...__inkwell.cur.items.values()].filter(i => i.t === 's' && !i.g); const s = a[a.length - 1]; return s ? Array.from(s.p) : []; }")
+            return [(r[i], r[i + 1]) for i in range(0, len(r), 3)]
+        def pick_edge(C, S):
+            # two neighbouring corners well inside
+            cx = sum(q[0] for q in C) / len(C); cy = sum(q[1] for q in C) / len(C)
+            a = min(C, key=lambda q: math.hypot(q[0] - cx, q[1] - cy))
+            b_ = min((q for q in C if q is not a and abs(math.hypot(q[0] - a[0], q[1] - a[1]) - S) < 2), key=lambda q: q[0])
+            return a, b_
+        def off_a_bit(a, b_, k=0.12):
+            return [(a[0] + (b_[0] - a[0]) * k + 3, a[1] + (b_[1] - a[1]) * k + 3), (b_[0] - (b_[0] - a[0]) * k + 3, b_[1] - (b_[1] - a[1]) * k + 3)]
+        a, b_ = pick_edge(C, S)
+        P = await pen(off_a_bit(a, b_))
+        check(not (math.hypot(P[0][0] - a[0], P[0][1] - a[1]) < 0.6 and math.hypot(P[-1][0] - b_[0], P[-1][1] - b_[1]) < 0.6), 'switch off: stays as drawn')
+        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(60)
+        await openmenu(page); await page.click('#hcOpen'); await page.click('#hexSnap2'); await page.wait_for_timeout(60)
+        check(await page.evaluate("__inkwell.prefs.hexSnap === true"), 'switch beside Draw honeycomb turns it on')
+        await page.evaluate("document.getElementById('shapePop').hidden = true")
+        P = await pen(off_a_bit(a, b_))
+        check(math.hypot(P[0][0] - a[0], P[0][1] - a[1]) < 0.6 and math.hypot(P[-1][0] - b_[0], P[-1][1] - b_[1]) < 0.6, f'line over an edge lands on its corners, on grid paper ({P[0]}, {P[-1]}, want {a}, {b_})')
+        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(60)
+        # a chain across cells
+        chain = [a, b_]
+        for _ in range(2):
+            nx = [q for q in C if abs(math.hypot(q[0] - chain[-1][0], q[1] - chain[-1][1]) - S) < 2 and q not in chain]
+            chain.append(max(nx, key=lambda q: q[0]))
+        P = await pen([(q[0] + 3, q[1] - 2) for q in chain])
+        check(all(min(math.hypot(q[0] - z[0], q[1] - z[1]) for q in P) < 0.6 for z in chain), 'zig-zag: every corner on the honeycomb')
+        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(60)
+        # writing and curves stay; outside stays
+        cx, cy = (a[0] + b_[0]) / 2, (a[1] + b_[1]) / 2
+        circ = [(cx + 0.5 * S * math.cos(i / 24 * 6.283), cy + 0.5 * S * math.sin(i / 24 * 6.283)) for i in range(25)]
+        P = await pen(circ, wob=0.3)
+        far = max(min(math.hypot(q[0] - z[0], q[1] - z[1]) for q in P) for z in circ)
+        check(far < 3, f'circle inside stays as drawn ({far:.1f})')
+        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(60)
+        P = await pen([(520, 100), (600, 104)])
+        check(math.hypot(P[0][0] - 520, P[0][1] - 100) < 3, 'outside the honeycomb on grid paper: stays as drawn')
+        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(60)
+        # moved and turned: its new corners count
+        await page.evaluate("""() => { const W = __inkwell, A = 0.5, cx = 250, cy = 300, c = Math.cos(A), s = Math.sin(A);
+          W.replaceItems([...W.cur.items.values()].filter(i => i.t === 's' && i.g).map(i => { const p = Array.from(i.p); for(let k = 0; k < p.length; k += 3){ const x = p[k] - cx, y = p[k + 1] - cy; p[k] = cx + 40 + x * c - y * s; p[k + 1] = cy + 10 + x * s + y * c; } return Object.assign({}, i, {p}); })); }""")
+        await page.wait_for_timeout(100)
+        h2 = await page.evaluate(CORNERS)
+        check(bool(h2) and abs(h2['s'] - S) < 1, 'still recognised after moving and turning it')
+        a2, b2 = pick_edge(h2['c'], h2['s'])
+        P = await pen(off_a_bit(a2, b2))
+        check(math.hypot(P[0][0] - a2[0], P[0][1] - a2[1]) < 0.6 and math.hypot(P[-1][0] - b2[0], P[-1][1] - b2[1]) < 0.6, 'turned honeycomb: lands on its new corners')
+        # other grouped shapes are not honeycombs
+        no = await page.evaluate("""() => { const W = __inkwell, mk = (id, pts) => { const p = []; for(const q of pts) p.push(q[0], q[1], .5); return {t: 's', id, g: 'gg', c: 'auto', w: 2, p}; };
+          const rows = []; for(let i = 0; i < 5; i++) rows.push(mk('r' + i, [[0, i * 40], [200, i * 40]])); for(let i = 0; i < 6; i++) rows.push(mk('c' + i, [[i * 40, 0], [i * 40, 160]]));
+          const star = [mk('st', Array.from({length: 11}, (_, i) => { const r = i % 2 ? 20 : 50, t = i * Math.PI / 5; return [r * Math.sin(t), -r * Math.cos(t)]; }))];
+          return [W.HexLine.shape(rows), W.HexLine.shape(star)]; }""")
+        check(no[0] is None and no[1] is None, f'a square grid and a star are not taken for a honeycomb ({no})')
         check(not errs, f'no page errors {errs}')
         await b.close()
     print('PASS' if not fails else f'{len(fails)} FAILED')

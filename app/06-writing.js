@@ -238,7 +238,7 @@ function eraseArea(wx, wy, R){
       if(pp.length < 6) continue;   // a lone point is just a crumb
       const np = {t: 's', id: 's' + newId(), c: it.c, w: it.w, hl: it.hl, p: pp};
       if(it.mk){ np.mk = 1; if(it.at) np.at = it.at; }
-      if(it.g) np.g = it.g;
+      if(it.g) np.g = it.g; if(it.sq) np.sq = 1;
       if(it.o) np.o = it.o;
       cur.items.set(np.id, np); act.added.set(np.id, np);
     }
@@ -306,13 +306,18 @@ function rdp(P, eps){
    Curves and small writing stay as drawn. An end far from any corner stays where it is. A line over a bond that is already
    there is only straightened, so the second line of a double bond stays beside the first. */
 const HexLine = {
-  corner(x, y, s){
+  corner(x, y, s, host){
+    if(host){
+      let best = null, bd = Infinity;
+      for(const q of host.corners){ const d = Math.hypot(q[0] - x, q[1] - y); if(d < bd){ bd = d; best = q; } }
+      return bd <= 0.5 * s ? best : null;
+    }
     let best = null, bd = Infinity;
     const see = (a, b) => { const d = Math.hypot(a - x, b - y); if(d < bd){ bd = d; best = [a, b]; } };
     hexEdges(s, x - s, y - s, x + s, y + s, (x1, y1, x2, y2) => { see(x1, y1); see(x2, y2); });
     return bd <= 0.5 * s ? best : null;
   },
-  fit(p, s, z){
+  fit(p, s, z, host){
     const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i + 1]]);
     let len = 0; for(let i = 1; i < P.length; i++) len += dist(P[i - 1], P[i]);
     if(len < 0.6 * s) return null;   // too small to be a bond (the second line of a double bond is a little shorter): writing
@@ -332,12 +337,62 @@ const HexLine = {
     if(HexLine.round(P, V) > Math.max(0.07 * s, 1 / z)) return null;
     const out = [];
     for(const v of V){
-      const c = HexLine.corner(v[0], v[1], s) || v;
+      const c = HexLine.corner(v[0], v[1], s, host) || v;
       if(!out.length || dist(out[out.length - 1], c) > 0.01) out.push(c);
     }
     if(out.length < 2) return V;
-    if(out.length === 2 && HexLine.taken(out[0], out[1], s)) return V;
+    if(out.length === 2 && HexLine.taken(out[0], out[1], s, host)) return V;
     return out;
+  },
+  /* (1.90.1) A honeycomb from Shapes works like Hex paper. It is recognised from its strokes (one group, or one closed
+     stroke) and not from a mark stored on them, so it still works after it is moved, turned or evenly resized, and on
+     honeycombs made before this. */
+  shape(items){
+    const pieces = [], corners = new Map(), ids = new Set();
+    const add = q => { const k = Math.round(q[0] * 2) + ':' + Math.round(q[1] * 2); if(!corners.has(k)) corners.set(k, q); };
+    for(const it of items){
+      ids.add(it.id);
+      const P = []; for(let i = 0; i < it.p.length; i += 3) P.push([it.p[i], it.p[i + 1]]);
+      const V = rdp(P, 0.6);
+      if(V.length > 600) return null;
+      for(let i = 0; i < V.length; i++){ add(V[i]); if(i) pieces.push([V[i - 1], V[i]]); }
+    }
+    if(pieces.length < 6) return null;
+    const L = pieces.map(q => dist(q[0], q[1])).sort((a, b) => a - b), s = L[L.length >> 1];
+    if(!(s > 2)) return null;
+    // a broken-up honeycomb (partly erased) still counts if most of it is whole
+    const whole = pieces.filter(q => Math.abs(dist(q[0], q[1]) - s) < 0.08 * s);
+    if(whole.length < pieces.length * 0.7) return null;
+    // all the lines point in three directions, 60° apart, however it is turned
+    const a0 = Math.atan2(whole[0][1][1] - whole[0][0][1], whole[0][1][0] - whole[0][0][0]);
+    const on = whole.filter(q => { const d = (Math.atan2(q[1][1] - q[0][1], q[1][0] - q[0][0]) - a0) / (Math.PI / 3); return Math.abs(d - Math.round(d)) < 0.1; });
+    if(on.length < whole.length * 0.9) return null;
+    const dirs = new Set(on.map(q => { const d = Math.round((Math.atan2(q[1][1] - q[0][1], q[1][0] - q[0][0]) - a0) / (Math.PI / 3)); return ((d % 3) + 3) % 3; }));
+    if(dirs.size < 3) return null;
+    return {s, corners: [...corners.values()], ids};
+  },
+  // the honeycomb a stroke was drawn in, if any
+  host(p){
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for(let i = 0; i < p.length; i += 3){ x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); }
+    const groups = new Map();
+    for(const it of cur.items.values()){
+      if(it.t !== 's' || it.hl || it.mk) continue;
+      if(it.g){ if(!groups.has(it.g)) groups.set(it.g, []); groups.get(it.g).push(it); }
+      else if(it.p.length >= 18){ const b = geoOf(it).b; if(!(b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) groups.set(it.id, [it]); }
+    }
+    let best = null, most = 0;
+    for(const items of groups.values()){
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      for(const it of items){ const b = geoOf(it).b; bx0 = Math.min(bx0, b[0]); by0 = Math.min(by0, b[1]); bx1 = Math.max(bx1, b[2]); by1 = Math.max(by1, b[3]); }
+      if(bx1 < x0 || bx0 > x1 || by1 < y0 || by0 > y1) continue;
+      let n = 0, m = 0;
+      for(let i = 0; i < p.length; i += 3){ m++; if(p[i] >= bx0 && p[i] <= bx1 && p[i + 1] >= by0 && p[i + 1] <= by1) n++; }
+      if(n / m < 0.6 || n / m <= most) continue;
+      const h = HexLine.shape(items);
+      if(h){ best = h; most = n / m; }
+    }
+    return best;
   },
   // a round shape cut into pieces bulges to the same side on every piece; a shaky line or zig-zag does not.
   // Returns how far it bulges on average (0 = not round).
@@ -355,10 +410,10 @@ const HexLine = {
     return sum / (V.length - 1);
   },
   // is there already a line along a to b?
-  taken(a, b, s){
+  taken(a, b, s, host){
     const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]), r = 0.15 * s;
     return [...cur.items.values()].some(it => {
-      if(it.t !== 's' || it.hl) return false;
+      if(it.t !== 's' || it.hl || (host && host.ids.has(it.id))) return false;   // the honeycomb's own lines are not bonds
       const g = geoOf(it).b;
       if(g[2] < x0 || g[0] > x1 || g[3] < y0 || g[1] > y1) return false;
       return [0.25, 0.5, 0.75].every(t => {

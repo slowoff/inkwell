@@ -662,6 +662,8 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.90.2', '2026-11-06', ['New honeycombs and straightened lines have sharp corners']],
+  ['1.90.1', '2026-11-06', ['Straighten lines now also works inside a honeycomb from Shapes, on any paper. Lines land on its own corners, also after you move or turn it']],
   ['1.90', '2026-11-06', ['Shapes: new Honeycomb. Choose rows and columns, then drag a box or tap on the page']],
   ['1.89', '2026-11-06', ['Hex paper: new switch Straighten lines under Paper. Lines you draw become straight and land on the corners of the hexagons. Curves and small writing stay as drawn']],
   ['1.88.1', '2026-11-06', ['Moving around a page is much smoother, especially on pages with a lot of writing','Zooming with two fingers is smoother too; the page sharpens when you stop','Finishing a stroke no longer redraws the whole page']],

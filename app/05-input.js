@@ -577,9 +577,10 @@ function endTool(e){
       const list = HLS.snap(a.pts, a.w).map(b => Object.assign({}, it, {id: 's' + newId(), w: b.w, p: b.p}));
       if(list.length){ addItems(list); return; }
     }
-    if(handwriting && prefs.hexSnap && cur.bg.type === 'hex'){
-      const V = HexLine.fit(a.pts, cur.bg.sy, cam.z);
-      if(V){ it.p = densify(V, false, a.isPen ? midPressure(a.pts) : shapePr()); addItems([it]); return; }
+    if(handwriting && prefs.hexSnap){
+      const host = HexLine.host(a.pts);   // (1.90.1) inside a honeycomb from Shapes: its own corners, also on other paper
+      const V = host ? HexLine.fit(a.pts, host.s, cam.z, host) : cur.bg.type === 'hex' ? HexLine.fit(a.pts, cur.bg.sy, cam.z) : null;
+      if(V){ it.p = densify(V, false, a.isPen ? midPressure(a.pts) : shapePr()); it.sq = 1; addItems([it]); return; }
     }
     addItems([it]);
     if(handwriting) WA.stroke(it);   // reference line: notes which line is being written (never moves ink)

@@ -170,7 +170,7 @@ function shapePolys(shape, b, w){
 }
 function shapeItems(shape, b){
   const w = penWidth(), polys = shapePolys(shape, b, w), g = polys.length > 1 ? 'g' + newId() : null;
-  return polys.map(([V, closed]) => { const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}; if(g) it.g = g; return it; });
+  return polys.map(([V, closed]) => { const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}; if(g) it.g = g; if(shape === 'honeycomb') it.sq = 1; return it; });
 }
 function insertShape(shape, b){
   const items = shapeItems(shape, b);
@@ -205,10 +205,8 @@ function honeycombPolys(b){
   }
   const place = q => [ox + q[0] * w / 2, oy + q[1] * s / 2];
   const out = [], used = new Set();
-  for(const [k0, e0] of edges){
-    if(used.has(k0)) continue;
-    used.add(k0);
-    const chain = [e0[0], e0[1]];
+  const walk = start => {
+    const chain = [start];
     for(;;){
       const end = chain[chain.length - 1], next = at.get(key(end[0], end[1])).find(k => !used.has(k));
       if(!next) break;
@@ -216,8 +214,13 @@ function honeycombPolys(b){
       const e = edges.get(next);
       chain.push(e[0][0] === end[0] && e[0][1] === end[1] ? e[1] : e[0]);
     }
-    out.push([chain.map(place), false]);
-  }
+    if(chain.length > 1) out.push([chain.map(place), false]);
+  };
+  // (1.90.2) start where three lines meet, so a line only ends at such a point and every plain corner is a real bend in a
+  // line: two line ends meeting at a corner would show as a round corner
+  const free = q => at.get(key(q[0], q[1])).filter(k => !used.has(k)).length;
+  for(const e of edges.values()) for(const q of e) while(free(q) % 2) walk(q);
+  for(const e of edges.values()) if(free(e[0])) walk(e[0]);
   return out;
 }
 function hcRC(){
@@ -227,6 +230,7 @@ function hcRC(){
 }
 function renderHc(){
   const [r, c] = hcRC();
+  $('hexSnap2').classList.toggle('on', !!prefs.hexSnap);
   $('hcR').textContent = r; $('hcC').textContent = c; $('hcSize').textContent = r + ' × ' + c;
   for(const st of $('hcSteps').querySelectorAll('.stepper')){
     const v = st.dataset.k === 'r' ? r : c;
@@ -277,6 +281,7 @@ $('hcSteps').addEventListener('click', e => {
   prefs.honeycomb = {r: k === 'r' ? clamp(r + d, 1, GRID_MAX) : r, c: k === 'c' ? clamp(c + d, 1, GRID_MAX) : c};
   savePrefs(); renderHc();
 });
+$('hexSnap2').addEventListener('click', () => { prefs.hexSnap = !prefs.hexSnap; savePrefs(); renderHc(); note(onOff('Straighten lines', prefs.hexSnap)); });
 $('hcOpen').addEventListener('click', () => {
   showHcPanel($('hcPanel').hidden);
   if(!$('shapePop').hidden) openPopAgain('shapePop', $('shapeBtn'));

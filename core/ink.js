@@ -99,8 +99,57 @@ function fillPath(it, svg){
 }
 // drawing order: fills first, then highlighter, then pen ink on top
 const inkPass = it => it.fl ? 2 : it.hl ? 1 : 0;
+// (1.90.2) sq:1 = sharp corners: straight lines between the stroke's corners, one even width, pointed joins, round free ends
+// (a honeycomb from Shapes). Works from the stored points, so it holds after moving, turning and saving. Older versions ignore
+// the field and draw the same stroke with slightly rounded corners.
+function sharpCorners(p){
+  const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i + 1]]);
+  const keep = (a, b, out) => {
+    let dm = 0, at = -1;
+    const ax = P[a][0], ay = P[a][1], dx = P[b][0] - ax, dy = P[b][1] - ay, L = Math.hypot(dx, dy);
+    for(let i = a + 1; i < b; i++){ const d = L > 1e-6 ? Math.abs((P[i][0] - ax) * dy - (P[i][1] - ay) * dx) / L : Math.hypot(P[i][0] - ax, P[i][1] - ay); if(d > dm){ dm = d; at = i; } }
+    if(dm > 0.4){ keep(a, at, out); out.push(P[at]); keep(at, b, out); }
+  };
+  const out = [P[0]]; keep(0, P.length - 1, out); out.push(P[P.length - 1]);
+  return out;
+}
+function sharpPath(it, svg){
+  const p = it.p, prs = []; for(let i = 2; i < p.length; i += 3) prs.push(p[i]); prs.sort((a, b) => a - b);
+  const r = Math.max(0.3, it.w / 2 * (0.3 + (prs[prs.length >> 1] || 0.5)));
+  let V = sharpCorners(p);
+  const closed = V.length > 3 && Math.hypot(V[0][0] - V[V.length - 1][0], V[0][1] - V[V.length - 1][1]) < 0.5;
+  if(closed) V = V.slice(0, -1);
+  const n = V.length;
+  if(n < 2) return svg ? '' : new Path2D();
+  const unit = (a, b) => { const x = b[0] - a[0], y = b[1] - a[1], l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+  const L = [], R = [];
+  for(let i = 0; i < n; i++){
+    const a = closed ? V[(i + n - 1) % n] : V[Math.max(0, i - 1)], b = closed ? V[(i + 1) % n] : V[Math.min(n - 1, i + 1)];
+    const u = i > 0 || closed ? unit(a, V[i]) : unit(V[i], b), w = i < n - 1 || closed ? unit(V[i], b) : unit(a, V[i]);
+    let nx = -(u[1] + w[1]), ny = u[0] + w[0]; const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+    const m = Math.min(4 * r, r / Math.max(0.05, nx * -w[1] + ny * w[0]));   // the point of the join, not too long on a very sharp turn
+    L.push([V[i][0] + nx * m, V[i][1] + ny * m]); R.push([V[i][0] - nx * m, V[i][1] - ny * m]);
+  }
+  const P = svg ? null : new Path2D(); let d = '';
+  const mv = q => { if(svg) d += `M${r1(q[0])} ${r1(q[1])}`; else P.moveTo(q[0], q[1]); };
+  const ln = q => { if(svg) d += `L${r1(q[0])} ${r1(q[1])}`; else P.lineTo(q[0], q[1]); };
+  const cap = (c, to) => { if(svg) d += `A${r1(r)} ${r1(r)} 0 0 0 ${r1(to[0])} ${r1(to[1])}`; else { const q = to, a0 = Math.atan2(q[1] - c[1], q[0] - c[0]) + Math.PI; P.arc(c[0], c[1], r, a0, a0 - Math.PI, true); } };
+  const close = () => { if(svg) d += 'Z'; else P.closePath(); };
+  if(closed){
+    mv(L[0]); for(let i = 1; i < n; i++) ln(L[i]); close();
+    mv(R[n - 1]); for(let i = n - 2; i >= 0; i--) ln(R[i]); close();
+  } else {
+    mv(L[0]); for(let i = 1; i < n; i++) ln(L[i]);
+    cap(V[n - 1], R[n - 1]);
+    for(let i = n - 2; i >= 0; i--) ln(R[i]);
+    cap(V[0], L[0]);
+    close();
+  }
+  return svg ? d : P;
+}
 function strokePath(it, svg){
   if(it.fl) return fillPath(it, svg);
+  if(it.sq && it.p.length >= 6) return sharpPath(it, svg);
   const {xs, ys, rs, n} = strokeShape(it);
   if(!n) return svg ? '' : new Path2D();
   let single = n === 1;

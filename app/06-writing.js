@@ -418,14 +418,15 @@ const HexLine = {
   },
   // (1.90.2) honeycombs made with 1.90 had no marks yet: they get them when their page opens
   adopt(){
-    const groups = new Map();
+    const groups = new Map(), other = new Set();
     for(const it of cur.items.values()){
-      if(it.t === 's' && it.g && !it.hl){ if(!groups.has(it.g)) groups.set(it.g, []); groups.get(it.g).push(it); }
-      else if(it.g && it.t !== 's') groups.set(it.g, null);
+      if(!it.g) continue;
+      if(it.t !== 's' || it.hl) other.add(it.g);   // text, formulas: a graph, not a honeycomb
+      else { if(!groups.has(it.g)) groups.set(it.g, []); groups.get(it.g).push(it); }
     }
     let hit = false;
-    for(const items of groups.values()){
-      if(!items || items.some(i => i.ne || i.sq || i.fl || i.c !== items[0].c || i.w !== items[0].w)) continue;
+    for(const [g, items] of groups){
+      if(other.has(g) || items.some(i => i.ne || i.sq || i.fl || i.c !== items[0].c || i.w !== items[0].w)) continue;
       const h = HexLine.shape(items);
       if(!h || h.corners.length < 10) continue;
       for(const i of items) cur.items.set(i.id, Object.assign({}, i, {sq: 1, ne: 1}));

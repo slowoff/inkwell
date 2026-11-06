@@ -113,16 +113,11 @@ function shapePolys(shape, b, w){
   }
   if(shape === 'honeycomb') return honeycombPolys(b);
   if(shape === 'grid'){
-    // (1.69) outer frame + inner row and column lines. (1.90.4, Rafael: "square boxes not wide") cells are always square:
-    // a tap makes cells of 40 screen px centred on the tap; a drag makes them as large as fit in the box, the grid starting
-    // at the corner where the drag began
+    // (1.69) outer frame + inner row and column lines; a tap makes cells of 56 × 36 screen px around the tap
     const [nr, nc] = gridRC();
     let L, T, R, B;
-    if(b.tap){ const cs = 40 / cam.z; L = b.x0 - cs * nc / 2; T = b.y0 - cs * nr / 2; R = L + cs * nc; B = T + cs * nr; }
-    else {
-      const cs = Math.min(Math.abs(b.x1 - b.x0) / nc, Math.abs(b.y1 - b.y0) / nr), gw = cs * nc, gh = cs * nr;
-      L = b.x1 >= b.x0 ? b.x0 : b.x0 - gw; T = b.y1 >= b.y0 ? b.y0 : b.y0 - gh; R = L + gw; B = T + gh;
-    }
+    if(b.tap){ const cw = 56 / cam.z, ch = 36 / cam.z; L = b.x0 - cw * nc / 2; T = b.y0 - ch * nr / 2; R = L + cw * nc; B = T + ch * nr; }
+    else { L = Math.min(b.x0, b.x1); T = Math.min(b.y0, b.y1); R = Math.max(b.x0, b.x1); B = Math.max(b.y0, b.y1); }
     if((R - L) * cam.z < 4 || (B - T) * cam.z < 4) return [];
     const out = [[[[L, T], [R, T], [R, B], [L, B]], true]];
     for(let i = 1; i < nr; i++){ const y = T + (B - T) * i / nr; out.push([[[L, y], [R, y]], false]); }
@@ -357,6 +352,16 @@ function texBox(tex, fs){
   texBoxes.set(k, r);
   return r;
 }
+/* (1.90.5, Rafael: square boxes on the graph) The graph was always 380 × 270 (× size) whatever its ranges, so the grid boxes
+   came out wider than tall (0–10 by 0–10: 38 × 27). Now one step on x is as long as one step on y, so every box is square
+   (with different steps, e.g. 1 on x and 10 on y, a box is still square: one step each way). The graph keeps about the area
+   it had, and its longer side stays within 570 (× size). Ranges with no usable steps keep the old size. */
+function graphSize(o, S){
+  const nx = (o.x1 - o.x0) / o.xs, ny = (o.y1 - o.y0) / o.ys;
+  if(!(nx > 0 && ny > 0 && isFinite(nx) && isFinite(ny)) || nx > 200 || ny > 200) return [380 * S, 270 * S];
+  const u = Math.min(Math.sqrt(380 * 270 / (nx * ny)), 570 / Math.max(nx, ny));
+  return [nx * u * S, ny * u * S];
+}
 function buildGraph(o, gx, gy){
   const L = Object.assign({}, GRAPH_LOOK, o.look || {}), S = L.size > 0 ? L.size : 1;
   const items = [], w = penWidth(), axisC = L.axC || 'auto', id = p => p + newId() + Math.random().toString(36).slice(2, 5);
@@ -398,7 +403,7 @@ function buildGraph(o, gx, gy){
     formula(labelTex(o.lx), ends.x[0] - 26, ends.x[1] - 6, 18);
     return finish();
   }
-  const GW = 380 * S, GH = 270 * S;
+  const [GW, GH] = graphSize(o, S);
   let {x0, x1, xs, y0, y1, ys} = o;
   const X = v => gx + (v - x0) / (x1 - x0) * GW, Y = v => gy + GH - (v - y0) / (y1 - y0) * GH;
   const ax = X(clamp(0, x0, x1)), ay = Y(clamp(0, y0, y1));
@@ -582,8 +587,8 @@ $('gInsert').addEventListener('click', () => {
   if(!cur) return;
   const g = readGraph();
   if(g.err){ $('gFnMsg').textContent = g.err; return; }
-  const S = g.o.look.size || 1;
-  const [gx, gy] = toWorld(Math.max(40, W / 2 - 240 * S * cam.z), Math.max(40, H / 2 - 170 * S * cam.z));
+  const S = g.o.look.size || 1, [gw, gh] = g.o.type === '3d' ? [380 * S, 270 * S] : graphSize(g.o, S);
+  const [gx, gy] = toWorld(Math.max(40, W / 2 - (gw / 2 + 50 * S) * cam.z), Math.max(40, H / 2 - (gh / 2 + 35 * S) * cam.z));
   const items = buildGraph(g.o, gx, gy);
   saveGraphForm(); saveGraphForm.flush();
   hideModal('graphDlg');

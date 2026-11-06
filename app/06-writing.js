@@ -330,7 +330,7 @@ const HexLine = {
     const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i + 1]]);
     let len = 0; for(let i = 1; i < P.length; i++) len += dist(P[i - 1], P[i]);
     if(len < 0.6 * s) return null;   // too small to be a bond (the second line of a double bond is a little shorter): writing
-    const V = rdp(P, Math.max(0.22 * s, 3 / z));
+    const V = dropStraight(rdp(P, Math.max(0.22 * s, 3 / z)));
     while(V.length > 2 && dist(V[0], V[1]) < 0.3 * s) V.shift();   // the little hook when the pen lands or lifts
     while(V.length > 2 && dist(V[V.length - 1], V[V.length - 2]) < 0.3 * s) V.pop();
     if(V.length > 15) return null;
@@ -374,7 +374,7 @@ const HexLine = {
     for(const it of items){
       ids.add(it.id);
       const P = []; for(let i = 0; i < it.p.length; i += 3) P.push([it.p[i], it.p[i + 1]]);
-      const V = rdp(P, 0.6);
+      const V = dropStraight(rdp(P, 0.6));
       if(V.length > 600) return null;
       for(let i = 0; i < V.length; i++){ add(V[i]); if(i) pieces.push([V[i - 1], V[i]]); }
     }
@@ -453,7 +453,7 @@ const HexLine = {
   taken(a, b, s, host){
     const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]), r = 0.15 * s;
     return [...cur.items.values()].some(it => {
-      if(it.t !== 's' || it.hl || (host && host.ids.has(it.id))) return false;   // the honeycomb's own lines are not bonds
+      if(it.t !== 's' || it.hl || it.ne) return false;   // the lines of a honeycomb or graph are not bonds
       const g = geoOf(it).b;
       if(g[2] < x0 || g[0] > x1 || g[3] < y0 || g[1] > y1) return false;
       return [0.25, 0.5, 0.75].every(t => {

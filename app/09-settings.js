@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.90.3', '2026-11-06', ['Honeycombs from Shapes: lines now snap on them the same as on Hex paper. Before, a saved honeycomb was often no longer recognised, so nothing snapped']],
   ['1.90.2', '2026-11-06', ['Honeycombs and straightened lines have sharp corners','The eraser removes what you draw on a honeycomb and leaves the honeycomb, like on a graph. To remove it, loop around all of it and delete','Select tool: a loop around writing on a honeycomb or graph takes only the writing','Straighten lines leaves your writing alone: nothing snaps on an imported page, and on Hex paper a line must be about a bond long with both ends near corners','Small slowly written strokes like a 1 no longer turn into a straight line when you pause']],
   ['1.90.1', '2026-11-06', ['Straighten lines now also works inside a honeycomb from Shapes, on any paper. Lines land on its own corners, also after you move or turn it']],
   ['1.90', '2026-11-06', ['Shapes: new Honeycomb. Choose rows and columns, then drag a box or tap on the page']],

@@ -102,6 +102,18 @@ const inkPass = it => it.fl ? 2 : it.hl ? 1 : 0;
 // (1.90.2) sq:1 = sharp corners: straight lines between the stroke's corners, one even width, pointed joins, round free ends
 // (a honeycomb from Shapes). Works from the stored points, so it holds after moving, turning and saving. Older versions ignore
 // the field and draw the same stroke with slightly rounded corners.
+// (1.90.3) Cutting a zig-zag into straight pieces can stop halfway along an edge: when an edge runs parallel to the line it is
+// measured from, all its points are equally far off and rounding (saved points are on quarter pixels) picks any of them.
+// Such a stop is no corner: the line hardly turns there.
+function dropStraight(V, turn = 0.35){
+  const out = V.slice();
+  for(let i = 1; i < out.length - 1;){
+    const a = Math.atan2(out[i][1] - out[i - 1][1], out[i][0] - out[i - 1][0]), b = Math.atan2(out[i + 1][1] - out[i][1], out[i + 1][0] - out[i][0]);
+    let d = Math.abs(b - a); if(d > Math.PI) d = 2 * Math.PI - d;
+    if(d < turn) out.splice(i, 1); else i++;
+  }
+  return out;
+}
 function sharpCorners(p){
   const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i + 1]]);
   const keep = (a, b, out) => {
@@ -111,7 +123,7 @@ function sharpCorners(p){
     if(dm > 0.4){ keep(a, at, out); out.push(P[at]); keep(at, b, out); }
   };
   const out = [P[0]]; keep(0, P.length - 1, out); out.push(P[P.length - 1]);
-  return out;
+  return dropStraight(out);
 }
 function sharpPath(it, svg){
   const p = it.p, prs = []; for(let i = 2; i < p.length; i += 3) prs.push(p[i]); prs.sort((a, b) => a - b);
@@ -260,5 +272,5 @@ function hexEdges(s, xa, ya, xb, yb, seg){
   }
 }
 
-return {hexEdges, encPts, decPts, ser, opOf, deser, r1, shapePoint, strokeShape, fillPath, inkPass, strokePath, inkOutline, inkPieces, strokeBox};
+return {dropStraight, hexEdges, encPts, decPts, ser, opOf, deser, r1, shapePoint, strokeShape, fillPath, inkPass, strokePath, inkOutline, inkPieces, strokeBox};
 });

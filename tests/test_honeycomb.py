@@ -103,6 +103,33 @@ async def main():
         red = await page.evaluate("""async () => { const W = __inkwell, id = W.cur.id; await W.flushSaves(); await W.newPage(); await new Promise(r => setTimeout(r, 200)); await W.openPage(id); await new Promise(r => setTimeout(r, 400));
           const a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g); return {all: a.length && a.every(i => i.sq === 1), lines: a.reduce((m, i) => m + (W.strokePath(i, true).match(/L/g) || []).length, 0)}; }""")
         check(red['all'] and abs(red['lines'] - sq['lines']) <= sq['lines'] * 0.08, f"same after saving and opening again ({red['lines']} vs {sq['lines']})")
+        # --- 1.90.3: a honeycomb the size of a real one, after saving: recognised, and no false corners halfway along an edge ---
+        for (nr, nc, sd) in [(8, 8, 18.5), (3, 4, 18.5), (5, 6, 12.0), (2, 2, 30.0), (12, 10, 15.0)]:
+            await page.evaluate("""async ([r, c]) => { const W = __inkwell; await W.newPage(); W.prefs.honeycomb = {r, c}; W.cam.z = 1; W.cam.ox = 40; W.cam.oy = 40; W.invalidate(); }""", [nr, nc]); await page.wait_for_timeout(150)
+            await openmenu(page); await page.click('#hcOpen'); await page.click('#hcDraw'); await page.wait_for_timeout(60)
+            wd = (nc + (0.5 if nr > 1 else 0)) * math.sqrt(3) * sd; hg = (1.5 * nr + 0.5) * sd
+            await page.mouse.move(st[0] + 40, st[1] + 40); await page.mouse.down(); await page.mouse.move(st[0] + 40 + wd, st[1] + 40 + hg, steps=4); await page.mouse.up(); await page.wait_for_timeout(150)
+            m = await page.evaluate("""async () => { const W = __inkwell, id = W.cur.id; await W.flushSaves(); await W.newPage(); await new Promise(r => setTimeout(r, 150)); await W.openPage(id); await new Promise(r => setTimeout(r, 200));
+              const a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g), h = W.HexLine.measure(a); return h && {s: h.s, n: h.corners.length}; }""")
+            E = set()
+            for r_ in range(nr):
+                for c in range(nc):
+                    x = 2 * c + (r_ & 1); y = 3 * r_
+                    for q in [(x + 1, y), (x + 2, y + 1), (x + 2, y + 3), (x + 1, y + 4), (x, y + 3), (x, y + 1)]: E.add(q)
+            check(bool(m) and abs(m['s'] - sd) < 1 and len(E) <= m['n'] <= len(E) * 1.1, f'{nr} x {nc}, side {sd:.0f}, after saving: recognised with its real corners ({m}, want {len(E)})')
+            if (nr, nc) == (8, 8):
+                # and a real pen stroke on it lands, like on Hex paper
+                await page.evaluate("__inkwell.prefs.hexSnap = true; __inkwell.setTool('pen')")
+                cc = await page.evaluate("""() => { const W = __inkwell, a = [...W.cur.items.values()].filter(i => i.t === 's' && i.g), h = W.HexLine.measure(a), C = h.corners, xs = C.map(q => q[0]), ys = C.map(q => q[1]), mx = (Math.min(...xs) + Math.max(...xs)) / 2, my = (Math.min(...ys) + Math.max(...ys)) / 2;
+                  const p = C.reduce((m, q) => Math.hypot(q[0] - mx, q[1] - my) < Math.hypot(m[0] - mx, m[1] - my) ? q : m), o = C.find(q => q !== p && Math.abs(Math.hypot(q[0] - p[0], q[1] - p[1]) - h.s) < 1); return [p, o, W.cam.ox, W.cam.oy, W.cam.z]; }""")
+                A, B, ox, oy, zz = cc
+                sc = lambda x, y: (st[0] + ox + x * zz, st[1] + oy + y * zz)
+                await page.mouse.move(*sc(A[0] + 2, A[1] + 2)); await page.mouse.down()
+                for i in range(1, 9): await page.mouse.move(*sc(A[0] + (B[0] - A[0]) * i / 8 + 2, A[1] + (B[1] - A[1]) * i / 8 + 1.5))
+                await page.mouse.up(); await page.wait_for_timeout(120)
+                pp = await page.evaluate("() => { const a = [...__inkwell.cur.items.values()].filter(i => i.t === 's' && !i.g); return a.length ? Array.from(a[a.length - 1].p) : []; }")
+                check(len(pp) > 3 and math.hypot(pp[0] - A[0], pp[1] - A[1]) < 0.6 and math.hypot(pp[-3] - B[0], pp[-2] - B[1]) < 0.6, 'pen stroke on a saved honeycomb lands on its corners')
+        await page.evaluate("__inkwell.prefs.honeycomb = {r: 4, c: 3}; __inkwell.prefs.hexSnap = false")
         # --- 1.90.1: Straighten lines inside a honeycomb, on grid paper ---
         await page.keyboard.press('Escape')
         await page.evaluate("""async () => { const W = __inkwell; await W.newPage(); W.setTool('pen'); W.prefs.hexSnap = false; W.cam.z = 1; W.cam.ox = 40; W.cam.oy = 40; W.invalidate(); }""")

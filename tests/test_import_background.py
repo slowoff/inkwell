@@ -120,10 +120,17 @@ async def main():
         await page.click('#impGo')
         await page.wait_for_function(f"({IMGS}).length >= 2", timeout=30000)
         await page.wait_for_function("!document.getElementById('toastBtn').hidden && document.getElementById('toastBtn').textContent === 'Stop'", timeout=20000)
+        # (1.90.4) the progress line counts up in place: no pop-in replayed per page, Stop holds still
+        BTN = "(() => { const r = document.getElementById('toastBtn').getBoundingClientRect(); return [r.left, r.top, document.getElementById('toastText').textContent, document.getElementById('toast').getAnimations().filter(a => a.playState === 'running').length]; })()"
+        a0 = await page.evaluate(BTN)
+        await page.wait_for_function(f"({IMGS}).length >= 3", timeout=30000)
+        await page.wait_for_timeout(60)
+        a1 = await page.evaluate(BTN)
+        check(a1[2] != a0[2] and a1[3] == 0 and abs(a1[0] - a0[0]) < 0.5 and abs(a1[1] - a0[1]) < 0.5, f'Stop holds still while the count goes up ({a0} -> {a1})')
         await page.click('#toastBtn')
         await wait_done(); await page.wait_for_timeout(500)
         n = await page.evaluate(f"({IMGS}).length")
-        check(2 <= n < 12, f'Stop ends the import and keeps what is placed ({n} pages)')
+        check(3 <= n < 12, f'Stop ends the import and keeps what is placed ({n} pages)')
 
         # --- leave the page while it runs
         await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(400)

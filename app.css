@@ -428,7 +428,7 @@ select.pf-ls option:checked{background:#9fbbe8}
 @media (hover:hover){.link-list button:hover{background:var(--panel2)}}
 .link-list small{display:block;color:var(--faint);font-size:12px;margin-top:2px}
 
-.toast{position:fixed;left:50%;bottom:calc(18px + var(--sab));transform:translateX(-50%);z-index:40;background:var(--fg);color:var(--paper);padding:10px 14px;border-radius:12px;font-size:14px;max-width:min(520px,calc(100% - 32px));box-shadow:var(--shadow);display:flex;gap:12px;align-items:center}
+.toast{position:fixed;left:50%;bottom:calc(18px + var(--sab));transform:translateX(-50%);z-index:40;background:var(--fg);color:var(--paper);padding:10px 14px;border-radius:12px;font-size:14px;max-width:min(520px,calc(100% - 32px));box-shadow:var(--shadow);display:flex;gap:12px;align-items:center;font-variant-numeric:tabular-nums}
 .toast button{color:var(--paper);font-weight:700;text-decoration:underline;text-underline-offset:3px}
 /* (1.72) short message when a switch or setting changes ("Finger draws on"): smaller than a toast, just above one */
 .note{position:fixed;left:50%;bottom:calc(18px + var(--sab) + var(--up,0px));transform:translateX(-50%);z-index:41;background:var(--fg);color:var(--paper);padding:7px 13px;border-radius:999px;font-size:13px;font-weight:600;line-height:1.3;max-width:min(420px,calc(100% - 32px));box-shadow:var(--shadow);pointer-events:none;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1125,7 +1125,11 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 /* (1.88) */
 .save-warn{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + var(--sat));z-index:45;width:min(560px,calc(100vw - 24px));padding:10px 14px;border-radius:10px;background:var(--danger);color:#fff;font-size:14px;font-weight:600;line-height:1.35;box-shadow:var(--shadow)}
 .save-warn[hidden]{display:none}
+.save-warn:not([hidden]){display:flex;align-items:center;gap:12px}
+.save-warn .sw-text{flex:1}
+.save-warn .sw-btn{flex:none;background:#fff;color:var(--danger);font-weight:700;border-radius:8px;padding:7px 12px;min-height:34px}
 .problems{margin:0;overflow:auto;white-space:pre-wrap;word-break:break-word;font:12px/1.45 var(--f-mono);max-height:60vh}
 .it-text table,.am.bot table{border-collapse:collapse}
 .it-text th,.it-text td{border:1px solid var(--line);padding:3px 7px;text-align:left;vertical-align:top}
 .it-text th{font-weight:600}
+@media (any-pointer:coarse){ .save-warn .sw-btn{min-height:44px} }

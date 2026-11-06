@@ -787,9 +787,12 @@ let pendingCurrentReload = false, lastLocalEdit = 0;
    Pages (content docs) merge item by item; page/section/notebook docs merge field by field.
    Both sides changed the same item: the newer side wins, except text boxes, where the other version is kept as a copy. */
 const MERGE_KINDS = new Set(['content', 'page', 'sec', 'nb']);
-const baseGet = id => IDB.get('meta', 'base:' + id);
-const baseSet = (id, d, ts) => IDB.put('meta', {d, ts: ts || null}, 'base:' + id);
-const baseDel = id => IDB.del('meta', 'base:' + id);
+// (1.90.4) baseTs: the server time of each merge base read or written this session ('new' = none), kept in memory so
+// SaveWatch.cloud can upload safely while the device storage cannot be read
+const baseTs = new Map();
+const baseGet = id => IDB.get('meta', 'base:' + id).then(b => { baseTs.set(id, b ? (b.ts || null) : 'new'); return b; });
+const baseSet = (id, d, ts) => { baseTs.set(id, ts || null); return IDB.put('meta', {d, ts: ts || null}, 'base:' + id); };
+const baseDel = id => { baseTs.delete(id); return IDB.del('meta', 'base:' + id); };
 // b, l, r: content data with serialised items. lNew: the local side was edited more recently.
 // (1.59.1) strokes and other items added on this device in the last few minutes (page id + time). A merge never
 // drops one of these just because the other side lacks it: two devices uploading at almost the same moment could

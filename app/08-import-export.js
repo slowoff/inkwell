@@ -270,7 +270,7 @@ $('impGo').addEventListener('click', async () => {
   impJobs.add(job);
   const total = pages ? pages.length : want ? want.size : src.n;
   const about = !pages && !want && total > 1 ? 'about ' : '';
-  const say = () => toast(`Placing page ${job.n + 1} of ${about}${Math.max(total, job.n + 1)}…`, 'Stop', () => { job.stopped = 'user'; });
+  const say = () => toast(`Placing page ${job.n + 1} of ${about}${Math.max(total, job.n + 1)}…`, 'Stop', () => { job.stopped = 'user'; }, true);
   let err = null;
   try {
     if(src.kind === 'pdf'){

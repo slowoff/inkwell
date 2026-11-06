@@ -26,14 +26,16 @@ const LSset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 const PULL_OVERLAP = 60000, PULL_LIST = 1000;
 
 let toastTimer;
-function toast(msg, btnLabel, onBtn){
+// (1.90.4) update = a progress line replacing itself ("Placing page 3 of 12"): new text without popping in again, so its
+// button holds still while it counts up (it jumped on every page, which made Stop hard to tap)
+function toast(msg, btnLabel, onBtn, update){
   const t = $('toast'), b = $('toastBtn');
   $('toastText').textContent = msg;
   if(btnLabel){ b.hidden = false; b.textContent = btnLabel; b.onclick = () => { t.hidden = true; onBtn(); }; }
   else b.hidden = true;
   const was = !t.hidden;
   t.hidden = false;
-  if(was){ t.classList.remove('pop-in'); void t.offsetWidth; }   // a new message pops in again
+  if(was && !update){ t.classList.remove('pop-in'); void t.offsetWidth; }   // a new message pops in again
   t.classList.add('pop-in');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.hidden = true, btnLabel ? 9000 : 3800);

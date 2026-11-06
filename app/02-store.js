@@ -42,50 +42,74 @@ const Acct = {
   }
 };
 const IDB = {
-  db: null, mem: null,
+  db: null, mem: null, opening: null, reopened: 0,
   stamp: 0,   // (1.72) goes up with every change to the docs store, so a reader can tell that nothing changed since it last looked
+  // (1.90.4) the connection to the database, also used to open it again after iPadOS cut it (see lost / reopen)
+  connect(){
+    return new Promise((res, rej) => {
+      // version 2 (1.60.2): index 'dirty' on docs, so a sync finds the unsynced docs without reading all of them
+      const r = indexedDB.open(Acct.name(), 2);
+      let waitT = 0;
+      r.onupgradeneeded = e => {
+        const d = r.result;
+        if(e.oldVersion < 1){
+          d.createObjectStore('docs', {keyPath: 'id'});
+          d.createObjectStore('assets', {keyPath: 'id'});
+          d.createObjectStore('meta');
+        }
+        const st = r.transaction.objectStore('docs');
+        if(!st.indexNames.contains('dirty')) st.createIndex('dirty', 'dirty');
+        // only numbers go into the index: any older "dirty: true" becomes 1, so no unsynced doc is missed
+        if(e.oldVersion >= 1) st.openCursor().onsuccess = ev => {
+          const c = ev.target.result; if(!c) return;
+          const v = c.value;
+          if(v.dirty && v.dirty !== 1){ v.dirty = 1; c.update(v); }
+          c.continue();
+        };
+      };
+      r.onsuccess = () => {
+        clearTimeout(waitT);
+        const db = r.result;
+        // a later version opened in another tab: let it upgrade (save first, then reload into the new version)
+        db.onversionchange = () => { flushSaves().catch(() => {}).finally(() => { db.close(); location.reload(); }); };
+        // (1.90.4) the browser closed the connection by itself (storage lost): the next step opens it again
+        db.onclose = () => { console.warn('storage connection closed'); if(this.db === db) this.db = null; };
+        res(db);
+      };
+      r.onerror = () => { clearTimeout(waitT); rej(r.error); };
+      // (1.60.2) another tab still runs the previous version: wait for it (it reloads by itself after the update)
+      // instead of giving up and keeping notes in memory only, as before
+      r.onblocked = () => { clearTimeout(waitT); waitT = setTimeout(() => toast('Updating your notes: close other Inkwell tabs or windows to continue.'), 2500); };
+    });
+  },
   async open(){
-    try {
-      this.db = await new Promise((res, rej) => {
-        // version 2 (1.60.2): index 'dirty' on docs, so a sync finds the unsynced docs without reading all of them
-        const r = indexedDB.open(Acct.name(), 2);
-        let waitT = 0;
-        r.onupgradeneeded = e => {
-          const d = r.result;
-          if(e.oldVersion < 1){
-            d.createObjectStore('docs', {keyPath: 'id'});
-            d.createObjectStore('assets', {keyPath: 'id'});
-            d.createObjectStore('meta');
-          }
-          const st = r.transaction.objectStore('docs');
-          if(!st.indexNames.contains('dirty')) st.createIndex('dirty', 'dirty');
-          // only numbers go into the index: any older "dirty: true" becomes 1, so no unsynced doc is missed
-          if(e.oldVersion >= 1) st.openCursor().onsuccess = ev => {
-            const c = ev.target.result; if(!c) return;
-            const v = c.value;
-            if(v.dirty && v.dirty !== 1){ v.dirty = 1; c.update(v); }
-            c.continue();
-          };
-        };
-        r.onsuccess = () => {
-          clearTimeout(waitT);
-          const db = r.result;
-          // a later version opened in another tab: let it upgrade (save first, then reload into the new version)
-          db.onversionchange = () => { flushSaves().catch(() => {}).finally(() => { db.close(); location.reload(); }); };
-          res(db);
-        };
-        r.onerror = () => { clearTimeout(waitT); rej(r.error); };
-        // (1.60.2) another tab still runs the previous version: wait for it (it reloads by itself after the update)
-        // instead of giving up and keeping notes in memory only, as before
-        r.onblocked = () => { clearTimeout(waitT); waitT = setTimeout(() => toast('Updating your notes: close other Inkwell tabs or windows to continue.'), 2500); };
-      });
-    } catch(e){
+    this.opening = this.connect().then(db => { this.db = db; }).finally(() => { this.opening = null; });
+    try { await this.opening; }
+    catch(e){
       this.mem = {docs: new Map(), assets: new Map(), meta: new Map()};
       toast('Storage is blocked in this browser. Notes will be lost when you close it.');
     }
   },
-  req(store, mode, fn){
-    return new Promise((res, rej) => {
+  /* (1.90.4) iPadOS can cut a running app off from its storage ("UnknownError: Connection to Indexed Database server lost",
+     e.g. after the app was in the background or the iPad ran short of memory). Every save failed from then on, until the app
+     was closed, and what was written in between was lost with it. A step that fails that way now opens the database again
+     and runs once more. */
+  lost(e){
+    const n = (e && e.name) || '', m = String((e && e.message) || '');
+    return n === 'UnknownError' || n === 'InvalidStateError' || /connection|server lost|closing|is closed/i.test(m);
+  },
+  reopen(){
+    if(this.mem) return Promise.resolve();
+    if(!this.opening){
+      const old = this.db; this.db = null;
+      try { if(old) old.close(); } catch(e){}
+      this.opening = this.connect().then(db => { this.db = db; this.reopened++; console.warn('storage opened again'); }).finally(() => { this.opening = null; });
+    }
+    return this.opening;
+  },
+  req(store, mode, fn, again){
+    return (this.db ? Promise.resolve() : this.reopen()).then(() => new Promise((res, rej) => {
+      if(!this.db) throw Object.assign(new Error('storage connection is closed'), {name: 'InvalidStateError'});
       const t = this.db.transaction(store, mode);
       const r = fn(t.objectStore(store));
       let out;
@@ -93,6 +117,10 @@ const IDB = {
       t.oncomplete = () => res(out);
       t.onerror = () => rej(t.error);
       t.onabort = () => rej(t.error || new Error('Storage write aborted'));
+    })).catch(e => {
+      if(again || this.mem || !this.lost(e)) throw e;
+      console.warn('storage step failed, opening the database again', e);
+      return this.reopen().then(() => this.req(store, mode, fn, true));
     });
   },
   get(store, key){ if(this.mem) return Promise.resolve(this.mem[store].get(key)); return this.req(store, 'readonly', s => s.get(key)); },
@@ -110,15 +138,8 @@ const IDB = {
   update(store, key, fn){
     if(store === 'docs') this.stamp++;
     if(this.mem){ const v = fn(structuredClone(this.mem[store].get(key))); this.mem[store].set(key, structuredClone(v)); return Promise.resolve(v); }
-    return new Promise((res, rej) => {
-      const t = this.db.transaction(store, 'readwrite'), s = t.objectStore(store);
-      let out;
-      const g = s.get(key);
-      g.onsuccess = () => { out = fn(g.result); s.put(out, key); };
-      t.oncomplete = () => res(out);
-      t.onerror = () => rej(t.error);
-      t.onabort = () => rej(t.error || new Error('Storage write aborted'));
-    });
+    let out;
+    return this.req(store, 'readwrite', s => { const g = s.get(key); g.onsuccess = () => { out = fn(g.result); s.put(out, key); }; return null; }).then(() => out);
   },
   // (1.60.2) docs not uploaded yet, read through the 'dirty' index (before, every sync read the whole database twice)
   dirty(){
@@ -146,34 +167,91 @@ const templates = () => [...docs.values()].filter(d => d.kind === 'tmpl' && live
 const getDoc = id => { const d = docs.get(id); return live(d) ? d : null; };
 
 /* (1.88) A write on the device that fails (storage full or blocked) used to show nothing: the writing stayed on screen and was
-   gone after a reload. Now a warning stays up, what could not be written is kept in memory and tried again until it works. */
+   gone after a reload. Now a warning stays up, what could not be written is kept in memory and tried again until it works.
+   (1.90.4) The warning names the error. When signed in, what could not be saved on the device is uploaded straight to the
+   cloud (cloud), so a restart brings it back; the warning then offers Restart, which also reconnects the device storage. */
 const SaveWatch = {
-  waiting: new Map(), timer: 0, shown: false,
+  waiting: new Map(), timer: 0, shown: false, err: null,
+  sent: new Map(), cloudT: 0, cloudBusy: false,   // sent: doc id -> the doc's `updated` that is in the cloud
   fail(e){
     console.warn('save failed', e);
-    if(!this.shown){
-      this.shown = true;
-      let el = $('saveWarn');
-      if(!el){ el = document.createElement('div'); el.id = 'saveWarn'; el.className = 'save-warn'; el.setAttribute('role', 'alert'); document.body.appendChild(el); }
-      el.textContent = 'Your latest changes are not saved: this device\'s storage is full or blocked. Keep Inkwell open and free up space. It keeps trying.';
-      el.hidden = false;
-    }
+    this.err = e;
+    this.shown = true;
+    this.show();
     if(!this.timer) this.timer = setTimeout(() => this.retry(), 10000);
+    this.cloudSoon();
+  },
+  // every doc that could not be saved here is in the cloud in its latest version
+  safe(){ return this.waiting.size > 0 && [...this.waiting.values()].every(r => this.sent.get(r.id) === r.updated); },
+  show(){
+    if(!this.shown) return;
+    let el = $('saveWarn');
+    if(!el){
+      el = document.createElement('div'); el.id = 'saveWarn'; el.className = 'save-warn'; el.setAttribute('role', 'alert');
+      el.innerHTML = '<span class="sw-text"></span><button type="button" class="sw-btn" hidden>Restart</button>';
+      el.querySelector('.sw-btn').onclick = () => { LSset('inkwell.opening', null); location.reload(); };
+      document.body.appendChild(el);
+    }
+    const e = this.err, why = e ? (e.name && e.name !== 'Error' ? e.name : String(e.message || e)).slice(0, 60) : '';
+    const full = e && (e.name === 'QuotaExceededError' || /quota|full/i.test(String(e.message || '')));
+    const safe = this.safe();
+    el.querySelector('.sw-text').textContent = safe
+      ? 'This device could not save your latest changes' + (why ? ' (' + why + ')' : '') + ', but they are saved in the cloud. Tap Restart to fix it.'
+      : 'Your latest changes are not saved on this device' + (why ? ' (' + why + ')' : '') + '. Keep Inkwell open' + (full ? ' and free up space' : '') + ': it keeps trying' + (Sync.user ? ' and sends them to the cloud.' : '.');
+    el.querySelector('.sw-btn').hidden = !safe;
+    el.hidden = false;
   },
   ok(){
     if(!this.shown || this.waiting.size) return;
-    this.shown = false;
+    this.shown = false; this.err = null; this.sent.clear();
     const el = $('saveWarn'); if(el) el.hidden = true;
     toast('Saved again');
   },
   async retry(){
     this.timer = 0;
+    // (1.90.4) a broken connection is opened again first (also when the error did not look like one)
+    if(this.waiting.size) await IDB.reopen().catch(e => console.warn('reopen', e));
     for(const [id, rec] of [...this.waiting]){
       try { await IDB.req('docs', 'readwrite', s => s.put(rec)); if(this.waiting.get(id) === rec) this.waiting.delete(id); }
       catch(e){ this.fail(e); return; }
     }
     if(this.waiting.size === 0 && this.shown){ Sync.soon(); this.ok(); }
     else if(this.shown) this.timer = setTimeout(() => this.retry(), 10000);
+  },
+  cloudSoon(){ if(!this.cloudT) this.cloudT = setTimeout(() => this.cloud(), 2500); },
+  // upload what could not be saved here, straight from memory. Only docs whose merge base is known (baseTs) go up, with
+  // that base as the expected server copy, so a newer copy from another device is never overwritten.
+  async cloud(){
+    this.cloudT = 0;
+    if(!Sync.user || !Sync.sb || !navigator.onLine || !this.waiting.size) return;
+    if(this.cloudBusy){ this.cloudSoon(); return; }
+    this.cloudBusy = true;
+    try {
+      for(const rec of [...this.waiting.values()]){
+        const upd = rec.updated;
+        if(this.sent.get(rec.id) === upd) continue;
+        const merge = MERGE_KINDS.has(rec.kind) && !rec.deleted && !!rec.data;
+        if(merge && !baseTs.has(rec.id)) continue;
+        const row = {id: rec.id, kind: rec.kind, data: rec.data ?? null, deleted: !!rec.deleted, updated_at: upd};
+        let ts = null;
+        if(Sync.noPut){
+          const {data, error} = await Sync.sb.from('docs').upsert([Object.assign({}, row, {user_id: Sync.user.id})], {onConflict: 'user_id,id'}).select('id,server_ts');
+          if(error) throw error;
+          ts = data && data[0] && data[0].server_ts;
+        } else {
+          const {data, error} = await Sync.sb.rpc('docs_put', {p_rows: [Object.assign(row, {exp: merge ? baseTs.get(rec.id) : null})]});
+          if(error) throw error;
+          const hit = data && Array.isArray(data.ok) && data.ok.find(x => x.id === rec.id);
+          ts = hit && hit.server_ts;
+        }
+        if(!ts) continue;   // another device changed it meanwhile: it stays here until the device can save again
+        if(merge) baseTs.set(rec.id, ts);
+        this.sent.set(rec.id, upd);
+      }
+    } catch(e){ console.warn('cloud copy of unsaved changes', e); }
+    finally { this.cloudBusy = false; }
+    this.show();
+    if(this.waiting.size && !this.safe() && Sync.user) this.cloudT = setTimeout(() => this.cloud(), 15000);
   }
 };
 async function writeDoc(rec){

@@ -735,6 +735,8 @@ if('serviceWorker' in navigator && (location.protocol === 'https:' || location.h
     if(reloaded) return; reloaded = true;
     const t0 = Date.now();
     const go = () => {
+      // (1.90.4) never while changes are not saved on the device and not in the cloud either: the reload would lose them
+      if(SaveWatch.shown && !SaveWatch.safe()){ setTimeout(go, 2000); return; }
       if((act || editing || selDrag || Date.now() - lastLocalEdit < 1500) && Date.now() - t0 < 60000){ setTimeout(go, 400); return; }
       LSset('inkwell.opening', null); flushSaves().then(() => location.reload());
     };

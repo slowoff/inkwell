@@ -1,6 +1,7 @@
 # 1.69: Shapes -> Grid. (1.69.1) Rows/columns and Draw grid only show after pressing Grid; folded again on reopen.
-# Rows/columns steppers (prefs.grid, remembered), drag a box = grid split into r x c,
-# tap = standard cells of 56 x 36 screen px, one group, one undo step, saved, popover fits. Guest mode.
+# Rows/columns steppers (prefs.grid, remembered), drag a box = grid of r x c, one group, one undo step, saved, popover fits.
+# (1.90.4) cells are always square: a drag makes them as large as fit in the box, starting at the drag's first corner;
+# tap = standard cells of 40 x 40 screen px. Guest mode.
 import asyncio, os
 from playwright.async_api import async_playwright
 PORT = os.environ.get('INKWELL_PORT', '8766')
@@ -68,11 +69,12 @@ async def main():
         check(dis, 'minus disabled at 1 row')
         await tap_step(page, 'r', '1')
 
-        # 3. drag a box 300 x 120 -> frame + 1 row line + 4 column lines, grouped, selected
+        # 3. drag a box 300 x 200 (taller than needed) -> square cells of 60: frame 300 x 120 from the drag's start,
+        # 1 row line + 4 column lines, grouped, selected
         await page.click('#gridDraw'); await page.wait_for_timeout(100)
         check(not await page.is_visible('#shapePop'), 'popover closes when Draw grid is pressed')
-        x0, y0 = cx - 150, cy - 60
-        await page.mouse.move(x0, y0); await page.mouse.down(); await page.mouse.move(x0 + 300, y0 + 120, steps=8); await page.mouse.up()
+        x0, y0 = cx - 150, cy - 100
+        await page.mouse.move(x0, y0); await page.mouse.down(); await page.mouse.move(x0 + 300, y0 + 200, steps=8); await page.mouse.up()
         await page.wait_for_timeout(250)
         r = await page.evaluate(STROKES)
         check(len(r['s']) == 6, f"6 strokes (frame + 1 + 4) ({len(r['s'])})")
@@ -81,27 +83,36 @@ async def main():
         check(r['tool'] == 'lasso' and r['sel'] == 6, f"grid selected afterwards ({r['tool']}, {r['sel']})")
         bx = boxes(r)
         frame = max(bx, key=lambda q: (q[2] - q[0]) * (q[3] - q[1]))
-        check(all(abs(a - e) < 1.5 for a, e in zip(frame, (x0 - st[0], y0 - st[1], x0 - st[0] + 300, y0 - st[1] + 120))), f'frame follows the drag ({[round(v) for v in frame]})')
+        check(all(abs(a - e) < 1.5 for a, e in zip(frame, (x0 - st[0], y0 - st[1], x0 - st[0] + 300, y0 - st[1] + 120))), f'frame starts at the drag, square cells fit the box ({[round(v) for v in frame]})')
         hz = sorted(q for q in bx if q is not frame and q[3] - q[1] < 2)
         vt = sorted(q for q in bx if q is not frame and q[2] - q[0] < 2)
-        check(len(hz) == 1 and abs(hz[0][1] - (frame[1] + 60)) < 1, f'row line in the middle ({[round(q[1]) for q in hz]})')
+        check(len(hz) == 1 and abs(hz[0][1] - (frame[1] + 60)) < 1, f'row line 60 px down: cells 60 × 60 ({[round(q[1]) for q in hz]})')
         check(len(vt) == 4 and all(abs(q[0] - (frame[0] + 60 * (i + 1))) < 1 for i, q in enumerate(vt)), f'column lines every 60 px ({[round(q[0]) for q in vt]})')
         check(all(abs(q[0] - frame[0]) < 1 and abs(q[2] - frame[2]) < 1 for q in hz) and all(abs(q[1] - frame[1]) < 1 and abs(q[3] - frame[3]) < 1 for q in vt), 'inner lines run edge to edge')
 
-        # 4. dragging up-left works the same
+        # 4. dragging up-left, box 150 x 100 (wider than tall) -> cells of 30, frame 150 x 60 ending at the drag's start
         await page.keyboard.press('Escape')
         await page.click('#shapeBtn'); await page.click('#gridOpen'); await page.click('#gridDraw')
-        await page.mouse.move(cx + 200, cy + 250); await page.mouse.down(); await page.mouse.move(cx + 50, cy + 150, steps=6); await page.mouse.up()
+        sx, sy = cx + 200, cy + 250
+        await page.mouse.move(sx, sy); await page.mouse.down(); await page.mouse.move(cx + 50, cy + 150, steps=6); await page.mouse.up()
         await page.wait_for_timeout(250)
         r = await page.evaluate(STROKES)
         check(len(r['s']) == 12, f"second grid from a reversed drag ({len(r['s'])})")
+        bx = boxes(r, set(s['id'] for s in r['s'][6:]))
+        fr = max(bx, key=lambda q: (q[2] - q[0]) * (q[3] - q[1]))
+        check(abs(fr[2] - (sx - st[0])) < 1.5 and abs(fr[3] - (sy - st[1])) < 1.5 and abs(fr[2] - fr[0] - 150) < 1.5 and abs(fr[3] - fr[1] - 60) < 1.5,
+              f'reversed drag: 150 × 60 ending at the start corner ({[round(v) for v in fr]})')
+        xs_ = sorted(set([round(q[0], 1) for q in bx if q is not fr and q[2] - q[0] < 2]))
+        ys_ = sorted(set([round(q[1], 1) for q in bx if q is not fr and q[3] - q[1] < 2]))
+        gaps = [b_ - a_ for a_, b_ in zip([fr[0]] + xs_, xs_ + [fr[2]])] + [b_ - a_ for a_, b_ in zip([fr[1]] + ys_, ys_ + [fr[3]])]
+        check(len(gaps) == 7 and all(abs(g - 30) < 1 for g in gaps), f'every cell 30 × 30 ({[round(g, 1) for g in gaps]})')
 
         # 5. one undo removes the whole grid
         await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(150)
         r = await page.evaluate(STROKES)
         check(len(r['s']) == 6, f"one undo removes the whole grid ({len(r['s'])})")
 
-        # 6. tap: standard cells 56 x 36 around the tap point (2 x 5 -> 280 x 72)
+        # 6. tap: standard square cells of 40 around the tap point (2 x 5 -> 200 x 80)
         await page.click('#shapeBtn'); await page.click('#gridOpen'); await page.click('#gridDraw')
         tx, ty = cx - 250, cy + 220
         await page.mouse.click(tx, ty); await page.wait_for_timeout(250)
@@ -111,7 +122,7 @@ async def main():
         fr = max(bx, key=lambda q: (q[2] - q[0]) * (q[3] - q[1]))
         w, h = fr[2] - fr[0], fr[3] - fr[1]
         mx, my = (fr[0] + fr[2]) / 2 + st[0], (fr[1] + fr[3]) / 2 + st[1]
-        check(len(new) == 6 and abs(w - 280) < 1.5 and abs(h - 72) < 1.5, f'tap = 2 × 5 cells of 56 × 36 ({len(new)}, {w:.1f} × {h:.1f})')
+        check(len(new) == 6 and abs(w - 200) < 1.5 and abs(h - 80) < 1.5, f'tap = 2 × 5 cells of 40 × 40 ({len(new)}, {w:.1f} × {h:.1f})')
         check(abs(mx - tx) < 1.5 and abs(my - ty) < 1.5, 'tap grid centred on the tap')
 
         # 7. a 1 x 1 grid is just a rectangle
@@ -124,6 +135,8 @@ async def main():
         await page.wait_for_timeout(250)
         r = await page.evaluate(STROKES)
         check(len(r['s']) == 13, f"1 × 1 grid = one stroke ({len(r['s'])})")
+        q = boxes(r, {r['s'][-1]['id']})[0]
+        check(abs(q[2] - q[0] - 50) < 1.5 and abs(q[3] - q[1] - 50) < 1.5, f'1 × 1 from a 100 × 50 drag is a 50 × 50 square ({q[2] - q[0]:.1f} × {q[3] - q[1]:.1f})')
 
         # 8. upper limit 30
         await page.click('#shapeBtn'); await page.click('#gridOpen')

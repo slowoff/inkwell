@@ -113,11 +113,16 @@ function shapePolys(shape, b, w){
   }
   if(shape === 'honeycomb') return honeycombPolys(b);
   if(shape === 'grid'){
-    // (1.69) outer frame + inner row and column lines; a tap makes cells of 56 × 36 screen px around the tap
+    // (1.69) outer frame + inner row and column lines. (1.90.4, Rafael: "square boxes not wide") cells are always square:
+    // a tap makes cells of 40 screen px centred on the tap; a drag makes them as large as fit in the box, the grid starting
+    // at the corner where the drag began
     const [nr, nc] = gridRC();
     let L, T, R, B;
-    if(b.tap){ const cw = 56 / cam.z, ch = 36 / cam.z; L = b.x0 - cw * nc / 2; T = b.y0 - ch * nr / 2; R = L + cw * nc; B = T + ch * nr; }
-    else { L = Math.min(b.x0, b.x1); T = Math.min(b.y0, b.y1); R = Math.max(b.x0, b.x1); B = Math.max(b.y0, b.y1); }
+    if(b.tap){ const cs = 40 / cam.z; L = b.x0 - cs * nc / 2; T = b.y0 - cs * nr / 2; R = L + cs * nc; B = T + cs * nr; }
+    else {
+      const cs = Math.min(Math.abs(b.x1 - b.x0) / nc, Math.abs(b.y1 - b.y0) / nr), gw = cs * nc, gh = cs * nr;
+      L = b.x1 >= b.x0 ? b.x0 : b.x0 - gw; T = b.y1 >= b.y0 ? b.y0 : b.y0 - gh; R = L + gw; B = T + gh;
+    }
     if((R - L) * cam.z < 4 || (B - T) * cam.z < 4) return [];
     const out = [[[[L, T], [R, T], [R, B], [L, B]], true]];
     for(let i = 1; i < nr; i++){ const y = T + (B - T) * i / nr; out.push([[[L, y], [R, y]], false]); }

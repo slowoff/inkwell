@@ -198,7 +198,7 @@ async def part_hl(br):
     await ctx.close()
 
 PROBE = """(pts) => { const cv = __inkwell.inkCv, g = cv.getContext('2d'), d = window.devicePixelRatio || 1, C = __inkwell.cam;
-  return pts.map(([x, y]) => { const X = Math.round((x * C.z + C.ox) * d), Y = Math.round((y * C.z + C.oy) * d);
+  return pts.map(([x, y]) => { const L = __inkwell.layerOff, X = Math.round((x * C.z + C.ox + L[0]) * d), Y = Math.round((y * C.z + C.oy + L[1]) * d);
     const a = g.getImageData(X - 1, Y - 1, 3, 3).data; let m = 0; for(let i = 3; i < a.length; i += 4) m = Math.max(m, a[i]); return m; }); }"""
 
 async def part_ink(br):

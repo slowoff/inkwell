@@ -58,7 +58,7 @@ async def main():
                 # highlight on the dark page background (not on paper): the old see-through look, not blended
                 r = await page.evaluate("""async () => { const W = __inkwell, p = []; for(let x = 100; x <= 400; x += 8) p.push(x, 600, .5);
                   W.addItems([{t: 's', id: 'h2', c: '#F5C400', w: 40, hl: 1, p}]); W.invalidate(); await new Promise(r => setTimeout(r, 400));
-                  const d = devicePixelRatio, at = id => [...document.getElementById(id).getContext('2d').getImageData((250 * W.cam.z + W.cam.ox) * d, (600 * W.cam.z + W.cam.oy) * d, 1, 1).data];
+                  const d = devicePixelRatio, at = id => [...document.getElementById(id).getContext('2d').getImageData((250 * W.cam.z + W.cam.ox + W.layerOff[0]) * d, (600 * W.cam.z + W.cam.oy + W.layerOff[1]) * d, 1, 1).data];
                   return {ink: at('ink'), hlm: at('hlm')}; }""")
                 check(r['ink'][3] > 60 and r['ink'][0] > 200 and r['hlm'][3] == 0, f'dark mode: a highlight on the dark background keeps the old see-through look, not blended ({r})')
             # while drawing: the live preview blends the same way

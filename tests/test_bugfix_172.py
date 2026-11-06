@@ -134,7 +134,7 @@ async def part_local(b):
       W.addItems(its); W.invalidate();
       await new Promise(r => setTimeout(r, 1000));
       const cv = W.inkCv, g = cv.getContext('2d'), d = devicePixelRatio || 1;
-      const at = ([x, y]) => { const a = g.getImageData(Math.round((x * 4 + W.cam.ox) * d) - 1, Math.round((y * 4 + W.cam.oy) * d) - 1, 3, 3).data; let m = 0; for(let i = 3; i < a.length; i += 4) m = Math.max(m, a[i]); return m; };
+      const at = ([x, y]) => { const a = g.getImageData(Math.round((x * 4 + W.cam.ox + W.layerOff[0]) * d) - 1, Math.round((y * 4 + W.cam.oy + W.layerOff[1]) * d) - 1, 3, 3).data; let m = 0; for(let i = 3; i < a.length; i += 4) m = Math.max(m, a[i]); return m; };
       const mid = its.map(it => at(shapePoint(it.p, 10)));
       return {heals: W.InkCheck.heals - h0, rawInk: raw.map(at), midInk: mid}; }""")
     check(all(v == 0 for v in r['rawInk']), f'(the raw recorded points lie beside the drawn ink: the old check looked there) {r["rawInk"]}')

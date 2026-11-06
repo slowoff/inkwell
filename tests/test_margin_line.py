@@ -9,7 +9,7 @@ def check(ok, what):
     if not ok: fails.append(what)
 # pixel of the paper canvas on the margin line
 PIX = """() => { const W = __inkwell, c = document.getElementById('bg') || document.querySelector('canvas'), d = devicePixelRatio || 1;
-  const x = Math.round(((Number.isFinite(W.cur.bg.mx) ? W.cur.bg.mx : 25) * 96 / 25.4 * W.cam.z + W.cam.ox) * d), y = Math.round(300 * d);
+  const x = Math.round(((Number.isFinite(W.cur.bg.mx) ? W.cur.bg.mx : 25) * 96 / 25.4 * W.cam.z + W.cam.ox + W.layerOff[0]) * d), y = Math.round((300 + W.layerOff[1]) * d);
   return [...c.getContext('2d').getImageData(x, y, 1, 1).data]; }"""
 async def main():
     async with async_playwright() as p:

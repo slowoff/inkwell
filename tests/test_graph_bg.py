@@ -17,7 +17,7 @@ INFO = """() => { const its = [...__inkwell.cur.items.values()], f = its.filter(
   return {n: f.length, c: f[0] && f[0].c, first: its[0] && its[0].fl === 1, g: f[0] && f[0].g, gs: new Set(its.map(i => i.g)).size, b, fb}; }"""
 # colour of the ink canvas at world point (x, y)
 PIX = """([x, y]) => { const W = __inkwell, c = document.getElementById('ink'), d = devicePixelRatio || 1;
-  const sx = (x * W.cam.z + W.cam.ox) * d, sy = (y * W.cam.z + W.cam.oy) * d;
+  const sx = (x * W.cam.z + W.cam.ox + W.layerOff[0]) * d, sy = (y * W.cam.z + W.cam.oy + W.layerOff[1]) * d;
   const v = c.getContext('2d').getImageData(Math.round(sx), Math.round(sy), 1, 1).data; return [v[0], v[1], v[2], v[3]]; }"""
 
 async def insert_graph(page, grid=True):

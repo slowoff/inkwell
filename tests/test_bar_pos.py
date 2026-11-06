@@ -41,7 +41,8 @@ async def main():
             check(ok and st['w'] > 300 and st['h'] > 300, f'{v}: bar in place, page beside it ({bar}, {st})')
             # drawing surface matches the stage
             cv = await page.evaluate("(() => { const c = document.getElementById('ink').getBoundingClientRect(); return [c.width, c.height]; })()")
-            check(abs(cv[0] - st['w']) < 2 and abs(cv[1] - st['h']) < 2, f'{v}: ink layer fits the stage ({cv})')
+            off = await page.evaluate("__inkwell.layerOff")   # (1.88.1) the layers are bigger than the stage by this much on each side
+            check(abs(cv[0] - st['w'] - 2 * off[0]) < 2 and abs(cv[1] - st['h'] - 2 * off[1]) < 2, f'{v}: ink layer fits the stage ({cv})')
             if v in ('left', 'right'):
                 for q in ('#undo', '#redo', '#swatches', '.tools'):
                     ok2 = await page.evaluate("s => { const b = document.querySelector(s).getBoundingClientRect(); return b.width > 0 && b.top >= 0 && b.bottom <= innerHeight; }", q)

@@ -36,15 +36,15 @@ async def main():
         clip = await page.evaluate("JSON.parse(localStorage.getItem('inkwell.clip'))")
         check(clip and len(clip['items']) == 4, 'Copy stores 4 items')
         check(isinstance(clip['items'][0].get('p') if clip['items'][0]['t'] == 's' else next(i for i in clip['items'] if i['t'] == 's')['p'], str), 'stroke points stored encoded')
-        check(await page.evaluate("!document.getElementById('pasteBtn').hidden && !document.getElementById('opts').hidden"), 'Paste button shows in the Select bar')
+        check(await page.evaluate("!(document.getElementById('pasteBtn').hidden && document.getElementById('freshPaste').hidden)"), 'a Paste button shows (since 1.91 the fresh-copy one under the zoom %)')
         # paste on another page
         await page.evaluate("async () => { await __inkwell.newPage(); }")
         await page.wait_for_timeout(300)
         await page.keyboard.press('l')
         dst = await page.evaluate("__inkwell.cur.id")
         check(dst != src, 'on a new page')
-        check(await page.evaluate("!document.getElementById('pasteBtn').hidden"), 'Paste button still there on the other page')
-        await page.click('#pasteBtn')
+        check(await page.evaluate("!(document.getElementById('pasteBtn').hidden && document.getElementById('freshPaste').hidden)"), 'Paste button still there on the other page')
+        await page.click('#freshPaste:visible, #pasteBtn:visible >> nth=0')
         r = await page.evaluate("""() => { const W = __inkwell, its = [...W.cur.items.values()];
           const s = its.find(i => i.t === 's'), m = its.find(i => i.t === 'm'), x = its.find(i => i.t === 'x'), im = its.find(i => i.t === 'i');
           return {n: its.length, ids: its.map(i => i.id), sp: s && Array.from(s.p), sg: s && s.g, mg: m && m.g, xh: x && x.html, ia: im && im.a, sx: s && s.p[0], mx: m && m.x,
@@ -82,7 +82,7 @@ async def main():
         await page.reload(); await page.wait_for_timeout(2500)
         await page.wait_for_function('window.__inkwell && window.__inkwell.cur', timeout=15000)
         await page.keyboard.press('l')
-        check(await page.evaluate("!document.getElementById('pasteBtn').hidden"), 'Paste still available after reload')
+        check(await page.evaluate("!(document.getElementById('pasteBtn').hidden && document.getElementById('freshPaste').hidden)"), 'Paste still available after reload')
         await page.keyboard.press('p')
         check(await page.evaluate("document.getElementById('pasteBtn').hidden && !document.getElementById('sizeWrap').hidden"), 'pen bar unchanged (no Paste, size slider back)')
         check(not errs, 'no page errors: ' + '; '.join(errs[:3]))

@@ -113,14 +113,14 @@ async def main():
         await page.evaluate("""async (b64) => { const bl = await (await fetch('data:image/png;base64,' + b64)).blob(); await navigator.clipboard.write([new ClipboardItem({'image/png': bl})]); }""", b64)
         n0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'i').length")
         await page.evaluate("dispatchEvent(new Event('blur'))")   # the screenshot was copied in another app
-        await page.click('#pasteBtn'); await page.wait_for_timeout(1200)
+        await page.click('#freshPaste:visible, #pasteBtn:visible >> nth=0'); await page.wait_for_timeout(1200)
         r = await page.evaluate("(() => { const ims = [...__inkwell.cur.items.values()].filter(i => i.t === 'i'); const it = ims[ims.length - 1]; return {n: ims.length, ar: it.w / it.h}; })()")
         check(r['n'] == n0 + 1 and abs(r['ar'] - 4 / 3) < 0.02, f'Paste button pastes a screenshot from another app ({r})')
         # copied in Inkwell and never left: the Paste button pastes the Inkwell copy without reading the clipboard
         await page.evaluate("() => { __inkwell.selectIds(['sA']); }"); await page.keyboard.press('Control+c'); await page.wait_for_timeout(200)
         await page.evaluate("() => { window.__reads = 0; const r = navigator.clipboard.read.bind(navigator.clipboard); navigator.clipboard.read = (...a) => { window.__reads++; return r(...a); }; }")
         ns = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 's').length")
-        await page.click('#pasteBtn'); await page.wait_for_timeout(500)
+        await page.click('#freshPaste:visible, #pasteBtn:visible >> nth=0'); await page.wait_for_timeout(500)
         r = await page.evaluate("({n: [...__inkwell.cur.items.values()].filter(i => i.t === 's').length, reads: window.__reads})")
         check(r['n'] == ns + 1 and r['reads'] == 0, f'Paste right after an Inkwell copy: pasted without asking the clipboard ({r})')
 
@@ -157,7 +157,7 @@ async def main():
         await page.keyboard.press('Escape')
         nx0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'x').length")
         ns0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 's').length")
-        await page.click('#pasteBtn'); await page.wait_for_timeout(800)
+        await page.click('#freshPaste:visible, #pasteBtn:visible >> nth=0'); await page.wait_for_timeout(800)
         r = await page.evaluate("(() => { const xs = [...__inkwell.cur.items.values()].filter(i => i.t === 'x'); return {nx: xs.length, ns: [...__inkwell.cur.items.values()].filter(i => i.t === 's').length, text: xs.length ? __inkwell.htmlText(xs[xs.length - 1].html) : ''}; })()")
         check(r['nx'] == nx0 + 1 and r['ns'] == ns0 and 'Alpha' in r['text'], f'page text copied after an Inkwell copy: Paste gives the text, not the old copy ({r})')
         # Copy as picture, then Paste: the picture
@@ -165,7 +165,7 @@ async def main():
         await drag(40, 75, 300, 130)
         await page.click('#tsShot'); await page.wait_for_timeout(1500)
         ni0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'i').length")
-        await page.click('#pasteBtn'); await page.wait_for_timeout(1200)
+        await page.click('#freshPaste:visible, #pasteBtn:visible >> nth=0'); await page.wait_for_timeout(1200)
         ni = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'i').length")
         check(ni == ni0 + 1, f'Copy as picture, then Paste: the picture is pasted ({ni0} -> {ni})')
         # text copied from a text box with the system Copy (copy event), then Paste
@@ -174,7 +174,7 @@ async def main():
         await page.keyboard.press('Escape')
         await page.evaluate("async () => { await navigator.clipboard.writeText('From a text box'); document.dispatchEvent(new Event('copy')); }")
         nx0 = await page.evaluate("[...__inkwell.cur.items.values()].filter(i => i.t === 'x').length")
-        await page.click('#pasteBtn'); await page.wait_for_timeout(800)
+        await page.click('#freshPaste:visible, #pasteBtn:visible >> nth=0'); await page.wait_for_timeout(800)
         r = await page.evaluate("(() => { const xs = [...__inkwell.cur.items.values()].filter(i => i.t === 'x'); return {nx: xs.length, text: __inkwell.htmlText(xs[xs.length - 1].html)}; })()")
         check(r['nx'] == nx0 + 1 and r['text'] == 'From a text box', f'text copied with the system Copy inside Inkwell pastes as text ({r})')
         # Ctrl+V lands in the hidden paste field (iPad Safari needs a focused field) and leaves no focus behind

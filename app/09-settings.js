@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.91', '2026-11-07', ['Toolbar on the side: a Claude button next to Mark for later. Tap it and draw a box around a question to scan it, no menu needed. Tap it again to stop','After you copy something in Inkwell, a Paste button shows under the zoom %, with any tool. It stays until a minute after your last paste (so you can paste a few times), or 30 minutes if you do not paste. Things copied in other apps still paste with the Select tool\'s Paste or Cmd+V']],
   ['1.90.5', '2026-11-06', ['Graph / axes: the grid boxes are square now. The graph takes the shape of its ranges and keeps about the same size','Shapes → Grid works as it did before 1.90.4 again']],
   ['1.90.4', '2026-11-06', ['Shapes → Grid: boxes are always square. Dragging makes them as big as fit in your box, starting where you began the drag; a tap makes a standard size','Importing: the Stop message no longer jumps each time a page is placed, so Stop is easier to tap','Saving: when the iPad cuts Inkwell off from its storage ("not saved" in red), Inkwell reconnects by itself. If that does not work, your changes are sent to the cloud and the message offers Restart, which brings them back. The message also names the error now']],
   ['1.90.3', '2026-11-06', ['Honeycombs from Shapes: lines now snap on them the same as on Hex paper. Before, a saved honeycomb was often no longer recognised, so nothing snapped']],

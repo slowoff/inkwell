@@ -506,6 +506,24 @@ $('askBtn').addEventListener('click', () => {
   startPick({kind: 'scan'}, 'Drag a box around the question');
 });
 $('askScan').addEventListener('click', () => startPick({kind: 'scan'}, 'Drag a box around the question'));
+/* (1.91) Scan with Claude straight from the side column's tool grid (Rafael: "add a little Claude icon so I don't have
+   to go into the menus to scan with Claude"): same as Ask Claude in the menu (opens the panel and starts the box).
+   Tapping it again while the box is being drawn stops; the panel closes again if this tap opened it and nothing
+   came of it. The button is lit while scanning (body.scanning). */
+let askQuickOpened = false;
+function askQuick(){
+  if(pick && pick.kind === 'scan'){
+    endPick();
+    if(askQuickOpened && !Ask.msgs.length && !(Array.isArray(Ask.pending) && Ask.pending.length)) Ask.close();
+    askQuickOpened = false;
+    return;
+  }
+  closePops();
+  askQuickOpened = $('askPanel').hidden;
+  Ask.open();
+  if(cur) startPick({kind: 'scan'}, 'Drag a box around the question');
+}
+$('askQuick').addEventListener('click', askQuick);
 $('scanBarX').addEventListener('click', () => endPick());
 $('askClose').addEventListener('click', () => { if(pick && pick.kind === 'scan') endPick(); Ask.close(); });
 $('askMin').addEventListener('click', () => $('askPanel').classList.toggle('min'));

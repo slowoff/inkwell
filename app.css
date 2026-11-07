@@ -1133,3 +1133,23 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .it-text th,.it-text td{border:1px solid var(--line);padding:3px 7px;text-align:left;vertical-align:top}
 .it-text th{font-weight:600}
 @media (any-pointer:coarse){ .save-warn .sw-btn{min-height:44px} }
+/* (1.91) Scan with Claude in the side column's tool grid (there Ask Claude is inside the menu; on the top/bottom bar it
+   is in plain view, so the button only shows in the side column), and the Paste button that shows after a copy:
+   under the zoom % in the side column, after it on the top/bottom bar */
+#askQuick{display:none;color:var(--accent)}
+body.scanning #askQuick{background:var(--accent);color:var(--accent-fg)}
+.fresh-paste{color:var(--accent);background:var(--accent-soft);font-weight:600}
+.fresh-paste svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.fresh-paste.pop{animation:fpPop .3s cubic-bezier(.2,1.5,.4,1)}
+@keyframes fpPop{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){ .fresh-paste.pop{animation:none} }
+@media (hover:hover){ .fresh-paste:hover{background:color-mix(in srgb,var(--accent) 24%,transparent)} }
+.fresh-paste:active{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+@media (min-width:761px){
+  .main[data-bar=left] #askQuick,.main[data-bar=right] #askQuick{display:inline-grid}
+  .main[data-bar=left] .bar2 .fresh-paste,.main[data-bar=right] .bar2 .fresh-paste{display:flex;margin:8px auto 0;width:92px;height:44px;padding:0 8px}
+}
+/* top/bottom bar short of room: the fresh Paste keeps only its icon (still accent-coloured) */
+.bar2.t2 .fresh-paste .fp-lbl{display:none}
+.bar2.t2 .fresh-paste{padding:0 8px}
+.bar2.t3 .fresh-paste{padding:0 6px}

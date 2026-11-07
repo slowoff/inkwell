@@ -367,6 +367,7 @@ const Clip = {
     const txt = items.filter(it => it.t === 'x').map(it => htmlText(it.html)).join('\n').trim() || ('Inkwell: ' + (items.length === 1 ? '1 item' : items.length + ' items'));
     Paste.note(txt);
     try { navigator.clipboard.writeText(txt).catch(() => {}); } catch {}
+    Fresh.copied();
     renderOpts();
   },
   paste(){
@@ -390,6 +391,7 @@ const Clip = {
     if(prefs.tool !== 'lasso') setTool('lasso');
     addItems(copies);
     selectIds(copies.map(o => o.id));
+    Fresh.used();
   }
 };
 $('selCopy').addEventListener('click', () => Clip.copy());
@@ -400,7 +402,7 @@ const Paste = {
   note(t){ try { localStorage.setItem('inkwell.clipSys', JSON.stringify(t)); } catch {} },
   away: 0,   // last time Inkwell lost focus (another app may have put something on the clipboard since)
   sysAt: 0,  // (1.53.1) last copy to the system clipboard made inside Inkwell (page text, Copy as picture, text in a box)
-  mark(){ this.sysAt = Date.now(); this.note(null); },
+  mark(){ this.sysAt = Date.now(); this.note(null); Fresh.copied(); },
   noted(){ return LSget('inkwell.clipSys', null); },
   got: 0,
   async handle(images, text){
@@ -412,14 +414,14 @@ const Paste = {
       const ids = [];
       let at = null;
       for(const b of images){ const it = await this.image(b, at, null, true); if(it){ ids.push(it.id); at = [it.x, it.y + it.h + 16 / cam.z]; } }
-      if(ids.length){ setTool('lasso'); selectIds(ids); toast(ids.length === 1 ? 'Picture pasted' : ids.length + ' pictures pasted'); }
+      if(ids.length){ setTool('lasso'); selectIds(ids); toast(ids.length === 1 ? 'Picture pasted' : ids.length + ' pictures pasted'); Fresh.used(); }
       return;
     }
     if(text.trim()){
       const [cx, cy] = toWorld(W / 2, H / 2), w = Math.min(460, W * 0.6 / cam.z);
       const html = cleanHTML(text.replace(/\n+$/, '').split('\n').map(l => '<p>' + (esc(l) || '<br>') + '</p>').join(''));
       const it = {t: 'x', id: 'x' + newId(), x: cx - w / 2, y: cy - 40, w, fs: 1, html};
-      addItems([it]); setTool('lasso'); selectIds([it.id]); toast('Text pasted');
+      addItems([it]); setTool('lasso'); selectIds([it.id]); toast('Text pasted'); Fresh.used();
       return;
     }
     toast('Nothing to paste');
@@ -471,11 +473,40 @@ const Paste = {
     }
   }
 };
+/* (1.91) Paste button for every tool, right after something was copied in Inkwell (Rafael: "add a paste when I freshly
+   copied something, no matter if I'm inside the select tool or not"). #freshPaste sits under the zoom % in the side
+   column (after it on the top/bottom bar). It shows after any copy made here: selection Copy or Cut, page text, Copy as
+   picture, text copied in a text box, the title or the Claude panel. It hides one minute after the last paste (so a
+   few pastes in a row still work), or 30 minutes after the copy if nothing was pasted. A web app cannot see copies made
+   in other apps without the iPad asking first, so those still go through the Select tool's Paste and Cmd+V. While it
+   shows, the Select tool's own Paste button is hidden (never two). localStorage inkwell.fresh = {at, used}. */
+const FRESH_KEEP = 30 * 60e3, FRESH_AFTER = 60e3;
+const Fresh = {
+  timer: 0,
+  get(){ const f = LSget('inkwell.fresh', null); return f && typeof f.at === 'number' ? f : null; },
+  put(f){ try { localStorage.setItem('inkwell.fresh', JSON.stringify(f)); } catch {} this.render(); },
+  copied(){ this.put({at: Date.now(), used: 0}); },
+  used(){ const f = this.get(); if(f) this.put({at: f.at, used: Date.now()}); },
+  // when the button goes away (0 = nothing copied)
+  until(){ const f = this.get(); if(!f) return 0; return f.used >= f.at ? f.used + FRESH_AFTER : f.at + FRESH_KEEP; },
+  on(){ const end = this.until(); return end > Date.now() && end - Date.now() <= FRESH_KEEP; },
+  render(){
+    clearTimeout(this.timer);
+    const b = $('freshPaste'); if(!b) return;
+    const on = this.on(), was = !b.hidden;
+    b.hidden = !on;
+    if(on && !was){ b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); }
+    if(on) this.timer = setTimeout(() => this.render(), this.until() - Date.now() + 50);
+    $('pasteBtn').hidden = prefs.tool !== 'lasso' || on;
+  }
+};
+$('freshPaste').addEventListener('click', () => Paste.read());
+$('freshPaste').addEventListener('animationend', () => $('freshPaste').classList.remove('pop'));
 $('pasteBtn').addEventListener('click', () => Paste.read());
 addEventListener('blur', () => { Paste.away = Date.now(); });
 document.addEventListener('copy', () => Paste.mark(), true);
 document.addEventListener('cut', () => Paste.mark(), true);
-document.addEventListener('visibilitychange', () => { if(document.hidden) Paste.away = Date.now(); });
+document.addEventListener('visibilitychange', () => { if(document.hidden) Paste.away = Date.now(); else Fresh.render(); });
 document.addEventListener('paste', e => {
   const t = e.target, ae = document.activeElement, catcher = $('pasteCatch');
   const caught = t === catcher || ae === catcher;

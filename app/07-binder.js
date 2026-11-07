@@ -576,7 +576,7 @@ function renderOpts(){
   const t = prefs.tool, ink = t === 'pen' || t === 'hl';
   const paste = t === 'lasso';   // (1.53) always: pastes Inkwell copies and pictures/text from other apps
   $('opts').hidden = !(ink || t === 'eraser' || t === 'mark' || paste);
-  $('pasteBtn').hidden = !paste; $('sizeWrap').hidden = t === 'lasso';
+  $('pasteBtn').hidden = !paste || Fresh.on(); $('sizeWrap').hidden = t === 'lasso';   // (1.91) never two Paste buttons
   $('lassoMode').hidden = t !== 'lasso';
   if(t === 'lasso') $('lassoMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.lassoMode === 'box' || prefs.lassoMode === 'tap' ? prefs.lassoMode : 'free')));
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
@@ -653,7 +653,7 @@ $('eraseMode').addEventListener('click', e => {
   const was = prefs.eraser.mode; prefs.eraser.mode = b.dataset.m; savePrefs(); renderOpts();
   if(was !== prefs.eraser.mode) note(prefs.eraser.mode === 'area' ? 'Eraser: Partial (rubs out only what it touches)' : 'Eraser: Stroke (removes whole strokes)');
 });
-document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if(b) setTool(b.dataset.tool); });
+document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool[data-tool]'); if(b) setTool(b.dataset.tool); });   // (1.91) #askQuick is not a tool
 $('size').addEventListener('input', () => { const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
 let lp = null;
 $('swatches').addEventListener('pointerdown', e => {

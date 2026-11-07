@@ -194,9 +194,9 @@ function renderNav(){
     const n = secs.reduce((a, s) => a + pagesOf(s.id).length, 0);
     let h = `<div class="nb ${open ? 'open' : ''}">`;
     if(editState && editState.kind === 'nb' && editState.id === nb.id) h += editFormHTML(nb.data.name, nb.data.color || 0, 'notebook');
-    else h += `<div class="nb-row"><button class="nb-main" data-nb="${nb.id}" aria-expanded="${open}"><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nb-sw" style="--c:var(--t${(nb.data.color || 0) % TABS})"></span><span class="nb-name">${esc(nb.data.name)}</span><span class="count">${n}</span></button>${open ? `<button class="icon-btn" data-editnb="${nb.id}" aria-label="Rename notebook" title="Rename notebook"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg></button>` : ''}</div>`;
+    else h += `<div class="nb-row"><button class="nb-main" data-nb="${nb.id}" aria-expanded="${open}"><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nb-sw" style="--c:var(--t${(nb.data.color || 0) % TABS})"></span><span class="nb-name">${esc(nb.data.name)}</span><span class="count">${n || ''}</span></button>${open ? `<button class="icon-btn" data-editnb="${nb.id}" aria-label="Rename notebook" title="Rename notebook"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg></button>` : ''}</div>`;
     if(open){
-      h += '<div class="secs">' + secs.map(s => `<button class="sec-row ${!q && s.id === ui.sec ? 'on' : ''}" data-sec="${s.id}"><span class="tab" style="--c:var(--t${(s.data.color || 0) % TABS})"></span><span class="nm">${esc(s.data.name)}</span><span class="count">${pagesOf(s.id).length}</span></button>`).join('') + `<button class="add-sec" data-addsec="${nb.id}">+ Section</button></div>`;
+      h += '<div class="secs">' + secs.map(s => `<button class="sec-row ${!q && s.id === ui.sec ? 'on' : ''}" data-sec="${s.id}"><span class="tab" style="--c:var(--t${(s.data.color || 0) % TABS})"></span><span class="nm">${esc(s.data.name)}</span><span class="count">${pagesOf(s.id).length || ''}</span></button>`).join('') + `<button class="add-sec" data-addsec="${nb.id}">+ Section</button></div>`;
     }
     return h + '</div>';
   }).join('');

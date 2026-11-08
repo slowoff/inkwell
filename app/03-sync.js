@@ -6,6 +6,8 @@
 /* =====================================================================
    Sync (Supabase). Local-first: edits save locally and upload later.
    ===================================================================== */
+// (1.91.2) big docs (serialised length) upload at most every BIG_GAP ms per MB, between BIG_MIN and BIG_MAX
+const BIG_DOC = 256 * 1024, BIG_GAP = 20000, BIG_MIN = 10000, BIG_MAX = 120000;
 const Sync = {
   sb: null, user: null, fresh: null, signingOut: false, state: 'local', msg: '', running: false, again: false, timer: null, lastOk: 0,
   chan: null, chanUser: null, liveOk: false, pingT: 0,
@@ -70,7 +72,9 @@ const Sync = {
   },
   ping(){ clearTimeout(this.pingT); this.pingT = setTimeout(() => this.run(), 200); },
   tell(){ if(this.chan && this.liveOk){ try { this.chan.send({type: 'broadcast', event: 'changed', payload: {}}); } catch(e){ console.warn('live sync send', e); } } },
-  async run(){
+  // (1.91.2) force: upload big pages now too (Sync now, app going to the background)
+  async run(force){
+    if(force || document.visibilityState === 'hidden') this.forceNext = true;
     if(!this.sb || !this.user){ this.unlisten(); setStatus(); return; }
     // (1.36) the notes on this device must belong to this account; otherwise its own local notes are opened first
     if(!(await Acct.ok(this.user))) return;
@@ -78,6 +82,7 @@ const Sync = {
     if(!navigator.onLine){ this.state = 'offline'; setStatus(); return; }
     if(this.running){ this.again = true; return; }
     this.running = true; this.state = 'syncing'; setStatus();
+    this.force = !!this.forceNext; this.forceNext = false;
     try {
       await seedBases();
       await this.pull();
@@ -197,7 +202,7 @@ const Sync = {
   async push(){
     if(this.noPut) await this.checkStale(false);
     else await this.checkStale(true);
-    this.refused = null;
+    this.refused = null; this.waiting = false; clearTimeout(this.bigT);
     let sent = 0, only = null;
     for(let round = 0; round < 3; round++){
       let dirty = await IDB.dirty();
@@ -212,8 +217,19 @@ const Sync = {
     }
     return sent;
   },
+  /* (1.91.2) Big pages upload less often. Every save sent the whole page again: a page with ~12,000 strokes (4.9 MB)
+     went up about every 10 s while writing, and the server rewrote 0.7 MB each time, which used up the database's
+     disk budget (Supabase warning, Nov 2026). A doc over BIG_DOC now waits BIG_GAP per MB since its last upload
+     (at least BIG_MIN, at most BIG_MAX). Nothing is lost meanwhile: it is saved on the device and still dirty.
+     Sync now and the app going to the background upload it right away. */
+  upAt: new Map(),
+  bigWait(id, size){
+    if(this.force || size < BIG_DOC || document.visibilityState === 'hidden') return 0;
+    const gap = Math.min(BIG_MAX, Math.max(BIG_MIN, size / 1048576 * BIG_GAP));
+    return Math.max(0, (this.upAt.get(id) || 0) + gap - Date.now());
+  },
   async upload(dirty){
-    let batch = [], size = 0, sent = 0;
+    let batch = [], size = 0, sent = 0, wait = Infinity;
     const conflicts = [];
     const LIMIT = /notes_full|doc_too_big/;
     const seen = await this.seenLoad();
@@ -280,7 +296,7 @@ const Sync = {
       }
       for(const d of batch){
         if(!ts.has(d.id)) continue;
-        sent++;
+        sent++; this.upAt.set(d.id, Date.now());
         const now = await IDB.get('docs', d.id);
         if(now && now.updated === d.updated){
           now.dirty = 0; await IDB.put('docs', now);
@@ -295,11 +311,15 @@ const Sync = {
     };
     for(const d of dirty){
       const s = JSON.stringify(d.data || null).length;
+      const w = this.bigWait(d.id, s);
+      if(w > 0){ wait = Math.min(wait, w); continue; }
       if(batch.length && size + s > 1500000){ if(await flush() === 'retry') return 'retry'; }
       batch.push(d); size += s;
     }
     if(await flush() === 'retry') return 'retry';
     await this.seenSave();
+    // a big page that has to wait: come back for it then
+    if(wait < Infinity){ this.waiting = true; clearTimeout(this.bigT); this.bigT = setTimeout(() => this.run(), wait + 250); }
     return {sent, conflicts};
   },
   async pushAssets(){
@@ -938,7 +958,7 @@ function setStatus(){
     else if(Sync.state === 'syncing'){ s = 'syncing'; txt = 'Syncing'; }
     else if(Sync.state === 'offline'){ s = 'local'; txt = 'Offline, will sync later'; }
     else if(Sync.state === 'warn'){ s = 'warn'; txt = Sync.msg || 'Sync problem'; }
-    else if(Sync.state === 'synced'){ s = 'synced'; txt = 'Synced ' + hhmm(Sync.lastOk); }
+    else if(Sync.state === 'synced'){ s = 'synced'; txt = Sync.waiting ? 'Saved here, syncs shortly' : 'Synced ' + hhmm(Sync.lastOk); }
   } else if(Sync.state === 'warn'){ s = 'warn'; txt = Sync.msg; }
   el.dataset.s = s;
   $('statusText').textContent = txt;

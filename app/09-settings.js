@@ -11,6 +11,7 @@ $('settingsBtn').addEventListener('click', openSettings);
 function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(true); showModal('settingsDlg'); updTrashInfo(true); DbSize.render(); DbSize.get().then(() => DbSize.render()).catch(() => {}); }
 async function renderSettings(fresh){
   renderPrefSettings(); updTrashInfo(); renderVersion();
+  if(typeof HWK !== 'undefined') HWK.renderPush();
   const ready = !!Sync.sb;
   $('setNoConfig').hidden = ready;
   if(authView === 'newpass' && !Sync.user) authView = 'signin';
@@ -662,6 +663,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.93', '2026-11-09', ['Homework: with the Select tool (Free or Box), circle or box what you have to do and tap Homework. Inkwell keeps a picture of that part, what to do, a due date and a reminder time','The Homework button in the top bar lists everything with its due date. Tap one to see it big, open its page, edit it or tick it off','Reminders on your phone: open Inkwell on the phone from the Home Screen, sign in, and turn on Settings → Homework reminders. The reminder then pops up as a notification at the time you picked, even when Inkwell is closed','Selection menu: the Homework button is the book icon; the colour dots are a little narrower on the iPad so the menu still fits on one row']],
   ['1.92', '2026-11-09', ['Toolbar on the side: a Shapes button sits at the bottom, next to the zoom, so shapes are one tap away', 'Toolbar on the side: the colours are smaller and three to a row, which makes room for it']],
   ['1.91.2', '2026-11-09', ['Very big pages (thousands of strokes) upload less often while you write: about every minute or two instead of after every pause. They are saved on the iPad right away as before, and go up at once when you leave the app or tap Sync now. While one waits, the sync line says "Saved here, syncs shortly". This keeps the notes server from running out of its disk budget']],
   ['1.91.1', '2026-11-07', ['Small text that was too pale to read easily (page counts, dates, ticked-off to-dos, notes under settings) is darker now','Empty notebooks and sections no longer show a 0','Page counts and dates use the normal font instead of the typewriter one','The highlighter icon matches the other tools']],

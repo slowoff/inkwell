@@ -75,6 +75,7 @@
       <button class="tb" id="shapeBtn" title="Insert shape or graph" aria-label="Insert shape or graph"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="4.5"/><path d="M13.5 13h7v7h-7z"/><path d="M4 20l4-6.5 4 6.5z"/></svg><span class="lbl">Shapes</span></button>
       <button class="tb ask-tb" id="askBtn" title="Ask Claude about a question on the page" aria-label="Ask Claude"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg><span class="lbl">Ask Claude</span></button>
       <button class="tb later-tb" id="laterBtn" title="Marked for later" aria-label="Marked for later"><svg viewBox="0 0 24 24"><path d="M7 3h10a1 1 0 0 1 1 1v17l-6-4-6 4V4a1 1 0 0 1 1-1z"/></svg><span class="lbl">Later</span><span class="later-n" id="laterCount" hidden></span></button>
+      <button class="tb later-tb" id="hwBtn" title="Homework: things you marked to do, with due dates and reminders" aria-label="Homework"><svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></svg><span class="lbl">Homework</span><span class="later-n hw-n" id="hwCount" hidden></span></button>
       <button class="tb" id="calcBtn" title="Calculator" aria-label="Calculator"><svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8 6.5h8v3H8z"/><path d="M8.5 13h.01M12 13h.01M15.5 13h.01M8.5 16.5h.01M12 16.5h.01M15.5 16.5h.01" stroke-width="2.4" stroke-linecap="round"/></svg><span class="lbl">Calculator</span></button>
       <button class="tb" id="paperBtn" title="Paper" aria-label="Paper"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/></svg><span class="lbl">Paper</span></button>
       <button class="tb" id="moreBtn" title="More" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
@@ -149,6 +150,7 @@
           <button class="tb" id="selRot90" title="Rotate 90° clockwise" aria-label="Rotate 90°"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
           <button class="tb" id="selText" hidden title="Text of the imported page inside your lasso">Text</button>
           <button class="tb" id="selShot" hidden title="Copy the box as a picture, like a screenshot">Copy as picture</button>
+          <button class="tb" id="selHw" title="Homework: add what you selected to your Homework list, with a due date and a reminder" aria-label="Add to Homework"><svg viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H14a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></svg></button>
           <button class="tb" id="selFade" title="Fade: make the selection lighter">Fade</button>
           <button class="tb" id="selCopy">Copy</button>
           <button class="tb" id="selDup">Duplicate</button>
@@ -157,7 +159,7 @@
       </div>
       <div class="ts" id="tsLayer" hidden>
         <div class="ts-box" id="tsBox"></div>
-        <div class="sel-menu ts-menu" id="tsMenu"><span class="ts-n" id="tsN"></span><button class="tb" id="tsCopy">Copy</button><button class="tb" id="tsOpen" title="See the text, copy part of it or put it on the page">Text…</button><button class="tb" id="tsShot" hidden title="Copy the box as a picture, like a screenshot">Copy as picture</button></div>
+        <div class="sel-menu ts-menu" id="tsMenu"><span class="ts-n" id="tsN"></span><button class="tb" id="tsCopy">Copy</button><button class="tb" id="tsOpen" title="See the text, copy part of it or put it on the page">Text…</button><button class="tb" id="tsShot" hidden title="Copy the box as a picture, like a screenshot">Copy as picture</button><button class="tb" id="tsHw" title="Add this to your Homework list, with a due date and a reminder">Homework</button></div>
       </div>
       <div class="pg-slider" id="pgSlider" hidden aria-label="Jump to page"><div class="pg-track" id="pgTrack"><div class="pg-ticks" id="pgTicks"></div><div class="pg-thumb" id="pgThumb"></div><div class="pg-label" id="pgLabel"></div></div></div>
       <div class="stage-empty" id="stageEmpty" hidden><div><h3>No page open</h3><p>Pick a page on the left or create a new one.</p></div></div>
@@ -404,6 +406,10 @@
       <p class="hint" id="syncInfo"></p>
       <div class="dlg-actions"><span class="btn-pair"><button class="btn ghost" id="signOut">Sign out</button><button class="btn ghost" id="changePass" hidden>Change password</button></span><button class="btn primary" id="syncNow">Sync now</button></div>
     </div>
+    <div id="pushBox" hidden>
+      <div class="set-row"><span>Homework reminders</span><span class="btn-pair"><button class="btn ghost" id="pushTest" hidden>Send a test</button><button class="btn ghost" id="pushBtn">Turn on</button></span></div>
+      <p class="hint" id="pushInfo"></p>
+    </div>
     <hr>
     <p class="set-h">Appearance</p>
     <div class="set-row"><span>Theme</span><div class="seg" id="setTheme"><button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
@@ -454,6 +460,38 @@
 </div>
 
 <textarea id="pasteCatch" aria-hidden="true" tabindex="-1" style="position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;resize:none"></textarea>
+<div class="modal" id="hwListDlg" hidden>
+  <div role="dialog" aria-modal="true" class="dlg hw-list-dlg">
+    <div class="dlg-head"><h3>Homework</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="hw-list" id="hwList"></div>
+  </div>
+</div>
+
+<div class="modal" id="hwViewDlg" hidden>
+  <div role="dialog" aria-modal="true" class="dlg hw-view-dlg">
+    <div class="dlg-head"><h3 id="hwvDue">Homework</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <img id="hwvImg" alt="The part you marked">
+    <p class="hw-v-text" id="hwvText"></p>
+    <p class="hint" id="hwvInfo"></p>
+    <div class="dlg-actions"><span class="btn-pair"><button class="btn ghost" id="hwvDel">Delete</button><button class="btn ghost" id="hwvEdit">Edit</button><button class="btn ghost" id="hwvGo">Open page</button></span><button class="btn primary" id="hwvDone">Done</button></div>
+  </div>
+</div>
+
+<div class="modal" id="hwDlg" hidden>
+  <div role="dialog" aria-modal="true" class="dlg hw-dlg">
+    <div class="dlg-head"><h3 id="hwDlgTitle">Add to Homework</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <img id="hwImg" alt="The part you marked">
+    <label class="field"><span>What to do</span><textarea id="hwText" rows="3" placeholder="e.g. Skript S. 178, Aufgabe 3"></textarea></label>
+    <div class="hw-when">
+      <label class="field"><span>Due</span><input type="date" id="hwDue" class="text-in"></label>
+      <label class="field"><span>Reminder</span><select id="hwWhen" class="text-in"><option value="eve">Day before, 18:00</option><option value="morn">On the day, 07:00</option><option value="pick">Pick a time…</option><option value="none">No reminder</option></select></label>
+    </div>
+    <label class="field" id="hwPickWrap" hidden><span>Remind me at</span><input type="datetime-local" id="hwPick" class="text-in"></label>
+    <p class="hint" id="hwRemInfo"></p>
+    <div class="dlg-actions"><span></span><button class="btn primary" id="hwSave">Add</button></div>
+  </div>
+</div>
+
 <div class="modal" id="shotDlg" hidden>
   <div role="dialog" aria-modal="true" class="dlg shot-dlg">
     <div class="dlg-head"><h3>Picture of the box</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>

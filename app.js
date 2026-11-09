@@ -42,6 +42,7 @@ const FILES = [
   'app/10-shapes.js',
   'app/11-claude.js',
   'app/12-tools.js',
+  'app/12b-homework.js',
   'app/13-start.js'
 ];
 try {

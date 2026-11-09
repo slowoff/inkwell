@@ -195,14 +195,14 @@ async def main():
         check(r['xmax'] <= x_end + 0.5, f'the saved stroke ends where the pen lifted (x {r["xmax"]:.1f}, pen at {x_end:.1f})')
         check(r['op'] == '', 'live layer back to normal after the stroke')
 
-        # highlighter: see-through while drawing, normal afterwards
+        # highlighter: full strength while drawing (1.94; was see-through), normal afterwards
         await page.evaluate("() => __inkwell.setTool('hl')")
         await page.mouse.move(box[0] + 200, box[1] + 420); await page.mouse.down()
         for i in range(1, 40): await page.mouse.move(box[0] + 200 + i * 4, box[1] + 420)
         op = await page.evaluate("() => document.getElementById('live').style.opacity")
         await page.mouse.up(); await page.wait_for_timeout(300)
         op2 = await page.evaluate("() => document.getElementById('live').style.opacity")
-        check(op in ('0.4', '0.34') and op2 == '', f'highlighter preview is see-through while drawing ({op}), normal after ({op2!r})')
+        check(op == '1' and op2 == '', f'(1.94) highlighter preview is at full strength while drawing ({op}), normal after ({op2!r})')
 
         check(not errs, f'no page errors {errs[:2]}')
         await b.close()

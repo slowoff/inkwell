@@ -359,6 +359,9 @@ function watchCanvas(c){
   c.addEventListener('contextrestored', () => invalidate());
 }
 for(const c of [bgCv, hlmCv, inkCv, liveCv]) watchCanvas(c);
+// (1.94) highlighter strength: the exact colour picked (was 0.4, and 0.34 on the dark page). Highlights blend into
+// what is under them (multiply), so printed text and writing stay readable through them
+const HL_A = 1;
 // (1.62) does this highlight blend into the page (multiply)? fills = boxes of filled shapes on the page
 const hlMultiply = (paper, b, fills) => (paper || !isDark()) && !fills.some(f => f[0] < b[2] && f[2] > b[0] && f[1] < b[3] && f[3] > b[1]);
 // the camera the ink and highlighter layers were last drawn with
@@ -382,14 +385,17 @@ function paintInk(boxes, probe){
         const paper = onPaperAt(pages, (g.b[0] + g.b[2]) / 2, (g.b[1] + g.b[3]) / 2);
         const ctx = pass === 1 && hlMultiply(paper, g.b, fills) ? hlmCtx : inkCtx;
         if(ctx === hlmCtx) hlmUsed = true;
-        ctx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
+        ctx.globalAlpha = (pass === 1 ? HL_A : 1) * opOf(it);
+        // (1.94) on the ink layer (over a filled shape) a light-mode highlight multiplies too, so the fill shows through;
+        // on the dark page it is drawn as it is (multiply would hide it there)
+        ctx.globalCompositeOperation = pass === 1 && ctx === inkCtx && !(isDark() && !paper) ? 'multiply' : 'source-over';
         ctx.fillStyle = inkColor(it.c, false, paper, it.hl);
         ctx.fill(g.path);
         if(probe && pass === 0) InkCheck.note(it);
       } catch(e){ frameError(e, 'stroke ' + it.id); }
     }
   }
-  inkCtx.globalAlpha = 1; hlmCtx.globalAlpha = 1;
+  inkCtx.globalAlpha = 1; hlmCtx.globalAlpha = 1; inkCtx.globalCompositeOperation = 'source-over';
   // one small bookmark at the top right of every marked spot
   inkCtx.setTransform(dpr, 0, 0, dpr, dpr * MX, dpr * MY);
   inkCtx.fillStyle = MARK_C;

@@ -52,7 +52,7 @@ async def main():
             plain = await px(page, 300, 330)     # white paper, no highlight
             print(f' {theme}: text {text}, highlighted paper {paper}, paper {plain}')
             check(max(text) < 30, f'{theme}: black text under a highlight stays black ({text})')
-            check(abs(paper[0] - 251) <= 4 and abs(paper[1] - 231) <= 5 and abs(paper[2] - 153) <= 6, f'{theme}: highlighted paper has the same pale yellow as before ({paper}, expected about (251, 231, 153))')
+            check(abs(paper[0] - 245) <= 4 and abs(paper[1] - 196) <= 5 and abs(paper[2] - 0) <= 6, f'{theme}: (1.94) highlighted paper has the exact colour picked ({paper}, expected about (245, 196, 0))')
             check(min(plain) > 245, f'{theme}: paper without highlight stays white ({plain})')
             if theme == 'dark':
                 # highlight on the dark page background (not on paper): the old see-through look, not blended

@@ -37,8 +37,10 @@ async def main():
         await page.wait_for_timeout(500)
         done = Image.open(io.BytesIO(await page.screenshot())).convert('RGB').getpixel((int(st[0] + x0 + 100), int(st[1] + y)))
         yellow = lambda c: c[0] > 200 and c[1] > 200 and c[2] < c[0] - 40
+        exact = lambda c: abs(c[0] - 255) <= 4 and abs(c[1] - 249) <= 5 and abs(c[2] - 107) <= 8
         check(yellow(live), f'pale yellow highlighter is yellow while drawing {live}')
         check(yellow(done), f'pale yellow highlighter is yellow when finished {done}')
+        check(exact(live) and exact(done), f'(1.94) it is the exact colour picked, #FFF96B (live {live}, finished {done})')
         it = await page.evaluate("[...__inkwell.cur.items.values()].find(i => i.t === 's')")
         check(it and it['c'] == '#FFF96B' and it['hl'], 'stroke keeps the colour')
         # white pen ink is still shown dark on white paper

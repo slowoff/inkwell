@@ -718,7 +718,7 @@ const Live = {
 };
 function drawLive(){
   clearLive();
-  const hlA = act && act.kind === 'stroke' && act.hl ? String(isDark() && !onPaperAt(paperRects(), act.pts[0], act.pts[1]) ? 0.34 : 0.4) : '';
+  const hlA = act && act.kind === 'stroke' && act.hl ? String(HL_A) : '';
   if(liveCv.style.opacity !== hlA) liveCv.style.opacity = hlA;
   // (1.62) the highlight being drawn blends into the page like the finished one
   liveCv.classList.toggle('hl-mul', !!hlA && hlMultiply(onPaperAt(paperRects(), act.pts[0], act.pts[1]), [act.pts[0], act.pts[1], act.pts[0], act.pts[1]], []));

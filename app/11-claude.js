@@ -156,9 +156,9 @@ const Ask = {
       if(it.f){ ctx.fillStyle = '#18212B'; for(const f of it.f){ if(f.k === 'tx' && f.v){ ctx.font = `${Math.max(8, f.h * it.h * 0.6)}px sans-serif`; ctx.fillText(String(f.v), it.x + f.x * it.w + 2, it.y + (f.y + f.h * 0.75) * it.h); } } }
     }
     for(const it of all.filter(i => i.t === 's').sort((a, b) => (b.hl || 0) - (a.hl || 0))){
-      ctx.globalAlpha = (it.hl ? 0.4 : 1) * opOf(it); ctx.fillStyle = inkColor(it.c, true, true, it.hl); ctx.fill(strokePath(it, false));
+      ctx.globalAlpha = (it.hl ? HL_A : 1) * opOf(it); ctx.globalCompositeOperation = it.hl ? 'multiply' : 'source-over'; ctx.fillStyle = inkColor(it.c, true, true, it.hl); ctx.fill(strokePath(it, false));
     }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
     for(const it of all.filter(i => i.t === 'x' || i.t === 'm')){
       const fsz = it.t === 'x' ? 16 * (it.fs || 1) : (it.fs || 22) * 0.8, maxW = it.t === 'x' ? it.w : 2000;
       ctx.fillStyle = '#18212B'; ctx.font = (it.t === 'm' ? 'italic ' : '') + fsz + 'px sans-serif';

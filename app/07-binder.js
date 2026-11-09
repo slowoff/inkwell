@@ -885,11 +885,11 @@ async function drawMarkPreview(cv, e){
     if(it.t !== 's' || (it.hl ? 1 : 0) !== pass) continue;
     const sb = strokeBox(it); if(boxGap(sb, area) > 0) continue;
     const paper = onP((sb[0] + sb[2]) / 2, (sb[1] + sb[3]) / 2);
-    ctx.globalAlpha = (pass ? 0.4 : 1) * opOf(it);
+    ctx.globalAlpha = (pass ? HL_A : 1) * opOf(it); ctx.globalCompositeOperation = pass ? 'multiply' : 'source-over';
     ctx.fillStyle = inkColor(it.c, false, paper, it.hl);
     ctx.fill(strokePath(it, false));
   }
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 }
 async function goToMark(pid, g){
   closePops();
@@ -1348,7 +1348,7 @@ function drawVersion(cv, data){
   const sc = Math.min((W - 12) / Math.max(1, b[2] - b[0]), (H - 12) / Math.max(1, b[3] - b[1]), 1);
   ctx.setTransform(sc, 0, 0, sc, 6 - b[0] * sc, 6 - b[1] * sc);
   for(const it of items){
-    if(it.t === 's'){ ctx.globalAlpha = (it.hl ? 0.35 : 1) * opOf(it); ctx.fillStyle = inkColor(it.c, true, false, it.hl); ctx.fill(strokePath(it, false)); ctx.globalAlpha = 1; }
+    if(it.t === 's'){ ctx.globalAlpha = (it.hl ? HL_A : 1) * opOf(it); ctx.globalCompositeOperation = it.hl ? 'multiply' : 'source-over'; ctx.fillStyle = inkColor(it.c, true, false, it.hl); ctx.fill(strokePath(it, false)); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; }
     else { const q = boxOf(it); ctx.fillStyle = it.t === 'i' ? '#e4e6ea' : it.t === 'tp' ? '#e8b23a' : '#c3c8d0'; ctx.fillRect(q[0], q[1], q[2] - q[0], it.t === 'x' ? Math.min(q[3] - q[1], 10 / sc) : q[3] - q[1]); }
   }
 }

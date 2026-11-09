@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.95', '2026-11-09', ['New highlighter icon: a line of text with one line marked, so it no longer looks like the eraser']],
   ['1.94', '2026-11-09', ['Highlighter: draws in the exact colour you pick instead of a pale see-through version. Printed text, your writing and lines under it stay readable, like with a real marker. Highlights you already drew look the same way now, also in PDF exports and in what Claude sees']],
   ['1.93.2', '2026-11-09', ['Homework: phone reminders removed. Homework keeps its list, due dates and pictures; the Reminder choice and Settings → Homework reminders are gone, and no more notifications are sent']],
   ['1.93.1', '2026-11-09', ['Highlighter: a pale colour (like a light lemon yellow from the colour wheel) drew grey. It now shows in its own colour, also in PDF exports. Highlights you already drew with it turn yellow too']],

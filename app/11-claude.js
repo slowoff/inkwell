@@ -41,7 +41,7 @@ const Ask = {
   },
   close(){ $('askPanel').hidden = true; if(this.ctrl) this.ctrl.abort(); },
   empty(){
-    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, add a <b>photo</b> (the picture icon), or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution.<br><br><b>Practice</b> (same menu): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
+    $('askLog').innerHTML = `<div class="ask-empty">Tap <b>scan</b> (the frame icon) and draw a box around a question on your page, add a <b>photo</b> (the picture icon), or just type. Claude also gets the typed text of the page you have open.<br><br><b>Tutor</b> explains and gives hints so you solve it yourself. <b>Solve</b> shows the full worked solution. <b>Check</b> only tells you whether your answer is right or wrong.<br><br><b>Practice</b> (same menu): pick pages with learning objectives, exercises or notes, and Claude quizzes you one exercise at a time.</div>`;
   },
   chats(){ return [...docs.values()].filter(d => d.kind === 'chat' && live(d)).sort((a, b) => (b.data.at || 0) - (a.data.at || 0)); },
   /* (1.68) History filter: chats from the open page, its section, its notebook, or all (prefs.askFilter, per device).
@@ -83,7 +83,7 @@ const Ask = {
     const day = ms => { const d = new Date(ms), now = new Date(); const same = d.toDateString() === now.toDateString(); return same ? d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : d.toLocaleDateString([], {day: 'numeric', month: 'short'}) + (d.getFullYear() !== now.getFullYear() ? ' ' + d.getFullYear() : ''); };
     $('askLog').innerHTML = `<div class="ah-head"><b>History</b><button class="btn ghost ah-back">Back to chat</button></div>` + (all.length ? bar : '') + (list.length ? list.map(c => {
       const pg = c.data.page && docs.get(c.data.page), n = (c.data.view || []).filter(v => v.who === 'user').length;
-      return `<div class="ah-row ${c.id === this.chatId ? 'on' : ''}" data-chat="${c.id}"><button class="ah-open"><b>${esc(c.data.title || 'Chat')}</b><span>${esc(day(c.data.at || 0))}${pg && live(pg) ? ' · ' + esc(pg.data.title || 'Untitled page') : ''} · ${n} question${n === 1 ? '' : 's'} · ${c.data.mode === 'solve' ? 'Solve' : c.data.mode === 'practice' ? 'Practice' : 'Tutor'}</span></button><button class="ah-del" title="Delete this chat" aria-label="Delete chat"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button></div>`;
+      return `<div class="ah-row ${c.id === this.chatId ? 'on' : ''}" data-chat="${c.id}"><button class="ah-open"><b>${esc(c.data.title || 'Chat')}</b><span>${esc(day(c.data.at || 0))}${pg && live(pg) ? ' · ' + esc(pg.data.title || 'Untitled page') : ''} · ${n} question${n === 1 ? '' : 's'} · ${c.data.mode === 'solve' ? 'Solve' : c.data.mode === 'check' ? 'Check' : c.data.mode === 'normal' ? 'Normal' : c.data.mode === 'practice' ? 'Practice' : 'Tutor'}</span></button><button class="ah-del" title="Delete this chat" aria-label="Delete chat"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button></div>`;
     }).join('') : `<div class="ask-empty">${esc(none)}</div>`);
   },
   showChat(){
@@ -111,8 +111,8 @@ const Ask = {
   },
   renderMode(){
     const sel = $('askModeSel');
-    sel.value = this.mode === 'practice' ? 'practice' : (['solve', 'normal'].includes(prefs.askMode) ? prefs.askMode : 'tutor');
-    sel.title = {normal: 'Normal: answers like the regular Claude app', tutor: 'Tutor: explains and gives hints, you solve it', solve: 'Solve: shows the full worked solution', practice: 'Practice: Claude quizzes you on pages you pick'}[sel.value];
+    sel.value = this.mode === 'practice' ? 'practice' : (['solve', 'normal', 'check'].includes(prefs.askMode) ? prefs.askMode : 'tutor');
+    sel.title = {normal: 'Normal: answers like the regular Claude app', tutor: 'Tutor: explains and gives hints, you solve it', solve: 'Solve: shows the full worked solution', check: 'Check: says whether your answer is right or wrong', practice: 'Practice: Claude quizzes you on pages you pick'}[sel.value];
     this.renderPending && this.renderPending();
   },
   reset(){ if(this.ctrl) this.ctrl.abort(); this.mode = null; this.renderMode(); this.pending = null; this.renderPending(); this.msgs = []; this.view = []; this.chatId = null; this.busy = false; this.histOpen = false; $('askPanel').classList.remove('hist'); this.empty(); $('askSend').disabled = false; },
@@ -235,7 +235,7 @@ const Ask = {
       const many = p.length > 1;
       const typed = many ? p.map((x, i) => x.typed ? 'Scan ' + (i + 1) + ':\n' + x.typed : '').filter(Boolean).join('\n\n') : p[0].typed;
       const box = (p.find(x => x.box) || {}).box || null, photos = p.filter(x => x.photo).length;
-      r = await this.send(t || (this.mode === 'practice' ? (many ? 'Here are my answers.' : 'Here is my answer.') : prefs.askMode === 'solve' ? (many ? 'Solve these questions.' : 'Solve this question.') : (many ? 'Help me with these.' : 'Help me with this question.')), p.map(x => x.url), typed, box, photos ? {photos} : undefined);
+      r = await this.send(t || (this.mode === 'practice' ? (many ? 'Here are my answers.' : 'Here is my answer.') : prefs.askMode === 'solve' ? (many ? 'Solve these questions.' : 'Solve this question.') : prefs.askMode === 'check' ? (many ? 'Check my answers.' : 'Check my answer.') : (many ? 'Help me with these.' : 'Help me with this question.')), p.map(x => x.url), typed, box, photos ? {photos} : undefined);
     }
     else r = await this.send(t);
     // (1.67.3) the question did not go through (no connection, server error, not signed in): the typed text and the
@@ -263,7 +263,7 @@ const Ask = {
   },
   async saveChat(){
     const first = this.view.find(v => v.who === 'user');
-    const auto = /^(Solve this question\.|Help me with this question\.|Solve these questions\.|Help me with these\.)$/;
+    const auto = /^(Check my answers?\.|Solve this question\.|Help me with this question\.|Solve these questions\.|Help me with these\.)$/;
     const page = first && first.page && getDoc(first.page);
     const title = first ? (first.text && !auto.test(first.text) ? first.text.split('\n')[0] : 'Scanned question' + (page && page.data.title ? ' · ' + page.data.title : '')) : 'Chat';
     const data = {title: title.slice(0, 80), at: Date.now(), page: first && first.page || null, mode: this.mode || prefs.askMode || 'tutor', msgs: this.msgs, view: this.view};
@@ -543,7 +543,7 @@ $('askLog').addEventListener('click', async e => {
   }
   if(e.target.closest('.ah-open')) Ask.load(id);
 });
-// one dropdown: Tutor / Solve change how Claude answers; Practice opens the practice setup.
+// one dropdown: Normal / Tutor / Solve / Check (1.96) change how Claude answers; Practice opens the practice setup.
 // Leaving a practice chat for Tutor or Solve starts a new chat (the practice stays in the history).
 $('askModeSel').addEventListener('change', () => {
   const v = $('askModeSel').value;
@@ -555,7 +555,7 @@ $('askModeSel').addEventListener('change', () => {
   const was = Ask.mode === 'practice' ? 'practice' : prefs.askMode;
   prefs.askMode = v; savePrefs();
   if(Ask.mode === 'practice') Ask.reset(); else Ask.renderMode();
-  if(was !== v) note(v === 'solve' ? 'Solve · full worked solutions' : v === 'normal' ? 'Normal · answers directly' : 'Tutor · hints, you solve it');
+  if(was !== v) note(v === 'solve' ? 'Solve · full worked solutions' : v === 'check' ? 'Check · right or wrong, nothing more' : v === 'normal' ? 'Normal · answers directly' : 'Tutor · hints, you solve it');
 });
 $('askSend').addEventListener('click', () => Ask.submit());
 $('askAttX').addEventListener('click', () => { Ask.pending = null; Ask.renderPending(); });

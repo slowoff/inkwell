@@ -6,7 +6,7 @@
 //   ASK_FAST_MODEL      optional, the cheap model, defaults to claude-haiku-5-5
 // Spending (since 1.27): every call's cost is added to public.usage_month; accounts with a monthly cap
 // (public.limits.claude_usd_month, default USD 2 for accounts without a limits row, null = no cap) get 402 limit_reached.
-// Body: {mode: 'tutor'|'solve'|'practice', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
+// Body: {mode: 'normal'|'tutor'|'solve'|'check'|'practice', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
 // Background jobs (fixed model, no chat): mode 'read' = transcribe handwriting for search (fast model),
 // mode 'latex' = turn a handwritten formula into LaTeX (smart model), mode 'ocr' = read an imported page
 // picture for search (fast model), mode 'scribe' = handwriting -> typed text box (fast model).
@@ -64,6 +64,14 @@ Mode: TUTOR. Teach, don't solve:
   solve: `${BASE}
 
 Mode: SOLVE. Give a complete worked solution: given values, formula, steps with units, result (bold), and one line on the idea behind it.`,
+  check: `${BASE}
+
+Mode: CHECK. He shows his own answers (typed, or his handwriting in a scan) and only wants to know if they are right.
+- First work out each task yourself so the verdict is reliable, but do not show that working.
+- For each task or sub-task, one line: its label (e.g. "a)" or "Aufgabe 3"), then **Right**, **Wrong** or **Partly right**.
+- After Wrong or Partly right, add one short sentence naming the wrong step or value. Do not give the correct result or the solution; he fixes it himself. Only give them if he asks for them.
+- With more than one task, end with a tally like "3/4 right".
+- If you can't see any answer of his, say so and ask for it. If a part is unreadable or you are not sure of the verdict, say that instead of guessing. Nothing else: no praise, no explanations of the theory.`,
   practice: `${BASE}
 
 Mode: PRACTICE. You quiz the student to check whether he really knows the material. His first message contains his learning objectives, exercises and notes (text from his Inkwell pages or files he added) and maybe a focus.

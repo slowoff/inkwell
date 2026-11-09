@@ -412,7 +412,7 @@ async function exportPdf(){
     const q = itemBox(it);
     const fo = (pass === 1 ? 0.4 : 1) * opOf(it);
     // (1.62) highlights blend into the page (multiply), like on screen
-    inks.push({a: q[1], b: q[3], hl: pass === 1, h: `<path d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true))}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
+    inks.push({a: q[1], b: q[3], hl: pass === 1, h: `<path d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true, false, it.hl))}"${fo < 1 ? ` fill-opacity="${+fo.toFixed(3)}"` : ''}/>`});
   }
   const tops = [];
   for(const it of cur.items.values()){
@@ -628,7 +628,7 @@ function pdfAnnotAdd(doc, page, dict, ops, bbox, res, M){
 }
 const rgbOf = c => { const v = parseInt(String(c).slice(1), 16) || 0; return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
 function pdfInkAnnot(doc, page, it, X, Y, sk, M){
-  const {drawSvgPath, rgb} = PDFLib, c = inkColor(it.c, true), [r, g, b] = rgbOf(c), q = itemBox(it), o = (it.hl ? 0.4 : 1) * opOf(it);
+  const {drawSvgPath, rgb} = PDFLib, c = inkColor(it.c, true, false, it.hl), [r, g, b] = rgbOf(c), q = itemBox(it), o = (it.hl ? 0.4 : 1) * opOf(it);
   const bbox = [X(q[0]) - 1, Y(q[3]) - 1, X(q[2]) + 1, Y(q[1]) + 1].map(v => Math.round(v * 100) / 100);
   const line = []; let w = 2;
   if(it.fl){ for(let i = 0; i < it.p.length; i += 3) line.push(...pdfPt(M, X(it.p[i]), Y(it.p[i + 1]))); }
@@ -685,7 +685,7 @@ async function movableSvg(items, inks, tops, b){
   n = 0;
   for(const it of inks){
     const o = (it.hl ? 0.4 : 1) * opOf(it);
-    add(`<path id="stroke-${++n}" d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true))}"${o < 1 ? ` fill-opacity="${+o.toFixed(3)}"` : ''}${it.hl ? ' style="mix-blend-mode:multiply"' : ''}/>`);
+    add(`<path id="stroke-${++n}" d="${strokePath(it, true)}" fill="${esc(inkColor(it.c, true, false, it.hl))}"${o < 1 ? ` fill-opacity="${+o.toFixed(3)}"` : ''}${it.hl ? ' style="mix-blend-mode:multiply"' : ''}/>`);
   }
   n = 0;
   for(const t of tops){
@@ -847,7 +847,7 @@ async function makePdf(){
       }
       if(!movable) for(const it of inks){
         const q = inkBoxes.get(it.id); if(!reach(q[1], q[3])) continue;
-        page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true)), opacity: (it.hl ? 0.4 : 1) * opOf(it), ...(it.hl && PDFLib.BlendMode ? {blendMode: PDFLib.BlendMode.Multiply} : {})});
+        page.drawSvgPath(strokePath(it, true), {...at, color: hexRgb(inkColor(it.c, true, false, it.hl)), opacity: (it.hl ? 0.4 : 1) * opOf(it), ...(it.hl && PDFLib.BlendMode ? {blendMode: PDFLib.BlendMode.Multiply} : {})});
       }
       if(!movable) for(const t of tops){
         if(!reach(t.b[1], t.b[3])) continue;

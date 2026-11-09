@@ -74,11 +74,14 @@ function lum(hex){
   return 0.2126 * (n >> 16) / 255 + 0.7152 * (n >> 8 & 255) / 255 + 0.0722 * (n & 255) / 255;
 }
 // onPaper: drawn over an imported page/picture, which always stays light, so use light-mode ink there
-function inkColor(c, print, onPaper){
+// hl: a highlighter stroke. (1.93.1) its colour is used as it is: the swap of very light ink for dark ink (so white
+// pen ink shows on white paper) turned a pale yellow highlighter into dark grey
+function inkColor(c, print, onPaper, hl){
   if(onPaper) print = true;
   const dark = !print && isDark();
   if(!c || c === 'auto') return print ? '#18212B' : tokens.fg;
   if(c === 'paper') return print ? '#FFFFFF' : (tokens.paper || '#FFFFFF');   // (1.57) the page colour: white, or dark in dark mode
+  if(hl) return c;
   const l = lum(c);
   if(dark && l < 0.07) return tokens.fg;
   if(!dark && l > 0.93) return '#18212B';
@@ -380,7 +383,7 @@ function paintInk(boxes, probe){
         const ctx = pass === 1 && hlMultiply(paper, g.b, fills) ? hlmCtx : inkCtx;
         if(ctx === hlmCtx) hlmUsed = true;
         ctx.globalAlpha = (pass === 1 ? (isDark() && !paper ? 0.34 : 0.4) : 1) * opOf(it);
-        ctx.fillStyle = inkColor(it.c, false, paper);
+        ctx.fillStyle = inkColor(it.c, false, paper, it.hl);
         ctx.fill(g.path);
         if(probe && pass === 0) InkCheck.note(it);
       } catch(e){ frameError(e, 'stroke ' + it.id); }

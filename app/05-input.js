@@ -725,7 +725,7 @@ function drawLive(){
   if(!act){ WA.drawAfter(); return; }
   if(act.kind === 'stroke'){
     const paper = onPaperAt(paperRects(), act.pts[0], act.pts[1]);
-    Live.draw(act, inkColor(act.c, false, paper));
+    Live.draw(act, inkColor(act.c, false, paper, act.hl));
     liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
     if(act.tool === 'pen' && !act.hl && !act.mk) WA.guide(act);
   } else if(act.kind === 'lasso'){

@@ -156,7 +156,7 @@ const Ask = {
       if(it.f){ ctx.fillStyle = '#18212B'; for(const f of it.f){ if(f.k === 'tx' && f.v){ ctx.font = `${Math.max(8, f.h * it.h * 0.6)}px sans-serif`; ctx.fillText(String(f.v), it.x + f.x * it.w + 2, it.y + (f.y + f.h * 0.75) * it.h); } } }
     }
     for(const it of all.filter(i => i.t === 's').sort((a, b) => (b.hl || 0) - (a.hl || 0))){
-      ctx.globalAlpha = (it.hl ? 0.4 : 1) * opOf(it); ctx.fillStyle = inkColor(it.c, true, true); ctx.fill(strokePath(it, false));
+      ctx.globalAlpha = (it.hl ? 0.4 : 1) * opOf(it); ctx.fillStyle = inkColor(it.c, true, true, it.hl); ctx.fill(strokePath(it, false));
     }
     ctx.globalAlpha = 1;
     for(const it of all.filter(i => i.t === 'x' || i.t === 'm')){
@@ -794,7 +794,7 @@ function inkImage(strokes, maxPx){
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
   ctx.setTransform(s, 0, 0, s, -x0 * s, -y0 * s);
-  for(const it of strokes){ ctx.fillStyle = inkColor(it.c, true); ctx.fill(strokePath(it, false)); }
+  for(const it of strokes){ ctx.fillStyle = inkColor(it.c, true, false, it.hl); ctx.fill(strokePath(it, false)); }
   const url = c.toDataURL('image/jpeg', 0.82);
   c.width = c.height = 1;
   return {url, box: b};

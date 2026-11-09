@@ -268,7 +268,7 @@ function showGridPanel(on){
 }
 $('gridOpen').addEventListener('click', () => {
   showGridPanel($('gridPanel').hidden);
-  if(!$('shapePop').hidden) openPopAgain('shapePop', $('shapeBtn'));   // re-place: the menu got taller or shorter
+  if(!$('shapePop').hidden) openPopAgain('shapePop', shapeAnchor);   // re-place: the menu got taller or shorter
 });
 $('gridDraw').addEventListener('click', () => {
   closePops();
@@ -284,7 +284,7 @@ $('hcSteps').addEventListener('click', e => {
 $('hexSnap2').addEventListener('click', () => { prefs.hexSnap = !prefs.hexSnap; savePrefs(); renderHc(); note(onOff('Straighten lines', prefs.hexSnap)); });
 $('hcOpen').addEventListener('click', () => {
   showHcPanel($('hcPanel').hidden);
-  if(!$('shapePop').hidden) openPopAgain('shapePop', $('shapeBtn'));
+  if(!$('shapePop').hidden) openPopAgain('shapePop', shapeAnchor);
 });
 $('hcDraw').addEventListener('click', () => {
   closePops();
@@ -292,7 +292,11 @@ $('hcDraw').addEventListener('click', () => {
   startPick({kind: 'shape', shape: 'honeycomb'}, `Drag a box on the page for a honeycomb of ${r} × ${c}. Tap for a standard size.`);
 });
 renderGrid(); renderHc();
-$('shapeBtn').addEventListener('click', e => { if(!cur){ toast('Open a page first'); return; } renderSnapShapes(); renderGrid(); renderHc(); showGridPanel(false); showHcPanel(false); openPop('shapePop', e.currentTarget); });
+// (1.92) two buttons open it: Shapes in the top bar / its menu, and #shapeRail at the foot of the toolbar column on the side
+let shapeAnchor = $('shapeBtn');
+function openShapes(e){ if(!cur){ toast('Open a page first'); return; } shapeAnchor = e.currentTarget; renderSnapShapes(); renderGrid(); renderHc(); showGridPanel(false); showHcPanel(false); openPop('shapePop', shapeAnchor); }
+$('shapeBtn').addEventListener('click', openShapes);
+$('shapeRail').addEventListener('click', openShapes);
 $('shapeGrid').addEventListener('click', e => {
   const b = e.target.closest('button[data-shape]'); if(!b) return;
   closePops();

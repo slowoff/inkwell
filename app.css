@@ -1062,7 +1062,7 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 }
 /* (1.83) Toolbar on the side: a narrow two-button column for the hand holding the iPad at the top corner (1.83.1: left mirrors
    right). The most used buttons sit nearest the corner; the menu and hide buttons sit at the foot, out of the thumb's way. */
-#barHide,#barShow{display:none}
+#barHide,#barShow,#shapeRail{display:none}
 @media (min-width:761px){
   .main[data-bar=left],.main[data-bar=right]{position:relative}
   .main[data-bar=left]{grid-template-columns:112px minmax(0,1fr)}
@@ -1097,7 +1097,14 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
   .main[data-bar=left] #rulerBtn,.main[data-bar=right] #rulerBtn,.main[data-bar=left] #fingerBtn,.main[data-bar=right] #fingerBtn{display:inline-flex;vertical-align:top;width:44px;height:44px;min-width:44px;padding:0;margin-top:6px;justify-content:center;border-radius:8px}
   .main[data-bar=left] #fingerBtn .sw,.main[data-bar=right] #fingerBtn .sw{display:none}
   .main[data-bar=left] #fingerBtn.on,.main[data-bar=right] #fingerBtn.on{background:var(--accent-soft);color:var(--accent)}
-  .main[data-bar=left] .bar2 .zoom,.main[data-bar=right] .bar2 .zoom{display:flex;margin:6px auto 0;min-width:44px;justify-content:center}
+  /* (1.92) Shapes beside the zoom at the foot of the column (Rafael uses it a lot); the zoom is narrowed to fit beside it */
+  .main[data-bar=left] #shapeRail,.main[data-bar=right] #shapeRail{display:inline-flex;vertical-align:top;width:44px;height:44px;min-width:44px;padding:0;margin-top:6px;justify-content:center;border-radius:8px}
+  .main[data-bar=left] .bar2 .zoom,.main[data-bar=right] .bar2 .zoom{display:inline-flex;vertical-align:top;margin:6px 0 0;width:46px;min-width:46px;padding:0;gap:2px;justify-content:center}
+  .main[data-bar=left] .bar2 .zoom svg,.main[data-bar=right] .bar2 .zoom svg{width:14px;height:14px}
+  /* (1.92) colours three to a row, smaller, so the column has room for Shapes */
+  .main[data-bar=left] .bar2 .swatches,.main[data-bar=right] .bar2 .swatches{grid-template-columns:repeat(3,30px);gap:3px}
+  .main[data-bar=left] .bar2 .swatch,.main[data-bar=right] .bar2 .swatch{width:30px;height:36px}
+  .main[data-bar=left] .bar2 .swatch.hl span,.main[data-bar=right] .bar2 .swatch.hl span{width:20px}
   #barMore[data-n]::after{content:attr(data-n);position:absolute;top:0;right:0;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#7B3FBF;color:#fff;font-size:10px;line-height:16px;font-weight:600;text-align:center}
   /* hidden: a small handle in the corner brings the column back */
   .main[data-bar=left][data-col]{grid-template-columns:0 minmax(0,1fr)}

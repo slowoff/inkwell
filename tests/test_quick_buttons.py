@@ -74,8 +74,9 @@ async def main():
         await page.evaluate("__inkwell.selectIds(['s_q'])"); await page.wait_for_selector('#selCopy', state='visible')
         await page.click('#selCopy'); await page.wait_for_timeout(500)
         check(await vis('#freshPaste') and not await vis('#pasteBtn'), 'after Copy: the fresh Paste shows, never two Paste buttons')
-        z, fp = await rect('#zoomBtn'), await rect('#freshPaste')
-        check(z and fp and fp['t'] >= z['b'] - 1 and fp['t'] - z['b'] < 30 and abs((fp['l'] + fp['r']) / 2 - (z['l'] + z['r']) / 2) < 2, f'left: under the zoom %, centred ({z}, {fp})')
+        # (1.92) the zoom shares its row with the Shapes button: the Paste button sits under that row, centred on it
+        z, fp, sr = await rect('#zoomBtn'), await rect('#freshPaste'), await rect('#shapeRail')
+        check(z and fp and sr and fp['t'] >= z['b'] - 1 and fp['t'] - z['b'] < 30 and abs((fp['l'] + fp['r']) / 2 - (sr['l'] + z['r']) / 2) < 2, f'left: under the Shapes + zoom % row, centred ({sr}, {z}, {fp})')
         foot = await rect('#sideBtn')
         check(foot and fp['b'] <= foot['t'] - 4, f'clear of the buttons at the foot ({foot})')
         check(fp['h'] >= 43.5, 'fresh Paste is 44 px tall')

@@ -406,10 +406,6 @@
       <p class="hint" id="syncInfo"></p>
       <div class="dlg-actions"><span class="btn-pair"><button class="btn ghost" id="signOut">Sign out</button><button class="btn ghost" id="changePass" hidden>Change password</button></span><button class="btn primary" id="syncNow">Sync now</button></div>
     </div>
-    <div id="pushBox" hidden>
-      <div class="set-row"><span>Homework reminders</span><span class="btn-pair"><button class="btn ghost" id="pushTest" hidden>Send a test</button><button class="btn ghost" id="pushBtn">Turn on</button></span></div>
-      <p class="hint" id="pushInfo"></p>
-    </div>
     <hr>
     <p class="set-h">Appearance</p>
     <div class="set-row"><span>Theme</span><div class="seg" id="setTheme"><button data-v="auto">Auto</button><button data-v="light">Light</button><button data-v="dark">Dark</button></div></div>
@@ -482,12 +478,7 @@
     <div class="dlg-head"><h3 id="hwDlgTitle">Add to Homework</h3><button class="icon-btn" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     <img id="hwImg" alt="The part you marked">
     <label class="field"><span>What to do</span><textarea id="hwText" rows="3" placeholder="e.g. Skript S. 178, Aufgabe 3"></textarea></label>
-    <div class="hw-when">
-      <label class="field"><span>Due</span><input type="date" id="hwDue" class="text-in"></label>
-      <label class="field"><span>Reminder</span><select id="hwWhen" class="text-in"><option value="eve">Day before, 18:00</option><option value="morn">On the day, 07:00</option><option value="pick">Pick a time…</option><option value="none">No reminder</option></select></label>
-    </div>
-    <label class="field" id="hwPickWrap" hidden><span>Remind me at</span><input type="datetime-local" id="hwPick" class="text-in"></label>
-    <p class="hint" id="hwRemInfo"></p>
+    <label class="field"><span>Due</span><input type="date" id="hwDue" class="text-in"></label>
     <div class="dlg-actions"><span></span><button class="btn primary" id="hwSave">Add</button></div>
   </div>
 </div>

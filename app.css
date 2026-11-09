@@ -941,11 +941,9 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
 .hw-view-dlg img{max-height:55vh;-webkit-touch-callout:default}
 .hw-dlg textarea{width:100%;min-height:64px;resize:vertical;font:16px/1.4 var(--f-ui);color:var(--fg);background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:8px 12px}
 .hw-dlg .field{margin-bottom:10px}
-.hw-when{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .hw-dlg select.text-in{appearance:auto;-webkit-appearance:menulist}
 .hw-dlg input[type=date],.hw-dlg input[type=datetime-local]{min-width:0}
-#hwRemInfo{min-height:1.2em;margin:0 0 6px}
-#hwRemInfo.warn,.hw-late{color:var(--danger,#E5484D)}
+.hw-late{color:var(--danger,#E5484D)}
 .hw-list-dlg{width:min(520px,calc(100vw - 24px))}
 .hw-list{display:flex;flex-direction:column;gap:6px;max-height:min(70vh,640px);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .hw-pv{width:104px;height:60px;flex:none;border-radius:6px;background:#fff;box-shadow:0 0 0 1px var(--line);object-fit:contain}

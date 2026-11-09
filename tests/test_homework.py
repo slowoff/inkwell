@@ -1,6 +1,7 @@
-# 1.93: Homework. Select tool → Homework makes a picture of the marked part with text, due date and reminder (doc kind
-# 'hw'); the top bar's Homework window lists them; Settings → Homework reminders subscribes this device to web push;
-# the service worker turns a push into a notification; ?hw=<id> opens that homework.
+# 1.93: Homework. Select tool → Homework makes a picture of the marked part with text and due date (doc kind 'hw');
+# the top bar's Homework window lists them. 1.93.1 (Rafael: "remove the notification thing from homework"): no Reminder
+# choice, no Settings → Homework reminders, sw.js shows no notifications, an old push subscription on the device is
+# dropped once, ?hw=<id> (old reminder links) opens the list.
 import asyncio, os, json
 from playwright.async_api import async_playwright
 PORT = os.environ.get('INKWELL_PORT', '8766')
@@ -59,32 +60,23 @@ async def main():
         await page.click('#selHw'); await page.wait_for_timeout(1200)
         d = await page.evaluate("""(() => ({open: !document.getElementById('hwDlg').hidden, img: document.getElementById('hwImg').naturalWidth,
           imgH: document.getElementById('hwImg').naturalHeight, text: document.getElementById('hwText').value, due: document.getElementById('hwDue').value,
-          when: document.getElementById('hwWhen').value, info: document.getElementById('hwRemInfo').textContent, sel: !!__inkwell.sel,
-          tomorrow: __inkwell.HWK.ymd(new Date(Date.now() + 86400000)), r: __inkwell.HWK.remindAt()}))()""")
+          sel: !!__inkwell.sel, rem: !!document.querySelector('#hwWhen,#hwPick,#hwRemInfo'),
+          tomorrow: __inkwell.HWK.ymd(new Date(Date.now() + 86400000))}))()""")
         check(d['open'] and d['img'] > 100 and abs(d['img'] / d['imgH'] - 336 / 166) < 0.1, f'dialog opens with a picture of the box ({d["img"]}x{d["imgH"]})')
         check(d['text'] == 'Skript S. 178, Aufgabe 3', f'text from the text box inside ({d["text"]!r})')
         check(d['due'] == d['tomorrow'], f'due tomorrow by default ({d["due"]})')
-        check(d['when'] in ('eve', 'morn') and d['r'] and d['r'] > 0 and d['info'].startswith('Reminder '), f'a reminder still ahead is picked ({d["when"]}, {d["info"]})')
+        check(not d['rem'], 'no Reminder choice in the window')
         check(not d['sel'], 'selection closed')
 
-        # 2. a time in the past is refused
-        await page.select_option('#hwWhen', 'pick')
-        await page.fill('#hwPick', '2020-01-01T08:00')
-        await page.wait_for_timeout(100)
-        warn = await page.evaluate("document.getElementById('hwRemInfo').classList.contains('warn')")
-        await page.click('#hwSave'); await page.wait_for_timeout(300)
-        check(warn and await vis('hwDlg'), 'a reminder in the past shows a warning and is not saved')
-        fut = await page.evaluate("(() => { const d = new Date(Date.now() + 3 * 86400000); d.setHours(17, 30, 0, 0); return __inkwell.HWK.ymd(d) + 'T17:30'; })()")
-        await page.fill('#hwPick', fut)
+        # 2. save
         await page.click('#hwSave'); await page.wait_for_timeout(800)
         h = await page.evaluate("""(() => { const l = [...__inkwell.docs.values()].filter(d => d.kind === 'hw');
           return {n: l.length, d: l[0] && l[0].data, id: l[0] && l[0].id, count: document.getElementById('hwCount').textContent, cshown: !document.getElementById('hwCount').hidden,
             page: __inkwell.cur.id, closed: document.getElementById('hwDlg').hidden}; })()""")
         x = h['d'] or {}
-        exp = await page.evaluate(f"new Date('{fut}').getTime()")
         check(h['n'] == 1 and h['closed'], 'one homework doc saved, dialog closed')
-        check(x.get('text') == 'Skript S. 178, Aufgabe 3' and x.get('page') == h['page'] and len(x.get('b') or []) == 4 and x.get('remind') == exp and x.get('when') == 'pick',
-              f'doc holds text, page, box, picked reminder ({x})')
+        check(x.get('text') == 'Skript S. 178, Aufgabe 3' and x.get('page') == h['page'] and len(x.get('b') or []) == 4 and x.get('remind') is None and x.get('due') == d['tomorrow'],
+              f'doc holds text, page, box, due date, no reminder ({x})')
         asset = await page.evaluate(f"__inkwell.IDB.get('assets', '{x.get('a')}').then(r => !!(r && r.blob && r.blob.size > 1000))")
         check(asset, 'picture saved as an asset')
         check(h['cshown'] and h['count'] == '1', f'badge on the Homework button ({h["count"]})')
@@ -100,7 +92,7 @@ async def main():
         await page.click('#hwList .later-go'); await page.wait_for_timeout(600)
         v = await page.evaluate("""(() => ({open: !document.getElementById('hwViewDlg').hidden, t: document.getElementById('hwvText').textContent, due: document.getElementById('hwvDue').textContent,
           info: document.getElementById('hwvInfo').textContent, img: document.getElementById('hwvImg').naturalWidth}))()""")
-        check(v['open'] and v['t'] == 'Skript S. 178, Aufgabe 3' and v['due'] == 'Due tomorrow' and v['info'].startswith('Reminder ') and v['img'] > 100, f'view window ({v})')
+        check(v['open'] and v['t'] == 'Skript S. 178, Aufgabe 3' and v['due'] == 'Due tomorrow' and 'eminder' not in v['info'] and v['img'] > 100, f'view window ({v})')
         await page.click('#hwvDone'); await page.wait_for_timeout(500)
         dn = await page.evaluate(f"(() => ({{done: __inkwell.docs.get('{hid}').data.done, badge: !document.getElementById('hwCount').hidden}}))()")
         check(dn['done'] is True and not dn['badge'], f'Done ticks it off and the badge goes ({dn})')
@@ -110,13 +102,12 @@ async def main():
         await page.click('#hwList .later-done'); await page.wait_for_timeout(400)
         check(await page.evaluate(f"!__inkwell.docs.get('{hid}').data.done"), 'tick in the list makes it open again')
 
-        # 4. edit: new text, no reminder
+        # 4. edit: new text
         await page.click('#hwList .later-go'); await page.wait_for_timeout(400)
         await page.click('#hwvEdit'); await page.wait_for_timeout(500)
-        e = await page.evaluate("(() => ({title: document.getElementById('hwDlgTitle').textContent, when: document.getElementById('hwWhen').value, pick: document.getElementById('hwPick').value, img: document.getElementById('hwImg').naturalWidth}))()")
-        check(e['title'] == 'Edit homework' and e['when'] == 'pick' and e['pick'] == fut and e['img'] > 0, f'edit window filled in ({e})')
+        e = await page.evaluate("(() => ({title: document.getElementById('hwDlgTitle').textContent, due: document.getElementById('hwDue').value, img: document.getElementById('hwImg').naturalWidth}))()")
+        check(e['title'] == 'Edit homework' and e['due'] == d['tomorrow'] and e['img'] > 0, f'edit window filled in ({e})')
         await page.fill('#hwText', 'Skript S. 178, Aufgabe 1-3')
-        await page.select_option('#hwWhen', 'none')
         await page.click('#hwSave'); await page.wait_for_timeout(500)
         x2 = await page.evaluate(f"__inkwell.docs.get('{hid}').data")
         check(x2['text'] == 'Skript S. 178, Aufgabe 1-3' and x2['remind'] is None and x2['a'] == x['a'], f'edit saved, same picture ({x2["text"]}, {x2["remind"]})')
@@ -127,7 +118,6 @@ async def main():
         check(await vis('tsHw'), 'empty box: Homework button next to Copy as picture')
         await page.click('#tsHw'); await page.wait_for_timeout(1000)
         check(await vis('hwDlg') and await page.evaluate("document.getElementById('hwText').value") == '', 'dialog opens with empty text')
-        await page.select_option('#hwWhen', 'none')
         await page.fill('#hwText', 'Learn vocab')
         await page.click('#hwSave'); await page.wait_for_timeout(600)
         check(await page.evaluate("[...__inkwell.docs.values()].filter(d => d.kind === 'hw' && !d.deleted).length") == 2, 'second homework added')
@@ -141,61 +131,34 @@ async def main():
         back = await page.evaluate(f"(() => {{ const d = __inkwell.docs.get('{id2}'); return !!(d && !d.deleted && d.data && d.data.text === 'Learn vocab'); }})()")
         check(gone and back, f'delete removes it, Undo brings it back ({gone}, {back})')
 
-        # 7. reload keeps them; ?hw=<id> opens that homework
+        # 7. reload keeps them; an old reminder link ?hw=<id> opens the list
         await page.evaluate("__inkwell.flushSaves()"); await page.wait_for_timeout(500)
         await page.goto(URL + '?hw=' + hid); await boot(page)
         await page.wait_for_timeout(1500)
-        r = await page.evaluate(f"""(() => ({{n: [...__inkwell.docs.values()].filter(d => d.kind === 'hw' && !d.deleted).length, view: !document.getElementById('hwViewDlg').hidden,
-          t: document.getElementById('hwvText').textContent, url: location.search}}))()""")
-        check(r['n'] == 2 and r['view'] and r['t'] == 'Skript S. 178, Aufgabe 1-3' and r['url'] == '', f'after reload: both kept, ?hw opens the view, address cleaned ({r})')
-        await page.evaluate("document.getElementById('hwViewDlg').hidden = true")
+        r = await page.evaluate("""(() => ({n: [...__inkwell.docs.values()].filter(d => d.kind === 'hw' && !d.deleted).length, list: !document.getElementById('hwListDlg').hidden,
+          url: location.search}))()""")
+        check(r['n'] == 2 and r['list'] and r['url'] == '', f'after reload: both kept, ?hw opens the list, address cleaned ({r})')
+        await page.evaluate("document.getElementById('hwListDlg').hidden = true")
 
-        # 8. reminders on this device (faked sign-in and server)
-        await page.evaluate("""() => { const W = __inkwell; W.Sync.user = {id: 'u1', email: 'r@example.com'}; window.__calls = [];
-          W.HWK.call = async (a, b) => { window.__calls.push([a, b]); if(a === 'key') return {pub: 'B' + 'A'.repeat(86)}; if(a === 'test') return {status: 201}; return {ok: true}; };
-          W.HWK.msg = ''; W.HWK.renderPush(); }""")
-        pb = await page.evaluate("(() => ({box: !document.getElementById('pushBox').hidden, btn: document.getElementById('pushBtn').textContent, test: !document.getElementById('pushTest').hidden}))()")
-        check(pb['box'] and pb['btn'] == 'Turn on' and not pb['test'], f'Settings: Homework reminders, Turn on ({pb})')
-        await page.evaluate("__inkwell.HWK.turnOn()"); await page.wait_for_timeout(800)
-        c = await page.evaluate("(() => ({calls: window.__calls, opts: window.__subOpts, ls: localStorage.getItem('inkwell.push'), btn: document.getElementById('pushBtn').textContent, test: !document.getElementById('pushTest').hidden, on: __inkwell.HWK.pushOn()}))()")
-        acts = [a for a, _ in c['calls']]
-        sub = next((b_ for a, b_ in c['calls'] if a == 'sub'), {}) or {}
-        check(acts[:3] == ['key', 'sub', 'test'], f'turning on asks for the key, sends the subscription, sends a test ({acts})')
-        check(sub.get('sub', {}).get('endpoint') == 'https://web.push.apple.com/fake-endpoint-123' and len(sub.get('sub', {}).get('keys', {}).get('auth', '')) == 22 and sub.get('dev') == 'Computer', f'subscription sent ({sub})')
-        check(c['opts'] == {'uv': True, 'key': 65}, f'subscribed with the 65-byte server key, visible only ({c["opts"]})')
-        check(c['on'] and c['btn'] == 'Turn off' and c['test'], f'shows as on ({c["btn"]})')
-        await page.evaluate("__inkwell.HWK.turnOff()"); await page.wait_for_timeout(600)
-        c2 = await page.evaluate("(() => ({last: window.__calls[window.__calls.length - 1], on: __inkwell.HWK.pushOn(), un: window.__unsubbed, btn: document.getElementById('pushBtn').textContent}))()")
-        check(c2['last'][0] == 'unsub' and not c2['on'] and c2['un'] == 1 and c2['btn'] == 'Turn on', f'turning off unsubscribes here and on the server ({c2})')
-
-        # 9. the service worker turns a push into a notification, and a tap focuses the open window with the homework id.
-        # sw.js runs here with fake self/registration/clients (headless Chromium cannot show notifications)
-        sw = await page.evaluate("""async (hid) => {
-          const src = await (await fetch('sw.js')).text(), H = {}, shown = [], posted = [], opened = []; let focused = 0;
-          const self = {addEventListener: (t, f) => { H[t] = f; }, registration: {scope: location.origin + '/', showNotification: async (t, o) => { shown.push({t, o}); }},
-            clients: {matchAll: async () => [{postMessage: m => posted.push(m), focus: async () => { focused++; }}], openWindow: async u => { opened.push(u); }, claim: async () => {}},
-            skipWaiting(){}};
-          new Function('self', 'caches', src)(self, {});
-          let wait;
-          H.push({data: {json: () => ({title: 'Homework · due Tue 10 Nov', body: 'Skript S. 178', id: hid, tag: 'hw-' + hid})}, waitUntil: p => { wait = p; }});
-          await wait;
-          let closed = 0;
-          H.notificationclick({notification: {data: {hw: hid}, close: () => { closed++; }}, waitUntil: p => { wait = p; }});
-          await wait;
-          // no window open: a new one at ?hw=<id>
-          self.clients.matchAll = async () => [];
-          H.notificationclick({notification: {data: {hw: hid}, close: () => {}}, waitUntil: p => { wait = p; }});
-          await wait;
-          return {shown, posted, focused, closed, opened};
-        }""", hid)
-        n0 = sw['shown'][0] if sw['shown'] else {}
-        check(len(sw['shown']) == 1 and n0.get('t') == 'Homework · due Tue 10 Nov' and n0['o']['body'] == 'Skript S. 178' and n0['o']['data'] == {'hw': hid} and n0['o']['tag'] == 'hw-' + hid,
-              f'push becomes a notification ({sw["shown"]})')
-        check(sw['closed'] == 1 and sw['focused'] == 1 and sw['posted'] == [{'hw': hid}], f'tapping it focuses Inkwell and names the homework ({sw["posted"]})')
-        check(len(sw['opened']) == 1 and sw['opened'][0].endswith('/?hw=' + hid), f'with Inkwell closed it opens ?hw=<id> ({sw["opened"]})')
-        # the message a tapped notification sends to an open window
-        await page.evaluate(f"__inkwell.HWK.showSoon('{hid}')"); await page.wait_for_timeout(500)
-        check(await vis('hwViewDlg'), 'tapped notification opens the homework')
+        # 8. no reminders anywhere: Settings has no Homework reminders box; sw.js has no push / notificationclick
+        check(await page.evaluate("!document.getElementById('pushBox') && !document.getElementById('pushBtn')"), 'Settings: no Homework reminders')
+        swsrc = await page.evaluate("fetch('sw.js').then(r => r.text())")
+        check("'push'" not in swsrc and 'notificationclick' not in swsrc and 'showNotification' not in swsrc, 'service worker shows no notifications')
+        # 9. a device that had reminders on drops its subscription once (browser and server list) and forgets it
+        await page.evaluate("""() => { localStorage.setItem('inkwell.push', JSON.stringify('https://web.push.apple.com/fake-endpoint-123')); localStorage.setItem('inkwell.pushKey', JSON.stringify('Bxx')); window.__hasSub = true; window.__unsubbed = 0;
+          const W = __inkwell; W.Sync.sb = {auth: {getSession: async () => ({data: {session: {access_token: 'tok'}}})}}; }""")
+        calls = []
+        async def fn(route):
+            if route.request.method == 'POST': calls.append(route.request.post_data)
+            await route.fulfill(status=200, body='{"ok":true}', headers={'content-type': 'application/json', 'access-control-allow-origin': '*', 'access-control-allow-headers': '*'})
+        await ctx.route('**/functions/v1/push', fn)   # registered last, so it runs before the catch-all abort
+        await page.evaluate("__inkwell.HWK.dropPush()"); await page.wait_for_timeout(600)
+        dp = await page.evaluate("(() => ({un: window.__unsubbed, ls: localStorage.getItem('inkwell.push'), k: localStorage.getItem('inkwell.pushKey')}))()")
+        check(dp['un'] == 1 and dp['ls'] in (None, 'null') and dp['k'] in (None, 'null'), f'old subscription dropped on the device ({dp})')
+        check(len(calls) == 1 and '"unsub"' in (calls[0] or '') and 'fake-endpoint-123' in calls[0], f'and removed from the server list ({calls})')
+        await page.evaluate("__inkwell.HWK.dropPush()"); await page.wait_for_timeout(300)
+        check(len(calls) == 1, 'only once')
+        await page.evaluate(f"__inkwell.HWK.view('{hid}')"); await page.wait_for_timeout(400)
 
         # 10. phone width: dialogs fit
         await page.set_viewport_size({'width': 390, 'height': 760}); await page.wait_for_timeout(400)

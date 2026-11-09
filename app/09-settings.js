@@ -11,7 +11,6 @@ $('settingsBtn').addEventListener('click', openSettings);
 function openSettings(){ Clean.plan = null; $('cleanBtn').textContent = 'Free up space'; $('cleanBtn').classList.remove('danger'); $('cleanBtn').disabled = false; $('cleanInfo').textContent = 'Images nothing uses any more'; renderSettings(true); showModal('settingsDlg'); updTrashInfo(true); DbSize.render(); DbSize.get().then(() => DbSize.render()).catch(() => {}); }
 async function renderSettings(fresh){
   renderPrefSettings(); updTrashInfo(); renderVersion();
-  if(typeof HWK !== 'undefined') HWK.renderPush();
   const ready = !!Sync.sb;
   $('setNoConfig').hidden = ready;
   if(authView === 'newpass' && !Sync.user) authView = 'signin';
@@ -663,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.93.2', '2026-11-09', ['Homework: phone reminders removed. Homework keeps its list, due dates and pictures; the Reminder choice and Settings → Homework reminders are gone, and no more notifications are sent']],
   ['1.93.1', '2026-11-09', ['Highlighter: a pale colour (like a light lemon yellow from the colour wheel) drew grey. It now shows in its own colour, also in PDF exports. Highlights you already drew with it turn yellow too']],
   ['1.93', '2026-11-09', ['Homework: with the Select tool (Free or Box), circle or box what you have to do and tap Homework. Inkwell keeps a picture of that part, what to do, a due date and a reminder time','The Homework button in the top bar lists everything with its due date. Tap one to see it big, open its page, edit it or tick it off','Reminders on your phone: open Inkwell on the phone from the Home Screen, sign in, and turn on Settings → Homework reminders. The reminder then pops up as a notification at the time you picked, even when Inkwell is closed','Selection menu: the Homework button is the book icon; the colour dots are a little narrower on the iPad so the menu still fits on one row']],
   ['1.92', '2026-11-09', ['Toolbar on the side: a Shapes button sits at the bottom, next to the zoom, so shapes are one tap away', 'Toolbar on the side: the colours are smaller and three to a row, which makes room for it']],

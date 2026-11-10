@@ -425,10 +425,34 @@ const HLS = {
     let tot = 0, cnt = 0; for(const v of hist) tot += v;
     let bg = 255; for(let v = 255; v >= 0; v--){ cnt += hist[v]; if(cnt >= tot * 0.3){ bg = v; break; } }
     const thr = bg - Math.max(45, bg * 0.25);
+    // (1.99) table lines and underlines are not text: long straight runs of ink (longer than any letter) are left out,
+    // so a table's borders no longer join its rows into one giant "line". Where a vertical line was, a band is split.
+    const ink = new Uint8Array(cw * ch);
+    for(let j = 0; j < ink.length; j++) ink[j] = lum[j] < thr ? 1 : 0;
+    const hRun = Math.max(8, it.w * 0.06 * s), vRun = Math.max(8, it.w * 0.045 * s);
+    const cut = [];
+    for(let y = 0; y < ch; y++){
+      const o = y * cw; let st = -1;
+      for(let x = 0; x <= cw; x++){
+        const on = x < cw && ink[o + x] && lum[o + x] < thr;
+        if(on){ if(st < 0) st = x; } else if(st >= 0){ if(x - st >= hRun) cut.push(o + st, o + x, 1); st = -1; }
+      }
+    }
+    const vCols = new Uint8Array(cw);
+    for(let x = 0; x < cw; x++){
+      let st = -1;
+      for(let y = 0; y <= ch; y++){
+        const on = y < ch && lum[y * cw + x] < thr;
+        if(on){ if(st < 0) st = y; } else if(st >= 0){ if(y - st >= vRun){ cut.push(st * cw + x, y * cw + x, cw); vCols[x] = 1; } st = -1; }
+      }
+    }
+    for(let i = 0; i < cut.length; i += 3) for(let j = cut[i]; j < cut[i+1]; j += cut[i+2]) ink[j] = 0;
+    const rules = [];
+    for(let x = 0; x < cw; x++) if(vCols[x] && !vCols[x - 1]){ let e = x; while(e + 1 < cw && vCols[e + 1]) e++; rules.push(X0 + ((x + e + 1) / 2) / s); }
     const rows = new Uint32Array(ch);
     let c0 = 0, c1 = cw;
     if(cols){ c0 = clamp(Math.floor((cols[0] - X0) * s), 0, cw - 1); c1 = clamp(Math.ceil((cols[1] - X0) * s), c0 + 1, cw); }
-    for(let y = 0; y < ch; y++){ let n = 0; const o = y * cw; for(let x = c0; x < c1; x++) if(lum[o + x] < thr) n++; rows[y] = n; }
+    for(let y = 0; y < ch; y++){ let n = 0; const o = y * cw; for(let x = c0; x < c1; x++) if(ink[o + x]) n++; rows[y] = n; }
     const minRow = Math.max(1, (c1 - c0) * 0.002);
     let groups = [];
     for(let y = 0; y < ch; y++){
@@ -459,7 +483,7 @@ const HLS = {
       if(gh < 3) continue;
       // words: runs of ink columns, split where the gap is wider than a letter gap
       const col = new Uint8Array(cw);
-      for(let y = g[0]; y <= g[1]; y++){ const o = y * cw; for(let x = 0; x < cw; x++) if(lum[o + x] < thr) col[x] = 1; }
+      for(let y = g[0]; y <= g[1]; y++){ const o = y * cw; for(let x = 0; x < cw; x++) if(ink[o + x]) col[x] = 1; }
       const wgap = Math.max(2, gh * 0.2), segs = [];
       let st = -1, last = -1;
       for(let x = 0; x < cw; x++){
@@ -471,7 +495,7 @@ const HLS = {
       if(!segs.length) continue;
       const wx = c => X0 + c / s, wy = r => Y0 + r / s;
       out.push({b: [wx(segs[0][0]), wy(g[0]), wx(segs[segs.length - 1][1] + 1), wy(g[1] + 1)], segs: segs.map(q => [wx(q[0]), wx(q[1] + 1)]),
-        cut: g[0] === 0 || g[1] === ch - 1});
+        cut: g[0] === 0 || g[1] === ch - 1, rules});
     }
     return out;
   },
@@ -504,12 +528,18 @@ const HLS = {
     return {w: h, p};
   },
   // where the band goes left to right on one line: whole words the stroke touched, or the stroke cut to the line
+  // (1.99) a list of pieces: words on both sides of a table's side line become separate bands
   span(l, bx0, bx1){
-    if(!l.segs) return [Math.max(l.b[0], bx0), Math.min(l.b[2], bx1)];
+    if(!l.segs) return [[Math.max(l.b[0], bx0), Math.min(l.b[2], bx1)]];
     const h = l.b[3] - l.b[1], tol = Math.min(h * 0.15, 4);
     const hit = l.segs.filter(q => Math.min(q[1], bx1) - Math.max(q[0], bx0) > tol);
-    if(!hit.length) return null;
-    return [hit[0][0], hit[hit.length - 1][1]];
+    if(!hit.length) return [];
+    const out = [[hit[0][0], hit[0][1]]];
+    for(let i = 1; i < hit.length; i++){
+      const p = out[out.length - 1], q = hit[i];
+      if((l.rules || []).some(x => x > p[1] && x < q[0])) out.push([q[0], q[1]]); else p[1] = q[1];
+    }
+    return out;
   },
   snap(pts, w){
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
@@ -551,9 +581,13 @@ const HLS = {
     }
     const res = [];
     for(const l of pick.sort((p, q) => p.b[1] - q.b[1])){
-      const sp = this.span(l, bx0, bx1); if(!sp || sp[1] - sp[0] < 1) continue;
       const h = l.b[3] - l.b[1], pad = l.segs ? h * 0.08 : 0;
-      res.push(this.band(sp[0] - pad, sp[1] + pad, l.b[1] - pad, l.b[3] + pad));
+      for(const sp of this.span(l, bx0, bx1)){
+        if(sp[1] - sp[0] < 1) continue;
+        // never past a side line: the round end stays inside the cell
+        const rl = (l.rules || []).filter(x => x < sp[0]).pop(), rr = (l.rules || []).find(x => x > sp[1]);
+        res.push(this.band(Math.max(sp[0] - pad, rl == null ? -Infinity : rl + h * 0.5), Math.min(sp[1] + pad, rr == null ? Infinity : rr - h * 0.5), l.b[1] - pad, l.b[3] + pad));
+      }
     }
     if(res.length) return res;
     // no text under it: a mostly level stroke becomes one straight band at its height

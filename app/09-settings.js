@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.97', '2026-11-10', ['Toolbar on the side: tidier. All icons in the same grey, a rounder selected tool, a divider above the ruler, finger, shapes and zoom block, highlighter colours two to a row instead of three plus one, and a cleaner thickness slider (thin filled track, round knob) instead of the big white iPad one']],
   ['1.96', '2026-11-09', ['Ask Claude: new Check mode in the menu next to Normal, Tutor and Solve. Show your answer (scan or type it) and Claude only says Right or Wrong for each task, names the wrong step without giving away the solution, and counts how many you got right']],
   ['1.95', '2026-11-09', ['New highlighter icon: a line of text with one line marked, so it no longer looks like the eraser']],
   ['1.94', '2026-11-09', ['Highlighter: draws in the exact colour you pick instead of a pale see-through version. Printed text, your writing and lines under it stay readable, like with a real marker. Highlights you already drew look the same way now, also in PDF exports and in what Claude sees']],

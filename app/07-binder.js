@@ -594,7 +594,7 @@ function renderOpts(){
   }
   renderFmt();
   if(t === 'pen' || t === 'hl' || t === 'eraser' || t === 'mark'){
-    $('size').value = prefs[t].s;
+    $('size').value = prefs[t].s; sizeFill();
     const d = t === 'pen' ? clamp(2 + penWidth() * 1.4, 2, 22) : t === 'hl' ? clamp(hlWidth() * 0.45, 4, 22) : t === 'mark' ? clamp(markWidth() * 0.45, 4, 22) : clamp(eraserRadius() * 0.8, 4, 24);
     $('sizeDot').style.setProperty('--d', d + 'px');
   }
@@ -654,7 +654,8 @@ $('eraseMode').addEventListener('click', e => {
   if(was !== prefs.eraser.mode) note(prefs.eraser.mode === 'area' ? 'Eraser: Partial (rubs out only what it touches)' : 'Eraser: Stroke (removes whole strokes)');
 });
 document.querySelector('.tools').addEventListener('click', e => { const b = e.target.closest('.tool[data-tool]'); if(b) setTool(b.dataset.tool); });   // (1.91) #askQuick is not a tool
-$('size').addEventListener('input', () => { const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
+function sizeFill(){ const i = $('size'); i.style.setProperty('--pct', ((i.value - i.min) / ((i.max - i.min) || 1) * 100) + '%'); }
+$('size').addEventListener('input', () => { sizeFill(); const t = prefs.tool; if(prefs[t]) { prefs[t].s = +$('size').value; savePrefs(); renderOpts(); } });
 let lp = null;
 $('swatches').addEventListener('pointerdown', e => {
   const b = e.target.closest('[data-i]'); if(!b) return;

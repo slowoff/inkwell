@@ -185,6 +185,14 @@ html,body{background:var(--paper)}
 .seg button.on{background:var(--well-on);color:var(--fg);box-shadow:0 1px 3px rgba(0,0,0,.15)}
 .size{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 6px;flex:none}
 .size input{width:110px;accent-color:var(--accent)}
+/* (1.97) one slider look on every device (iPad drew a big white knob with no fill): a thin track filled up to the value in the
+   accent colour (--pct is set by the app) and a round accent knob */
+.size input[type=range]{-webkit-appearance:none;appearance:none;background:transparent;cursor:pointer}
+.size input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(to right,var(--accent) 0 var(--pct,50%),color-mix(in srgb,var(--fg) 14%,transparent) var(--pct,50%) 100%)}
+.size input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;background:var(--accent);border:3px solid var(--panel);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.size input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:color-mix(in srgb,var(--fg) 14%,transparent)}
+.size input[type=range]::-moz-range-progress{height:6px;border-radius:3px;background:var(--accent)}
+.size input[type=range]::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--accent);border:3px solid var(--panel)}
 .size-dot{width:24px;height:24px;display:inline-grid;place-items:center}
 .size-dot::after{content:"";width:var(--d,6px);height:var(--d,6px);max-width:24px;max-height:24px;border-radius:50%;background:var(--fg)}
 .toggle{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);padding:0 8px;height:38px;flex:none;white-space:nowrap}
@@ -1121,6 +1129,15 @@ body.ro-on,body.ro-on *{cursor:grabbing!important}
   .main[data-bar=left] .bar2 .swatches,.main[data-bar=right] .bar2 .swatches{grid-template-columns:repeat(3,30px);gap:3px}
   .main[data-bar=left] .bar2 .swatch,.main[data-bar=right] .bar2 .swatch{width:30px;height:36px}
   .main[data-bar=left] .bar2 .swatch.hl span,.main[data-bar=right] .bar2 .swatch.hl span{width:20px}
+  /* (1.97) polish: one icon colour for the whole column, rounder selected tool, a divider above the ruler/finger/shapes/zoom
+     block, highlighter colours two to a row (four sat as three plus one) */
+  .main[data-bar=left] .bar2 .tool,.main[data-bar=right] .bar2 .tool{border-radius:12px}
+  .main[data-bar=left] .bar2 .opts::after,.main[data-bar=right] .bar2 .opts::after,.main[data-bar=left] .bar2 .fmt::after,.main[data-bar=right] .bar2 .fmt::after{content:"";flex:0 0 100%;height:1px;background:var(--line);margin:6px 0 0}
+  .main[data-bar=left] .bar2 .opts[hidden],.main[data-bar=right] .bar2 .opts[hidden],.main[data-bar=left] .bar2 .fmt[hidden],.main[data-bar=right] .bar2 .fmt[hidden]{display:none}
+  .main[data-bar=left] #rulerBtn:not(.on),.main[data-bar=right] #rulerBtn:not(.on),.main[data-bar=left] #shapeRail,.main[data-bar=right] #shapeRail,.main[data-bar=left] #fingerBtn:not(.on),.main[data-bar=right] #fingerBtn:not(.on){color:var(--muted)}
+  .main[data-bar=left] #fingerBtn:not(.on) .tg-ico,.main[data-bar=right] #fingerBtn:not(.on) .tg-ico,.main[data-bar=left] #hlSnap:not(.on) .tg-ico,.main[data-bar=right] #hlSnap:not(.on) .tg-ico{color:var(--muted)}
+  .main[data-bar=left] .bar2 .swatches:has(>.swatch:nth-child(4):last-child),.main[data-bar=right] .bar2 .swatches:has(>.swatch:nth-child(4):last-child){grid-template-columns:repeat(2,44px);gap:3px 4px}
+  .main[data-bar=left] .bar2 .swatches:has(>.swatch:nth-child(4):last-child) .swatch,.main[data-bar=right] .bar2 .swatches:has(>.swatch:nth-child(4):last-child) .swatch{width:44px}
   #barMore[data-n]::after{content:attr(data-n);position:absolute;top:0;right:0;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#7B3FBF;color:#fff;font-size:10px;line-height:16px;font-weight:600;text-align:center}
   /* hidden: a small handle in the corner brings the column back */
   .main[data-bar=left][data-col]{grid-template-columns:0 minmax(0,1fr)}

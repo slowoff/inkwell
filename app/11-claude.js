@@ -345,7 +345,8 @@ const Ask = {
       const usedName = /haiku/i.test(used) ? 'Haiku (fast)' : /sonnet/i.test(used) ? 'Sonnet (smart)' : used;
       await readSSE(res, t => { acc += t; paint(); });
       paint(true);
-      if(!acc) throw new Error('No answer came back');
+      // (1.99.1) say why: a cut connection (no end reached) or Claude stopping without text (with its reason)
+      if(!acc) throw new Error(!readSSE.stop ? 'The answer was cut off before it started. Try again; if it keeps happening, start a new chat (+).' : readSSE.stop === 'refusal' ? 'Claude declined to answer this one.' : 'Claude stopped without an answer (' + readSSE.stop + '). Try again, or ask with a few more words.');
       const modelLine = usedName ? usedName + ((prefs.askModel || 'auto') === 'auto' ? ', picked automatically' : '') : '';
       this.decorateBot(out, acc, modelLine);
       this.msgs.push({role: 'assistant', content: [{type: 'text', text: acc}]});
@@ -739,6 +740,7 @@ $('mPractice').addEventListener('click', () => { closePops(); Prac.open(); });
 // Reads the server-sent events of a streamed Claude answer and hands over each piece of text.
 async function readSSE(res, onText){
   const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+  readSSE.stop = '';
   for(;;){
     const {value, done} = await reader.read(); if(done) break;
     buf += dec.decode(value, {stream: true});
@@ -749,6 +751,7 @@ async function readSSE(res, onText){
         if(!line.startsWith('data:')) continue;
         let ev; try { ev = JSON.parse(line.slice(5)); } catch { continue; }
         if(ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta') onText(ev.delta.text);
+        else if(ev.type === 'message_delta' && ev.delta && ev.delta.stop_reason) readSSE.stop = ev.delta.stop_reason;
         else if(ev.type === 'error') throw new Error((ev.error && ev.error.message) || 'Claude stopped with an error');
       }
     }

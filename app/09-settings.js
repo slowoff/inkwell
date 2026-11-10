@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['1.99.1', '2026-11-10', ['Ask Claude: when an answer comes back empty, it now says why (connection cut off, or the reason Claude stopped) instead of only "No answer came back", and the server notes what happened so the cause can be fixed']],
   ['1.99', '2026-11-10', ['Stick to text works in tables: the highlight now lands on the words instead of the border above them, stays inside its cell, and one swipe across a whole row marks each cell separately. Table lines and underlines are no longer mistaken for text']],
   ['1.98', '2026-11-10', ['Highlighter: six colours like the pen (yellow, green, pink, blue, orange, purple), replacing the old four. What you already highlighted keeps its colour']],
   ['1.97', '2026-11-10', ['Toolbar on the side: tidier. All icons in the same grey, a rounder selected tool, a divider above the ruler, finger, shapes and zoom block, highlighter colours two to a row instead of three plus one, and a cleaner thickness slider (thin filled track, round knob) instead of the big white iPad one']],

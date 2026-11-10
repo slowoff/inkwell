@@ -64,11 +64,11 @@ const onOff = (name, on) => name + (on ? ' on' : ' off');
    ===================================================================== */
 const DEFAULT_PREFS = {
   tool: 'pen',
-  pen: {c: 'auto', s: 40}, hl: {c: '#F5C400', s: 40}, eraser: {s: 30, mode: 'stroke'}, mark: {s: 40},
+  pen: {c: 'auto', s: 40}, hl: {c: '#FFE45C', s: 40}, eraser: {s: 30, mode: 'stroke'}, mark: {s: 40},
   wheel: 'right',
   hwSearch: true,  // Claude reads handwriting in the background so search finds it (true = handwriting + imported pages, 'docs' = imported pages only (1.44), false = off)  // Pencil menu on press and hold: 'right' (opens left of the pen), 'left', or 'off'
   penFavs: ['auto', '#1F4FCF', '#C2362B', '#167A3C', '#E07A10', '#7B3FBF'],
-  hlFavs: ['#F5C400', '#4CC26B', '#FF6FA3', '#3BA5F0'],
+  hlFavs: ['#FFE45C', '#8EE89A', '#FF9EC7', '#8CCBFF', '#FFB870', '#C9A8FF'],   // (1.98) six like the pen (set A)
   finger: false,
   autoText: false,   // Write to text: pen writing becomes a typed text box (needs sign-in)
   snapLines: true,
@@ -93,5 +93,7 @@ for(const k of ['pen', 'hl', 'eraser', 'mark', 'ruler', 'bg']) prefs[k] = Object
 const savePrefs = debounce(() => LSset('inkwell.prefs', prefs), 300);
 // 1.41 had prefs.assist {level, space}; 1.42 keeps only the reference line (on if levelling was on)
 if(prefs.assist){ if(prefs.assist.level && !LSget('inkwell.prefs', {}).hasOwnProperty('refLine')) prefs.refLine = true; delete prefs.assist; savePrefs(); }
+// (1.98) highlighter: six colours (set A) instead of four. Once per device the old four are replaced; strokes already drawn keep their colour
+if(!prefs.hlSix){ prefs.hlFavs = DEFAULT_PREFS.hlFavs.slice(); if(!prefs.hlFavs.includes(prefs.hl.c)) prefs.hl.c = prefs.hlFavs[0]; prefs.hlSix = true; savePrefs(); }
 const ui = Object.assign({nb: null, sec: null, page: null}, LSget('inkwell.ui', {}));
 const saveUi = () => LSset('inkwell.ui', ui);

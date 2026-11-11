@@ -6,7 +6,7 @@
 //   ASK_FAST_MODEL      optional, the cheap model, defaults to claude-haiku-5-5
 // Spending (since 1.27): every call's cost is added to public.usage_month; accounts with a monthly cap
 // (public.limits.claude_usd_month, default USD 2 for accounts without a limits row, null = no cap) get 402 limit_reached.
-// Body: {mode: 'normal'|'tutor'|'solve'|'check'|'practice', model: 'auto'|'fast'|'smart', messages}. 'auto' lets the cheap model decide first.
+// Body: {mode: 'normal'|'tutor'|'solve'|'check'|'practice', model: 'auto'|'fast'|'smart', tech?: 1, messages}. 'auto' lets the cheap model decide first.
 // Background jobs (fixed model, no chat): mode 'read' = transcribe handwriting for search (fast model),
 // mode 'latex' = turn a handwritten formula into LaTeX (smart model), mode 'ocr' = read an imported page
 // picture for search (fast model), mode 'scribe' = handwriting -> typed text box (fast model).
@@ -83,6 +83,18 @@ Mode: PRACTICE. You quiz the student to check whether he really knows the materi
 - Keep a running score like "Score: 3/4" at the end of each feedback.
 - If he says stop, done or enough: give a short summary with the score, which objectives look solid, which need more work and what to review.`,
 };
+
+// (2.0) pages in a technical notebook (the app sends tech: 1): Claude also acts as a robotics design helper
+const ROBO = `
+
+This page is in his technical notebook, where he designs robots. He is new to robotics. His drawings are to scale in mm: thick lines are visible edges, dashed lines hidden edges, dash-dot lines centre lines, and dimension lines show sizes in mm. He also draws mechanisms and wiring with schematic symbols (motor, servo, battery, switch, LED, resistor, sensor, controller board).
+On top of the mode above, act as a robotics design helper:
+- When he shows a drawing, review it like an engineer: missing or unclear sizes, parts that would collide or can't be made, missing holes or fasteners, and whether the mechanism can move the way he intends.
+- For motors and mechanisms, check the numbers when they matter: torque (N·m), gear ratios, speed, the load on a servo, battery voltage and current. Show the calculation briefly, in SI units.
+- Suggest common hobby-robotics parts where they fit (for example M3 screws, 608 bearings, SG90 or MG996R servos, Arduino or ESP32 boards), and say when the choice depends on numbers he hasn't given.
+- For wiring: check polarity, power vs. signal, a shared ground, resistors for LEDs, and whether a motor needs a driver instead of a direct connection to a pin.
+- Explain robotics terms simply when they come up.
+- Never make up exact part data (sizes, torque ratings, pinouts) you are not sure of; say it should be checked in the datasheet.`;
 
 const JOBS: Record<string, { system: string; max: number; smart: boolean }> = {
   read: {
@@ -174,7 +186,7 @@ Deno.serve(async (req) => {
 
   const raw = await req.text();
   if (raw.length > 9_000_000) return fail(req, 413, "too_big");
-  let body: { mode?: string; model?: string; messages?: any[] };
+  let body: { mode?: string; model?: string; tech?: number; messages?: any[] };
   try { body = JSON.parse(raw); } catch { return fail(req, 400, "bad_json"); }
   // long chats: the first message stays (in a practice session it holds the notes), then the latest turns
   const all = Array.isArray(body.messages) ? body.messages : [];
@@ -197,7 +209,7 @@ Deno.serve(async (req) => {
       model,
       max_tokens: job ? job.max : 2500,
       stream: true,
-      system: job ? job.system : MODES[body.mode || "tutor"] || MODES.tutor,
+      system: job ? job.system : (MODES[body.mode || "tutor"] || MODES.tutor) + (body.tech && body.mode !== "practice" ? ROBO : ""),
       messages: job ? messages.slice(-1) : cached(messages),
     }),
   });

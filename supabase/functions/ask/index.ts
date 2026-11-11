@@ -212,6 +212,8 @@ Deno.serve(async (req) => {
   const [toApp, toMeter] = r.body.tee();
   const metered = (async () => {
     const usage: any = {};
+    // (1.99.1) what came back, for the log when an answer is empty (no message text is logged)
+    const seen = { text: 0, stop: "", types: new Set<string>(), err: "" };
     let buf = "";
     const dec = new TextDecoder();
     const rd = toMeter.getReader();
@@ -223,15 +225,21 @@ Deno.serve(async (req) => {
         let i;
         while ((i = buf.indexOf("\n")) >= 0) {
           const line = buf.slice(0, i); buf = buf.slice(i + 1);
-          if (!line.startsWith("data:") || !line.includes("usage")) continue;
+          if (!line.startsWith("data:")) continue;
+          if (line.includes('"text_delta"')) { seen.text++; continue; }
+          if (!line.includes("usage") && !line.includes("content_block_start") && !line.includes('"error"')) continue;
           try {
             const ev = JSON.parse(line.slice(5));
+            if (ev?.type === "content_block_start") seen.types.add(ev?.content_block?.type || "?");
+            if (ev?.delta?.stop_reason) seen.stop = ev.delta.stop_reason;
+            if (ev?.type === "error") seen.err = ev?.error?.type || "error";
             const u = ev?.message?.usage || ev?.usage;
             if (u) for (const k of Object.keys(u)) if (typeof u[k] === "number") usage[k] = u[k];
           } catch { /* partial or other event */ }
         }
       }
     } catch (e) { console.error("usage read", e); }
+    if (!job && !seen.text) console.error("empty answer", JSON.stringify({ model, mode: body.mode, stop: seen.stop, blocks: [...seen.types], err: seen.err, out: usage.output_tokens, msgs: messages.length }));
     const usd = costOf(model, usage) + spent.usd;
     if (usd > 0) { try { await admin.rpc("add_claude_usage", { p_user: user.id, p_usd: usd }); } catch (e) { console.error("usage log", e); } }
   })();

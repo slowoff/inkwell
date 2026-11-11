@@ -151,6 +151,7 @@ function transformItem(it, tf){
     const p = it.p.slice();
     for(let i = 0; i < p.length; i += 3){ const [x, y] = m(p[i], p[i+1]); p[i] = x; p[i+1] = y; }
     o.p = p; o.w = it.w * tf.s;
+    if(it.geo) Tech.moveGeo(o, it, m, tf.s);
   } else {
     [o.x, o.y] = m(it.x, it.y);
     if(it.t === 'x'){ o.w = it.w * tf.s; o.fs = (it.fs || 1) * tf.s; if(it.lh) o.lh = it.lh * tf.s; }
@@ -171,6 +172,7 @@ function rotateItem(it, r, ax, ay){
     const p = it.p.slice();
     for(let i = 0; i < p.length; i += 3){ const [x, y] = rot(p[i], p[i+1]); p[i] = x; p[i+1] = y; }
     o.p = p;
+    if(it.geo) Tech.turnGeo(o, it, rot);
     const ra = normDeg((it.ra || 0) + r * 180 / Math.PI);
     if(ra) o.ra = ra; else delete o.ra;
   } else {

@@ -257,12 +257,13 @@ function startTool(e, sx, sy, pr){
   act = {tool, id: e.pointerId, sx, sy, moved: false, target: e.target, anchor: [sx, sy], isPen: e.pointerType === 'pen'};
   TS.clear();
   if(pick){
-    clearSel(); act.kind = 'pick'; act.w0 = [wx, wy]; act.w1 = null;
+    clearSel(); act.kind = 'pick'; act.w0 = pick.kind === 'shape' && pick.shape !== 'honeycomb' && pick.shape !== 'grid' ? Tech.snap(wx, wy).p : [wx, wy]; act.w1 = null; Tech.pickWhy = '';
   } else if(tool === 'pen' || tool === 'hl' || tool === 'mark'){
     clearSel();
     act.kind = 'stroke';
     if(tool === 'mark'){ act.c = MARK_C; act.w = markWidth(); act.hl = 1; act.mk = 1; }
     else { act.c = prefs[tool].c; act.w = tool === 'hl' ? hlWidth() : penWidth(); act.hl = tool === 'hl' ? 1 : 0; }
+    if(tool === 'pen'){ const ts = Tech.style(); if(ts){ act.ls = ts.ls; act.w = ts.w; } }   // (2.0) technical notebook line type
     act.edge = prefs.ruler.on ? rulerEdge(sx, sy) : null;
     let X = sx, Y = sy;
     if(act.edge) [X, Y] = projectEdge(act.edge, sx, sy, act.w);
@@ -296,8 +297,9 @@ const HOLD_STILL = 13;   // screen px (1.73: 9, 1.73.1: 13)
 function dragLineEnd(a, b){
   let len = Math.hypot(b[0] - a[0], b[1] - a[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
   const sn = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
+  if(Tech.on()){ const t = Tech.target(b[0], b[1]); if(t){ Tech.why = t[2]; return [t[0], t[1]]; } }   // (2.0) onto an end nearby
   if(prefs.angleSnap !== false && Math.abs(sn - ang) < 0.1) ang = sn;   // (1.73.1) within ~6° (the Line tool: ~3.5°)
-  return [a[0] + len * Math.cos(ang), a[1] + len * Math.sin(ang)];
+  return Tech.lineEnd(a, [a[0] + len * Math.cos(ang), a[1] + len * Math.sin(ang)]);
 }
 /* (1.73.5) Rafael's iPad (read from his saved strokes): iPadOS sometimes hands over Pencil points it already delivered.
    getCoalescedEvents repeats recent points with exactly the same coordinates, so the stroke jumped back and went over
@@ -352,7 +354,12 @@ function toolMove(e){
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
     else if(act.kind === 'space'){ moveSpace(toWorld(sx, sy)[1] - act.y0); }
     else if(act.kind === 'lasso'){ if(act.box){ act.poly = boxPoly(act.sx, act.sy, sx, sy); act.b1 = [sx, sy]; } else act.poly.push(sx, sy); }
-    else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){ act.w1 = toWorld(sx, sy); if(act.kind === 'pick') compassTrack(act); }
+    else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){
+      act.w1 = toWorld(sx, sy);
+      // (2.0) technical notebook: a shape's far corner / end snaps too
+      if(act.kind === 'pick' && pick && pick.kind === 'shape' && pick.shape !== 'honeycomb' && pick.shape !== 'grid' && Tech.on()){ const s = Tech.snap(act.w1[0], act.w1[1]); act.w1 = s.p; Tech.pickWhy = s.why; }
+      if(act.kind === 'pick') compassTrack(act);
+    }
   }
   // (1.61) draw a little ahead of the Pencil (preview only)
   if(act && act.kind === 'stroke' && act.lastEv){ const [ev, sx, sy] = act.lastEv; act.lastEv = null; Live.predict(act, ev === list[list.length - 1] ? e : ev, sx, sy); }
@@ -605,7 +612,10 @@ function endTool(e){
     if(a.pts.length < 3) return;
     const it = {t: 's', id: 's' + newId(), c: a.c, w: a.w, hl: a.hl, p: a.pts};
     if(a.mk){ it.mk = 1; it.at = Date.now(); }
-    const handwriting = a.tool === 'pen' && !a.snapped && !a.hl && !a.mk && !a.edge;
+    if(a.ls) it.ls = a.ls;
+    // (2.0) technical notebook: a held stroke that became a line, rectangle or circle remembers its exact shape
+    if(a.snapped && Tech.on()){ const P = a.pts, n = P.length; const g = a.snapped === 'line' ? {k: 'l', v: [P[0], P[1], P[n-3], P[n-2]]} : a.snapGeo; if(g) it.geo = g; }
+    const handwriting = a.tool === 'pen' && !a.snapped && !a.hl && !a.mk && !a.edge && !a.ls;
     // (1.60) highlighter "Stick to text": the stroke becomes straight bands on the text lines under it
     if(a.tool === 'hl' && prefs.hlSnap && !a.snapped && !a.edge){
       const list = HLS.snap(a.pts, a.w).map(b => Object.assign({}, it, {id: 's' + newId(), w: b.w, p: b.p}));
@@ -678,11 +688,11 @@ const Live = {
     const m = a.pts.length / 3;
     const tr = [dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy];
     const pred = a.pred && performance.now() - a.predAt < PRED_LIFE ? a.pred : null;
-    if(m < LIVE_MIN || a.snapped || a.edge){
+    if(m < LIVE_MIN || a.snapped || a.edge || a.ls){
       if(this.upto) this.reset();
       liveCtx.setTransform(...tr); liveCtx.fillStyle = fill;
       const p = pred && !a.snapped && !a.edge ? a.pts.concat(pred) : a.pts;
-      liveCtx.fill(strokePath({t: 's', c: a.c, w: a.w, hl: a.hl, p}, false));
+      liveCtx.fill(strokePath({t: 's', c: a.c, w: a.w, hl: a.hl, ls: a.ls, p}, false));
       return;
     }
     if(!this.bake){ this.bake = document.createElement('canvas'); this.bctx = this.bake.getContext('2d'); }
@@ -760,6 +770,7 @@ function drawLive(){
   if(act.kind === 'stroke'){
     const paper = onPaperAt(paperRects(), act.pts[0], act.pts[1]);
     Live.draw(act, inkColor(act.c, false, paper, act.hl));
+    Tech.liveStroke(act);
     liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
     if(act.tool === 'pen' && !act.hl && !act.mk) WA.guide(act);
   } else if(act.kind === 'lasso'){

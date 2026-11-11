@@ -104,6 +104,7 @@
         <button class="tb" id="colorBtn" title="More colours" aria-label="More colours"><span class="rainbow"></span></button>
         <button class="tb" id="assistBtn" hidden title="Writing: Write to text, Reference line" aria-label="Writing options"><svg viewBox="0 0 24 24"><path d="M3 17h18" stroke-dasharray="3 2.5"/><path d="M4 13c1.5-5 3-5 3.5 0s2-5 3.5 0M14 13c1-4 2.5-4 3 0s1.5-3 3-1"/></svg></button>
         <button class="toggle hl-snap" id="hlSnap" hidden title="Stick to text: the highlight lands exactly on the line of text under it, straight and as tall as the text" aria-label="Stick to text" aria-pressed="false"><span class="sw"></span><svg class="tg-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 18h11"/><path d="M3 12h18" stroke-width="6" opacity=".35"/><path d="M5 12h12"/></svg><span class="tg-lbl">Stick to text</span></button>
+        <button class="tb tech-btn" id="techBtn" hidden title="Line type" aria-label="Line type and snap"></button>
         <button class="tb" id="pasteBtn" hidden title="Paste: what you copied here, or a picture or text from another app (Ctrl+V)">Paste</button>
         <label class="size" id="sizeWrap" title="Thickness"><span class="size-dot" id="sizeDot"></span><input type="range" id="size" min="1" max="100" aria-label="Thickness"></label>
       </div>
@@ -203,6 +204,13 @@
   <div class="later-list" id="laterList"></div>
 </div>
 <div class="wheel" id="wheel" hidden aria-label="Pencil menu"></div>
+<div class="pop tech-pop" id="techPop" hidden>
+  <div class="pop-title">Line type</div>
+  <div class="tech-ls" id="techLs"></div>
+  <div class="pop-title">Snap to grid</div>
+  <div class="seg tech-snap" id="techSnap"></div>
+  <p class="tech-note">Shapes and held lines also snap onto the ends, middles, corners and centres of what is already drawn.</p>
+</div>
 <div class="pop" id="shapePop" hidden>
   <div class="pop-title">Insert shape</div>
   <div class="shape-grid" id="shapeGrid">

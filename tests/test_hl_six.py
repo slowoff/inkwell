@@ -19,7 +19,8 @@ async def main():
         await ctx.add_init_script(f"if(!sessionStorage.getItem('seeded')){{localStorage.setItem('inkwell.prefs', {json.dumps(json.dumps(old))}); sessionStorage.setItem('seeded','1');}}")
         page = await ctx.new_page(); errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
-        await page.goto(URL); await page.wait_for_function('!!window.__inkwellBooted', timeout=15000)
+        await page.goto(URL); await page.wait_for_function('navigator.serviceWorker && navigator.serviceWorker.controller', timeout=15000)
+        await page.wait_for_timeout(2500); await page.wait_for_function('!!window.__inkwellBooted', timeout=15000)
         await page.evaluate("async () => { await __inkwell.newPage(); }"); await page.wait_for_timeout(500)
         st = await page.evaluate("[__inkwell.prefs.hlFavs, __inkwell.prefs.hl.c, __inkwell.prefs.hl.s, document.querySelectorAll('#swatches .swatch').length, !!document.querySelector('#swatches .swatch.on')]")
         check(st[0] == A, f'old four replaced by the six ({st[0]})')

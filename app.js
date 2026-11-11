@@ -40,6 +40,7 @@ const FILES = [
   'app/08-import-export.js',
   'app/09-settings.js',
   'app/10-shapes.js',
+  'app/10b-tech.js',
   'app/11-claude.js',
   'app/12-tools.js',
   'app/12b-homework.js',

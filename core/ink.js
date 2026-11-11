@@ -159,8 +159,51 @@ function sharpPath(it, svg){
   }
   return svg ? d : P;
 }
+/* (2.0) Technical lines (it.ls, technical notebooks): the same width all along (no pen pressure), as workshop drawings use.
+   k thick 0.7 mm, n thin 0.35 mm, h hidden (dashed), c centre (dash-dot). The width is it.w; the dash lengths are in mm and
+   grow with thicker lines. Older app versions ignore ls and draw the points as a normal solid stroke. */
+const TECH_MM = 96 / 25.4;
+const TECH_DASH = {h: [3, 1.5], c: [8, 1.5, 0.5, 1.5]};
+function techPath(it, svg){
+  const p = it.p, X = [], Y = [];
+  for(let i = 0; i < p.length; i += 3){ const x = p[i], y = p[i+1]; if(!X.length || Math.abs(x - X[X.length-1]) + Math.abs(y - Y[Y.length-1]) > 1e-6){ X.push(x); Y.push(y); } }
+  const r = Math.max(0.3, it.w / 2), n = X.length;
+  const one = (xs, ys) => {
+    const m = xs.length, rs = new Array(m).fill(r);
+    if(m === 1 || Math.abs(xs[m-1] - xs[0]) + Math.abs(ys[m-1] - ys[0]) < 1e-6 && m < 3){
+      if(svg) return `M${r1(xs[0]-r)} ${r1(ys[0])}a${r1(r)} ${r1(r)} 0 1 0 ${r1(2*r)} 0a${r1(r)} ${r1(r)} 0 1 0 ${r1(-2*r)} 0Z`;
+      const P = new Path2D(); P.arc(xs[0], ys[0], r, 0, Math.PI * 2); return P;
+    }
+    return inkOutline(xs, ys, rs, m, 0, m - 1, true, true, svg);
+  };
+  if(!n) return svg ? '' : new Path2D();
+  const pat = TECH_DASH[it.ls];
+  if(!pat || n < 2) return one(X, Y);
+  // dashes along the path; a round end adds half the width to each end, so each dash is drawn that much shorter
+  const k = Math.max(1, it.w / (0.35 * TECH_MM)), seg = pat.map(v => v * TECH_MM * k);
+  const L = [0]; for(let i = 1; i < n; i++) L.push(L[i-1] + Math.hypot(X[i] - X[i-1], Y[i] - Y[i-1]));
+  const at = d => { let i = 1; while(i < n - 1 && L[i] < d) i++; const t = (d - L[i-1]) / ((L[i] - L[i-1]) || 1); return [X[i-1] + (X[i] - X[i-1]) * t, Y[i-1] + (Y[i] - Y[i-1]) * t, i]; };
+  let d = 0, j = 0, out = svg ? '' : new Path2D();
+  // centre the pattern so both ends start with a long dash
+  while(d < L[n-1]){
+    const len = seg[j % seg.length], on = j % 2 === 0;
+    if(on){
+      const a = d + (len > 2 * r ? r : len / 2 - 0.01), b = Math.min(L[n-1], d + len) - (len > 2 * r ? r : len / 2 - 0.01);
+      if(b >= a){
+        const A = at(a), B = at(b), xs = [A[0]], ys = [A[1]];
+        for(let i = A[2]; i < B[2]; i++){ if(L[i] > a && L[i] < b){ xs.push(X[i]); ys.push(Y[i]); } }
+        xs.push(B[0]); ys.push(B[1]);
+        const piece = one(xs, ys);
+        if(svg) out += piece; else out.addPath(piece);
+      }
+    }
+    d += len; j++;
+  }
+  return out;
+}
 function strokePath(it, svg){
   if(it.fl) return fillPath(it, svg);
+  if(it.ls && it.p.length >= 3) return techPath(it, svg);
   if(it.sq && it.p.length >= 6) return sharpPath(it, svg);
   const {xs, ys, rs, n} = strokeShape(it);
   if(!n) return svg ? '' : new Path2D();

@@ -43,7 +43,7 @@ async function openPage(id, opts = {}){
   if(saved && isFinite(saved.z)) Object.assign(cam, saved);
   else { cam.z = 1; cam.ox = W > 900 ? 56 : 20; cam.oy = 28; }
   slPages = null;
-  clearSel(); updUndo(); renderRuler(); invalidate();
+  clearSel(); updUndo(); renderRuler(); Tech.render(); invalidate();
   markActivePage(); markBadgeSoon();
   if(width() === 'narrow') app.dataset.view = 'editor';
   if(Ask.histOpen && !$('askPanel').hidden) Ask.showHistory();   // (1.68) the chat filter follows the open page
@@ -62,7 +62,7 @@ function showEmpty(){
   cur = null; slPages = null;
   worldBack.innerHTML = ''; worldFront.innerHTML = ''; elMap.clear(); geo.clear();
   $('stageEmpty').hidden = false; $('title').value = '';
-  clearSel(); updUndo(); renderRuler(); invalidate();
+  clearSel(); updUndo(); renderRuler(); Tech.render(); invalidate();
 }
 async function newPage(tmplId){
   let sec = ui.sec && getDoc(ui.sec);
@@ -133,7 +133,9 @@ function showLeft(which){ app.dataset.left = which; if(width() === 'narrow') app
 
 function editFormHTML(name, color, what){
   const sw = Array.from({length: TABS}, (_, i) => `<button type="button" class="${i === color % TABS ? 'on' : ''}" data-col="${i}" style="--c:var(--t${i})" aria-label="Colour ${i + 1}"></button>`).join('');
-  return `<form class="edit-form"><input id="editName" value="${esc(name)}" aria-label="Name" maxlength="60" autocomplete="off"><div class="tabsw">${sw}</div><div class="edit-actions"><button type="button" class="btn danger" data-del>Delete ${what}</button><button type="submit" class="btn primary">Done</button></div></form>`;
+  // (2.0) notebooks: Technical (line types, snapping, sizes while drawing)
+  const tech = what === 'notebook' ? `<button type="button" class="toggle edit-tech${editState && editState.tech ? ' on' : ''}" data-tech aria-pressed="${editState && editState.tech ? 'true' : 'false'}"><span class="sw"></span><span><b>Technical notebook</b><small>Line types, snapping and sizes in mm for technical drawings</small></span></button>` : '';
+  return `<form class="edit-form"><input id="editName" value="${esc(name)}" aria-label="Name" maxlength="60" autocomplete="off"><div class="tabsw">${sw}</div>${tech}<div class="edit-actions"><button type="button" class="btn danger" data-del>Delete ${what}</button><button type="submit" class="btn primary">Done</button></div></form>`;
 }
 function wireEditForm(root){
   const form = root.querySelector('.edit-form'); if(!form) return;
@@ -144,6 +146,8 @@ function wireEditForm(root){
     editState.color = +b.dataset.col;
     form.querySelectorAll('[data-col]').forEach(x => x.classList.toggle('on', x === b));
   }));
+  const tb = form.querySelector('[data-tech]');
+  if(tb) tb.addEventListener('click', () => { editState.tech = !editState.tech; tb.classList.toggle('on', editState.tech); tb.setAttribute('aria-pressed', editState.tech ? 'true' : 'false'); });
   const del = form.querySelector('[data-del]'), label = del.textContent;
   del.addEventListener('click', () => {
     if(!editState.armed){
@@ -159,8 +163,8 @@ async function commitEdit(name){
   const st = editState; editState = null;
   if(!st) return;
   const d = getDoc(st.id);
-  if(d) await patchDoc(d, {name: name || d.data.name, color: st.color});
-  renderNav(); renderList();
+  if(d) await patchDoc(d, st.kind === 'nb' ? {name: name || d.data.name, color: st.color, tech: !!st.tech} : {name: name || d.data.name, color: st.color});
+  renderNav(); renderList(); renderOpts();
 }
 async function deleteContainer(){
   const st = editState; editState = null;
@@ -194,7 +198,7 @@ function renderNav(){
     const n = secs.reduce((a, s) => a + pagesOf(s.id).length, 0);
     let h = `<div class="nb ${open ? 'open' : ''}">`;
     if(editState && editState.kind === 'nb' && editState.id === nb.id) h += editFormHTML(nb.data.name, nb.data.color || 0, 'notebook');
-    else h += `<div class="nb-row"><button class="nb-main" data-nb="${nb.id}" aria-expanded="${open}"><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nb-sw" style="--c:var(--t${(nb.data.color || 0) % TABS})"></span><span class="nb-name">${esc(nb.data.name)}</span><span class="count">${n || ''}</span></button>${open ? `<button class="icon-btn" data-editnb="${nb.id}" aria-label="Rename notebook" title="Rename notebook"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg></button>` : ''}</div>`;
+    else h += `<div class="nb-row"><button class="nb-main" data-nb="${nb.id}" aria-expanded="${open}"><svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span class="nb-sw" style="--c:var(--t${(nb.data.color || 0) % TABS})"></span><span class="nb-name">${esc(nb.data.name)}</span>${nb.data.tech ? '<svg class="nb-tech" viewBox="0 0 24 24" aria-label="Technical notebook"><title>Technical notebook</title><path d="M3 21 21 3M7 21v-4M11 21v-3M15 21v-4M19 21v-3M3 21h18"/></svg>' : ''}<span class="count">${n || ''}</span></button>${open ? `<button class="icon-btn" data-editnb="${nb.id}" aria-label="Rename notebook" title="Rename notebook"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg></button>` : ''}</div>`;
     if(open){
       h += '<div class="secs">' + secs.map(s => `<button class="sec-row ${!q && s.id === ui.sec ? 'on' : ''}" data-sec="${s.id}"><span class="tab" style="--c:var(--t${(s.data.color || 0) % TABS})"></span><span class="nm">${esc(s.data.name)}</span><span class="count">${pagesOf(s.id).length || ''}</span></button>`).join('') + `<button class="add-sec" data-addsec="${nb.id}">+ Section</button></div>`;
     }
@@ -281,7 +285,7 @@ $('search').addEventListener('input', () => {
 $('nbList').addEventListener('click', async e => {
   const t = e.target.closest('button'); if(!t) return;
   if(t.dataset.nb){ prefs.open[t.dataset.nb] = !prefs.open[t.dataset.nb]; savePrefs(); renderNav(); return; }
-  if(t.dataset.editnb){ const nb = getDoc(t.dataset.editnb); if(!nb) return; editState = {kind: 'nb', id: nb.id, color: nb.data.color || 0}; renderNav(); return; }
+  if(t.dataset.editnb){ const nb = getDoc(t.dataset.editnb); if(!nb) return; editState = {kind: 'nb', id: nb.id, color: nb.data.color || 0, tech: !!nb.data.tech}; renderNav(); return; }
   if(t.dataset.sec){ selectSection(t.dataset.sec); return; }
   if(t.dataset.addsec){
     const nbId = t.dataset.addsec, secs = sectionsOf(nbId), nb = getDoc(nbId);
@@ -582,6 +586,7 @@ function renderOpts(){
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   $('assistBtn').hidden = t !== 'pen';
+  Tech.render();
   $('hlSnap').hidden = t !== 'hl'; $('hlSnap').classList.toggle('on', !!prefs.hlSnap); $('hlSnap').setAttribute('aria-pressed', prefs.hlSnap ? 'true' : 'false');
   $('assistBtn').classList.toggle('on', !!(prefs.refLine || prefs.autoText));
   if(t === 'eraser') $('eraseMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.eraser.mode === 'area' ? 'area' : 'stroke')));
@@ -1432,9 +1437,9 @@ function openPop(id, anchor){
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }
-function closePops(){ for(const id of ['paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop', 'spellPop']) closePop(id); }
+function closePops(){ for(const id of ['techPop', 'paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop', 'spellPop']) closePop(id); }
 document.addEventListener('pointerdown', e => {
-  if(e.target.closest('.pop') || e.target.closest('#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#shapeRail,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"],[data-act="spell"]')) return;
+  if(e.target.closest('.pop') || e.target.closest('#techBtn,#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#shapeRail,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"],[data-act="spell"]')) return;
   closePops();
 }, true);
 let modalAt = 0;

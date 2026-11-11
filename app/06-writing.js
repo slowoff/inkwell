@@ -258,8 +258,10 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 function trySnap(a){
   const p = a.pts; if(p.length < 15) return;
   const P = []; for(let i = 0; i < p.length; i += 3) P.push([p[i], p[i+1]]);
-  const s = recognize(holdTrim(P));
+  let s = recognize(holdTrim(P));
   if(!s) return;
+  s = Tech.snapHeld(s);   // (2.0) technical notebook: corners onto other lines' ends and the mm grid
+  a.snapGeo = Tech.on() ? Tech.heldGeo(s) : null;
   a.snapped = s.kind;
   if(s.kind === 'line'){ a.lineStart = s.pts[0]; s.pts[1] = dragLineEnd(s.pts[0], s.pts[1]); }
   a.snapPr = a.isPen ? midPressure(p) : shapePr();   // the shape keeps the thickness this stroke was written with

@@ -63,6 +63,7 @@ function drawPickPreview(a){
     const b = pickBox(a);
     liveCtx.fillStyle = inkColor(prefs.pen.c, false, false);
     for(const it of shapeItems(pick.shape, b)) liveCtx.fill(strokePath(it, false));
+    Tech.livePick(pick.shape, b, shapePolys(pick.shape, b, penWidth()));
     if(pick.shape === 'compass'){
       // needle point, dashed radius line and the radius in cm (paper scale, as on the ruler)
       const [cx, cy, r] = compassGeo(b), ex = b.x1, ey = b.y1;
@@ -169,8 +170,17 @@ function shapePolys(shape, b, w){
   return [];
 }
 function shapeItems(shape, b){
-  const w = penWidth(), polys = shapePolys(shape, b, w), g = polys.length > 1 ? 'g' + newId() : null;
-  return polys.map(([V, closed]) => { const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)}; if(g) it.g = g; if(shape === 'honeycomb'){ it.sq = 1; it.ne = 1; } return it; });   // ne: the eraser leaves it alone, like a graph; Select + delete removes it
+  // (2.0) technical notebook: the chosen line type and width, and the exact shape (it.geo) on the main line
+  const ts = shape === 'honeycomb' || shape === 'grid' ? null : Tech.style(), tech = Tech.on();
+  const w = ts ? ts.w : penWidth(), polys = shapePolys(shape, b, w), g = polys.length > 1 ? 'g' + newId() : null;
+  const geo = tech ? Tech.shapeGeo(shape, polys) : null;
+  return polys.map(([V, closed], i) => {
+    const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c: prefs.pen.c, w, hl: 0, p: polyPts(V, closed)};
+    if(g) it.g = g; if(shape === 'honeycomb'){ it.sq = 1; it.ne = 1; }   // ne: the eraser leaves it alone, like a graph; Select + delete removes it
+    if(ts && shape !== 'dline') it.ls = i && (ts.ls === 'h' || ts.ls === 'c') ? 'n' : ts.ls;   // arrow heads stay solid
+    if(geo && !i) it.geo = geo;
+    return it;
+  });
 }
 function insertShape(shape, b){
   const items = shapeItems(shape, b);

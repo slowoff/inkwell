@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.0', '2026-11-11', ['Technical notebooks for robotics and other technical drawings. Turn one on in the notebook\'s edit form (pencil next to its name): Technical notebook', 'Line types for the pen and shapes: thick (visible edges), thin, hidden (dashed) and centre (dash-dot), all at real mm widths; pick them with the line button next to the colours', 'Shapes and lines you hold to straighten snap onto a mm grid (1, 2, 5 or 10 mm, or off) and onto the ends, middles, corners and centres of what is already drawn', 'While drawing, the length and angle, width × height or diameter in mm is shown next to the pen']],
   ['1.99.1', '2026-11-10', ['Ask Claude: when an answer comes back empty, it now says why (connection cut off, or the reason Claude stopped) instead of only "No answer came back", and the server notes what happened so the cause can be fixed']],
   ['1.99', '2026-11-10', ['Stick to text works in tables: the highlight now lands on the words instead of the border above them, stays inside its cell, and one swipe across a whole row marks each cell separately. Table lines and underlines are no longer mistaken for text']],
   ['1.98', '2026-11-10', ['Highlighter: six colours like the pen (yellow, green, pink, blue, orange, purple), replacing the old four. What you already highlighted keeps its colour']],

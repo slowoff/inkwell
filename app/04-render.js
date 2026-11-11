@@ -851,6 +851,14 @@ function setItems(pairs){
   changed(dirty);
 }
 function commit(before, after){
+  // (2.0) dimensions anchored to something that changed are rebuilt in the same undo step; an id already in the step keeps
+  // its first "before" and its latest "after"
+  const ex = Tech.follow(before, after);
+  if(ex){
+    const seen = new Set(before.map(p => p[0]));
+    before = before.concat(ex[0].filter(p => !seen.has(p[0])));
+    const late = new Map(ex[1]); after = after.filter(p => !late.has(p[0])).concat(ex[1]);
+  }
   cur.undo.push({b: before, a: after});
   if(cur.undo.length > 300) cur.undo.shift();
   cur.redo.length = 0;

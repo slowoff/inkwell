@@ -62,8 +62,9 @@ function drawPickPreview(a){
   if(pick && pick.kind === 'shape'){
     const b = pickBox(a);
     liveCtx.fillStyle = inkColor(prefs.pen.c, false, false);
-    for(const it of shapeItems(pick.shape, b)) liveCtx.fill(strokePath(it, false));
-    Tech.livePick(pick.shape, b, shapePolys(pick.shape, b, penWidth()));
+    for(const it of shapeItems(pick.shape, b)) if(it.t === 's') liveCtx.fill(strokePath(it, false));
+    if(pick.shape === 'dim'){ if(!b.tap) Tech.label(Tech.lineText([b.x0, b.y0], [b.x1, b.y1]), b.x1, b.y1, Tech.pickWhy || ''); }
+    else Tech.livePick(pick.shape, b, shapePolys(pick.shape, b, penWidth()));
     if(pick.shape === 'compass'){
       // needle point, dashed radius line and the radius in cm (paper scale, as on the ruler)
       const [cx, cy, r] = compassGeo(b), ex = b.x1, ey = b.y1;
@@ -170,6 +171,7 @@ function shapePolys(shape, b, w){
   return [];
 }
 function shapeItems(shape, b){
+  if(shape === 'dim'){ const r = Tech.on() ? Tech.dimFromPick(b) : null; return r ? [r.main, ...r.parts.filter(Boolean)] : []; }
   // (2.0) technical notebook: the chosen line type and width, and the exact shape (it.geo) on the main line
   const ts = shape === 'honeycomb' || shape === 'grid' ? null : Tech.style(), tech = Tech.on();
   const w = ts ? ts.w : penWidth(), polys = shapePolys(shape, b, w), g = polys.length > 1 ? 'g' + newId() : null;
@@ -304,13 +306,13 @@ $('hcDraw').addEventListener('click', () => {
 renderGrid(); renderHc();
 // (1.92) two buttons open it: Shapes in the top bar / its menu, and #shapeRail at the foot of the toolbar column on the side
 let shapeAnchor = $('shapeBtn');
-function openShapes(e){ if(!cur){ toast('Open a page first'); return; } shapeAnchor = e.currentTarget; renderSnapShapes(); renderGrid(); renderHc(); showGridPanel(false); showHcPanel(false); openPop('shapePop', shapeAnchor); }
+function openShapes(e){ if(!cur){ toast('Open a page first'); return; } shapeAnchor = e.currentTarget; document.querySelectorAll('#shapeGrid .tech-only').forEach(b => { b.hidden = !Tech.on(); }); renderSnapShapes(); renderGrid(); renderHc(); showGridPanel(false); showHcPanel(false); openPop('shapePop', shapeAnchor); }
 $('shapeBtn').addEventListener('click', openShapes);
 $('shapeRail').addEventListener('click', openShapes);
 $('shapeGrid').addEventListener('click', e => {
   const b = e.target.closest('button[data-shape]'); if(!b) return;
   closePops();
-  startPick({kind: 'shape', shape: b.dataset.shape}, 'Drag on the page to draw the ' + (b.title || 'shape').toLowerCase());
+  startPick({kind: 'shape', shape: b.dataset.shape}, b.dataset.shape === 'dim' ? 'Drag from one point to another to measure it, or tap a circle for its diameter' : 'Drag on the page to draw the ' + (b.title || 'shape').toLowerCase());
 });
 $('compassOpen').addEventListener('click', () => {
   closePops();

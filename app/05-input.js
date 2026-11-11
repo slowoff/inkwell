@@ -257,7 +257,8 @@ function startTool(e, sx, sy, pr){
   act = {tool, id: e.pointerId, sx, sy, moved: false, target: e.target, anchor: [sx, sy], isPen: e.pointerType === 'pen'};
   TS.clear();
   if(pick){
-    clearSel(); act.kind = 'pick'; act.w0 = pick.kind === 'shape' && pick.shape !== 'honeycomb' && pick.shape !== 'grid' ? Tech.snap(wx, wy).p : [wx, wy]; act.w1 = null; Tech.pickWhy = '';
+    clearSel(); act.kind = 'pick'; act.w0 = pick.kind === 'shape' && pick.shape !== 'honeycomb' && pick.shape !== 'grid' ? Tech.snap(wx, wy).p : [wx, wy]; act.w1 = null; Tech.pickWhy = ''; Tech.pickA = Tech.pickB = null;
+    if(pick.shape === 'dim'){ Tech.pickA = Tech.anchorAt(wx, wy); act.w0 = Tech.pickA.p; }
   } else if(tool === 'pen' || tool === 'hl' || tool === 'mark'){
     clearSel();
     act.kind = 'stroke';
@@ -357,7 +358,8 @@ function toolMove(e){
     else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){
       act.w1 = toWorld(sx, sy);
       // (2.0) technical notebook: a shape's far corner / end snaps too
-      if(act.kind === 'pick' && pick && pick.kind === 'shape' && pick.shape !== 'honeycomb' && pick.shape !== 'grid' && Tech.on()){ const s = Tech.snap(act.w1[0], act.w1[1]); act.w1 = s.p; Tech.pickWhy = s.why; }
+      if(act.kind === 'pick' && pick && pick.shape === 'dim'){ Tech.pickB = Tech.anchorAt(act.w1[0], act.w1[1]); act.w1 = Tech.pickB.p; Tech.pickWhy = Tech.pickB.why; }
+      else if(act.kind === 'pick' && pick && pick.kind === 'shape' && pick.shape !== 'honeycomb' && pick.shape !== 'grid' && Tech.on()){ const s = Tech.snap(act.w1[0], act.w1[1]); act.w1 = s.p; Tech.pickWhy = s.why; }
       if(act.kind === 'pick') compassTrack(act);
     }
   }

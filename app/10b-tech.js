@@ -55,13 +55,11 @@ const Tech = {
     const out = [];
     if(!cur) return out;
     for(const it of cur.items.values()){
-      if(it.t !== 's' || it.hl || it.mk || (skip && skip.has(it.id))) continue;
+      if(it.t !== 's' || it.hl || it.mk || it.dim || it.dp || (skip && skip.has(it.id))) continue;
       const b = geoBox(it); if(x < b[0] - r || x > b[2] + r || y < b[1] - r || y > b[3] + r) continue;
-      const g = this.geoOf(it), p = it.p, n = p.length;
-      if(g && g.k === 'l'){ const v = g.v; out.push([v[0], v[1], 'end'], [v[2], v[3], 'end'], [(v[0] + v[2]) / 2, (v[1] + v[3]) / 2, 'middle']); }
-      else if(g && g.k === 'r'){ const [L, T, R, B] = g.v; out.push([L, T, 'corner'], [R, T, 'corner'], [R, B, 'corner'], [L, B, 'corner'], [(L + R) / 2, T, 'middle'], [R, (T + B) / 2, 'middle'], [(L + R) / 2, B, 'middle'], [L, (T + B) / 2, 'middle'], [(L + R) / 2, (T + B) / 2, 'centre']); }
-      else if(g && g.k === 'e'){ const [cx, cy, rx, ry] = g.v; out.push([cx, cy, 'centre'], [cx + rx, cy, 'edge'], [cx - rx, cy, 'edge'], [cx, cy + ry, 'edge'], [cx, cy - ry, 'edge']); }
-      else if(!it.fl){ out.push([p[0], p[1], 'end']); if(Math.hypot(p[n-3] - p[0], p[n-2] - p[1]) > 1) out.push([p[n-3], p[n-2], 'end']); }
+      const P = this.points(it);
+      // [x, y, what, item id, point name] (a stroke that ends where it started offers one point)
+      for(const k in P){ if(k === 'b' && P.a && Math.hypot(P.b[0] - P.a[0], P.b[1] - P.a[1]) <= 1) continue; out.push([P[k][0], P[k][1], this.why(k), it.id, k]); }
     }
     return out;
   },
@@ -188,6 +186,212 @@ const Tech = {
 };
 // a stroke's box, also for strokes without a cached geometry
 function geoBox(it){ try { return geoOf(it).b; } catch { return strokeBox(it); } }
+/* ---------- (2.0 stage 2) dimension lines and exact sizes ----------
+   A dimension is ordinary items in one group, so selecting, moving, erasing, export and sync all work as for any drawing:
+   two extension lines, the dimension line (thin), two filled arrowheads and a text box with the size in mm.
+   The dimension line carries it.dim = {a, b, parts: [ids], k: 'lin' | 'dia'}; a and b are anchors: {id, k} = a point of
+   another item (an end, middle, corner or centre, see Tech.points) or {p: [x, y]} = a fixed point. Whenever a change is
+   committed that touches an anchored item (or the dimension itself, e.g. moved further out), the dimension is rebuilt from
+   its anchors in the same undo step, so the number always shows the part's real size. Older app versions just see the
+   lines and the text. */
+Object.assign(Tech, {
+  // the named points of an item (the same ones the snapping offers)
+  points(it){
+    const out = {};
+    if(!it || it.t !== 's' || !it.p || it.p.length < 3) return out;
+    const g = this.geoOf(it), p = it.p, n = p.length;
+    if(g && g.k === 'l'){ const v = g.v; out.a = [v[0], v[1]]; out.b = [v[2], v[3]]; out.m = [(v[0] + v[2]) / 2, (v[1] + v[3]) / 2]; }
+    else if(g && g.k === 'r'){ const [L, T, R, B] = g.v; Object.assign(out, {c0: [L, T], c1: [R, T], c2: [R, B], c3: [L, B], m0: [(L + R) / 2, T], m1: [R, (T + B) / 2], m2: [(L + R) / 2, B], m3: [L, (T + B) / 2], ce: [(L + R) / 2, (T + B) / 2]}); }
+    else if(g && g.k === 'e'){ const [cx, cy, rx, ry] = g.v; Object.assign(out, {ce: [cx, cy], q0: [cx + rx, cy], q1: [cx, cy + ry], q2: [cx - rx, cy], q3: [cx, cy - ry]}); }
+    else if(!it.fl){ out.a = [p[0], p[1]]; out.b = [p[n-3], p[n-2]]; }
+    return out;
+  },
+  why(k){ return k === 'm' || /^m\d/.test(k) ? 'middle' : k === 'ce' ? 'centre' : /^c\d/.test(k) ? 'corner' : /^q\d/.test(k) ? 'edge' : 'end'; },
+  resolve(an){
+    if(!an) return null;
+    if(an.p) return an.p;
+    const it = cur && cur.items.get(an.id); if(!it) return null;
+    return this.points(it)[an.k] || null;
+  },
+  isDimPart(it){ return !!(it && (it.dim || it.dp)); },
+
+  /* building a dimension */
+  MMs(v){ return v * MM; },
+  arrow(tip, dir, c){
+    // filled arrowhead, 3 mm long, 1 mm wide, pointing along dir (unit) to tip
+    const l = 3 * MM, w = 0.5 * MM, bx = tip[0] - dir[0] * l, by = tip[1] - dir[1] * l, nx = -dir[1], ny = dir[0];
+    return {t: 's', c, w: 0.2 * MM, hl: 0, fl: 1, p: [tip[0], tip[1], 0.5, bx + nx * w, by + ny * w, 0.5, bx - nx * w, by - ny * w, 0.5]};
+  },
+  line(a, b, c){
+    const P = [], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 3));
+    for(let i = 0; i <= n; i++) P.push(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n, 0.5);
+    return {t: 's', c, w: 0.25 * MM, hl: 0, ls: 'n', p: P};
+  },
+  textItem(txt, cx, cy, side){
+    // upright text (ISO 129 allows all dimension text to read from the bottom); about 3.5 mm tall
+    const px = 13, fs = Math.round(px / 17 * 1000) / 1000, w = Math.max(28, txt.length * px * 0.62 + 14), h = px * 1.45 + 6;
+    const x = cx - w / 2 + side[0] * (w / 2 + 1 * MM), y = cy - h / 2 + side[1] * (h / 2 + 0.5 * MM);
+    return {t: 'x', x, y, w, fs, html: '<p>' + esc(txt) + '</p>'};
+  },
+  // the items of a linear dimension from A to B, the dimension line at distance off (signed, along normal n)
+  buildLin(A, B, off, c){
+    const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy);
+    if(L < 0.5) return null;
+    const u = [dx / L, dy / L], n = [-u[1], u[0]], s = off >= 0 ? 1 : -1, gap = 1 * MM, over = 2 * MM;
+    const D1 = [A[0] + n[0] * off, A[1] + n[1] * off], D2 = [B[0] + n[0] * off, B[1] + n[1] * off];
+    const e = (P, D) => Math.abs(off) > gap + 0.5 ? this.line([P[0] + n[0] * gap * s, P[1] + n[1] * gap * s], [D[0] + n[0] * over * s, D[1] + n[1] * over * s], c) : null;
+    const mid = [(D1[0] + D2[0]) / 2, (D1[1] + D2[1]) / 2];
+    return {
+      main: this.line(D1, D2, c),
+      parts: [e(A, D1), e(B, D2), this.arrow(D1, [-u[0], -u[1]], c), this.arrow(D2, u, c), this.textItem(this.num(L / MM), mid[0], mid[1], [n[0] * s, n[1] * s])]
+    };
+  },
+  // diameter: a line across the circle through its centre at 45° (or along the drag), arrows on the circle, ⌀ text outside
+  buildDia(C, r, ang, c){
+    const u = [Math.cos(ang), Math.sin(ang)], P1 = [C[0] - u[0] * r, C[1] - u[1] * r], P2 = [C[0] + u[0] * r, C[1] + u[1] * r];
+    const tail = [P2[0] + u[0] * 6 * MM, P2[1] + u[1] * 6 * MM];
+    return {
+      main: this.line(P1, tail, c),
+      parts: [null, null, this.arrow(P1, [-u[0], -u[1]], c), this.arrow(P2, u, c), this.textItem('⌀' + this.num(2 * r / MM), tail[0], tail[1], [u[0] >= 0 ? 1 : -1, 0])]
+    };
+  },
+  // finished items (ids kept from the old dimension when rebuilding, so a selection holding it stays valid)
+  dimItems(spec, old){
+    const c = old ? old.c : (prefs.pen.c || 'auto');
+    let built = null;
+    if(spec.k === 'dia'){
+      const it = cur.items.get(spec.a.id), g = it && this.geoOf(it);
+      if(!g || g.k !== 'e') return null;
+      built = this.buildDia([g.v[0], g.v[1]], (g.v[2] + g.v[3]) / 2, spec.ang == null ? -Math.PI / 4 : spec.ang, c);
+    } else {
+      const A = this.resolve(spec.a), B = this.resolve(spec.b);
+      if(!A || !B) return null;
+      built = this.buildLin(A, B, spec.off, c);
+    }
+    if(!built) return null;
+    const ids = old && old.dim && old.dim.parts && old.dim.parts.length === 5 ? old.dim.parts.slice() : [0, 1, 2, 3, 4].map(i => (i === 4 ? 'x' : 's') + newId() + Math.random().toString(36).slice(2, 5));
+    const mainId = old ? old.id : 's' + newId() + Math.random().toString(36).slice(2, 5);
+    const g = old && old.g ? old.g : 'g' + newId();
+    const main = Object.assign(built.main, {id: mainId, g, dim: {k: spec.k, a: spec.a, b: spec.b || null, off: spec.off || 0, ang: spec.ang == null ? null : spec.ang, parts: ids}});
+    const parts = built.parts.map((it, i) => it ? Object.assign(it, {id: ids[i], g, dp: mainId}) : null);
+    return {main, parts, ids};
+  },
+  // where the dimension line now is (after the user moved it): its signed distance from A-B
+  offNow(it, A, B){
+    const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy) || 1, n = [-dy / L, dx / L], p = it.p;
+    return (p[0] - A[0]) * n[0] + (p[1] - A[1]) * n[1];
+  },
+  // anchor from a snap target, or a fixed point
+  anchorAt(x, y){
+    const t = this.target(x, y);
+    if(t && t[3]) return {an: {id: t[3], k: t[4]}, p: [t[0], t[1]], why: t[2]};
+    const s = this.snap(x, y); return {an: {p: s.p}, p: s.p, why: s.why};
+  },
+  // the dimension shape from the shapes menu: drag from one point to another (a tap on a circle: its diameter)
+  dimFromPick(b){
+    if(b.tap){
+      // tap on a circle
+      for(const it of cur.items.values()){
+        const g = this.geoOf(it); if(!g || g.k !== 'e') continue;
+        const d = Math.hypot((b.x0 - g.v[0]) / g.v[2], (b.y0 - g.v[1]) / g.v[3]);
+        if(Math.abs(d - 1) < 0.25 || d < 1) return this.dimItems({k: 'dia', a: {id: it.id, k: 'ce'}, ang: -Math.PI / 4});
+      }
+      return null;
+    }
+    const A = this.pickA || {an: {p: [b.x0, b.y0]}, p: [b.x0, b.y0]}, B = this.pickB || {an: {p: [b.x1, b.y1]}, p: [b.x1, b.y1]};
+    // away from the part: the side the part's centre is not on; else above / left
+    const dx = B.p[0] - A.p[0], dy = B.p[1] - A.p[1], L = Math.hypot(dx, dy) || 1, n = [-dy / L, dx / L];
+    let side = (n[1] < -0.01 || (Math.abs(n[1]) <= 0.01 && n[0] < 0)) ? 1 : -1;   // default: up (or left)
+    const host = A.an.id && cur.items.get(A.an.id), hb = host ? geoBox(host) : null;
+    if(hb){ const cx = (hb[0] + hb[2]) / 2 - A.p[0], cy = (hb[1] + hb[3]) / 2 - A.p[1], dot = cx * n[0] + cy * n[1]; if(Math.abs(dot) > 1) side = dot > 0 ? -1 : 1; }
+    return this.dimItems({k: 'lin', a: A.an, b: B.an, off: side * 8 * MM});
+  },
+  // committed changes: rebuild every dimension anchored to a changed item (or itself changed); returns extra [before, after] pairs
+  follow(before, after){
+    if(!cur) return null;
+    const changed = new Set(after.map(p => p[0]));
+    const dims = [...cur.items.values()].filter(it => it.dim && (changed.has(it.id) || changed.has(it.dim.a && it.dim.a.id) || changed.has(it.dim.b && it.dim.b.id)));
+    if(!dims.length) return null;
+    const B = [], A = [];
+    for(const d of dims){
+      let off = d.dim.off;
+      if(d.dim.k === 'lin'){
+        const pa = this.resolve(d.dim.a), pb = this.resolve(d.dim.b);
+        if(!pa || !pb) continue;
+        if(changed.has(d.id)) off = this.offNow(d, pa, pb);   // the dimension itself was moved: keep it where it was put
+      }
+      let ang = d.dim.ang;
+      if(d.dim.k === 'dia' && changed.has(d.id)){ const p = d.p; ang = Math.atan2(p[p.length-2] - p[1], p[p.length-3] - p[0]); }
+      const r = this.dimItems({k: d.dim.k, a: d.dim.a, b: d.dim.b, off, ang}, d);
+      if(!r) continue;
+      for(const it of [r.main, ...r.parts]){ if(!it) continue; B.push([it.id, cur.items.get(it.id) || null]); A.push([it.id, it]); }
+      // a part that is no longer needed (extension lines of a dimension pulled onto the part)
+      r.ids.forEach((id, i) => { if(!r.parts[i] && cur.items.get(id)){ B.push([id, cur.items.get(id)]); A.push([id, null]); } });
+    }
+    if(!A.length) return null;
+    setItems(A);
+    return [B, A];
+  },
+
+  /* typing an exact size: one line, rectangle or circle selected */
+  sizeTarget(its){
+    if(!this.on() || its.length !== 1) return null;
+    const it = its[0]; if(it.dim || it.dp || it.g) return null;
+    return this.geoOf(it) ? it : null;
+  },
+  withGeo(it, g){
+    const pr = it.p[2] || 0.5, P = [];
+    const push = V => { for(let i = 0; i < V.length - 1; i++){ const a = V[i], b = V[i + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2.5)); for(let k = 0; k < n; k++) P.push(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n, pr); } const l = V[V.length - 1]; P.push(l[0], l[1], pr); };
+    if(g.k === 'l') push([[g.v[0], g.v[1]], [g.v[2], g.v[3]]]);
+    else if(g.k === 'r'){ const [L, T, R, B] = g.v; push([[L, T], [R, T], [R, B], [L, B], [L, T]]); }
+    else { const [cx, cy, rx, ry] = g.v, V = []; for(let i = 0; i <= 96; i++){ const t = i / 96 * Math.PI * 2; V.push([cx + rx * Math.cos(t), cy + ry * Math.sin(t)]); } push(V); }
+    const o = Object.assign({}, it, {p: P, geo: g}); delete o.ra;
+    return o;
+  },
+  openSize(){
+    const it = sel && this.sizeTarget(sel.ids.map(id => cur.items.get(id)).filter(Boolean)); if(!it) return;
+    const g = this.geoOf(it), f = v => this.num(v / MM);
+    let rows;
+    if(g.k === 'l'){
+      const L = Math.hypot(g.v[2] - g.v[0], g.v[3] - g.v[1]); let deg = -Math.atan2(g.v[3] - g.v[1], g.v[2] - g.v[0]) * 180 / Math.PI; if(deg < 0) deg += 360;
+      rows = [['len', 'Length', f(L), 'mm'], ['ang', 'Angle', String(Math.round(deg * 10) / 10), '°']];
+    } else if(g.k === 'r') rows = [['w', 'Width', f(g.v[2] - g.v[0]), 'mm'], ['h', 'Height', f(g.v[3] - g.v[1]), 'mm']];
+    else rows = Math.abs(g.v[2] - g.v[3]) < 0.5 ? [['d', 'Diameter', f(2 * g.v[2]), 'mm']] : [['w', 'Width', f(2 * g.v[2]), 'mm'], ['h', 'Height', f(2 * g.v[3]), 'mm']];
+    $('sizeRows').innerHTML = rows.map(([k, l, v, u]) => `<label class="size-row"><span>${l}</span><input type="text" inputmode="decimal" data-k="${k}" value="${v}" autocomplete="off"><em>${u}</em></label>`).join('');
+    $('sizeErr').hidden = true;
+    $('sizePop').dataset.id = it.id;
+    openPop('sizePop', $('selSize'));
+    const first = $('sizeRows').querySelector('input'); if(first){ first.focus(); first.select(); }
+  },
+  applySize(){
+    const it = cur && cur.items.get($('sizePop').dataset.id), g = it && this.geoOf(it); if(!g) return;
+    const val = k => { const el = $('sizeRows').querySelector(`[data-k="${k}"]`); if(!el) return null; const v = parseFloat(el.value.replace(',', '.')); return isFinite(v) ? v : NaN; };
+    const bad = msg => { $('sizeErr').textContent = msg; $('sizeErr').hidden = false; };
+    let ng;
+    if(g.k === 'l'){
+      const L = val('len'), a = val('ang');
+      if(!(L > 0) || L > 5000) return bad('Enter a length above 0 mm.');
+      if(!isFinite(a)) return bad('Enter an angle in degrees.');
+      const t = -a * Math.PI / 180;
+      ng = {k: 'l', v: [g.v[0], g.v[1], g.v[0] + L * MM * Math.cos(t), g.v[1] + L * MM * Math.sin(t)]};
+    } else if(g.k === 'r'){
+      const w = val('w'), h = val('h');
+      if(!(w > 0) || !(h > 0) || w > 5000 || h > 5000) return bad('Enter a width and height above 0 mm.');
+      ng = {k: 'r', v: [g.v[0], g.v[1], g.v[0] + w * MM, g.v[1] + h * MM]};
+    } else {
+      const d = val('d');
+      if(d != null){ if(!(d > 0) || d > 5000) return bad('Enter a diameter above 0 mm.'); ng = {k: 'e', v: [g.v[0], g.v[1], d * MM / 2, d * MM / 2]}; }
+      else { const w = val('w'), h = val('h'); if(!(w > 0) || !(h > 0)) return bad('Enter a width and height above 0 mm.'); ng = {k: 'e', v: [g.v[0], g.v[1], w * MM / 2, h * MM / 2]}; }
+    }
+    closePops();
+    replaceItems([this.withGeo(it, ng)]);
+    selectIds([it.id]);
+    toast(this.boxText(ng));
+  }
+});
+
 $('techBtn').addEventListener('click', e => { Tech.render(); openPop('techPop', e.currentTarget); });
 $('techLs').addEventListener('click', e => { const b = e.target.closest('[data-ls]'); if(!b) return; prefs.techLs = b.dataset.ls; savePrefs(); Tech.render(); closePops(); });
 $('techSnap').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if(!b) return; prefs.techSnap = +b.dataset.step; savePrefs(); Tech.render(); });
+$('selSize').addEventListener('click', () => Tech.openSize());
+$('sizeForm').addEventListener('submit', e => { e.preventDefault(); Tech.applySize(); });

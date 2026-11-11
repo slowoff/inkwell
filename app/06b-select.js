@@ -243,6 +243,7 @@ function renderGroupBtns(){
   $('selUngroup').hidden = !its.some(it => it.g);
   $('selMath').hidden = !its.some(it => it.t === 's' && !it.hl) || its.some(it => it.t !== 's');
   $('selGraph').hidden = !GAdd.find(its);
+  $('selSize').hidden = !Tech.sizeTarget(its);   // (2.0) technical notebook: type an exact size
   if(!$('selGraph').hidden) $('selMath').hidden = true;
   // (1.59) imported pages and pictures turn in 90° steps with the button (their picture is turned); no free turning
   const pics = its.some(it => it.t === 'i');

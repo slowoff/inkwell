@@ -66,7 +66,8 @@ async def main():
         await ctx.route('**/*.supabase.co/**', lambda r: r.abort())
         page = await ctx.new_page(); errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
-        await page.goto(URL); await page.wait_for_function('!!window.__inkwellBooted', timeout=15000)
+        await page.goto(URL); await page.wait_for_function('navigator.serviceWorker && navigator.serviceWorker.controller', timeout=15000)
+        await page.wait_for_timeout(2500); await page.wait_for_function('!!window.__inkwellBooted', timeout=15000)
         await page.evaluate(SETUP)
         await page.wait_for_function("(() => { const el = document.querySelector('#worldBack [data-id=\"ipage\"]'); return el && el._loaded && el._img.complete; })()", timeout=10000)
         W = await page.evaluate("window.__words"); C = await page.evaluate("window.__cols"); R = await page.evaluate("window.__rows")

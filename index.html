@@ -148,6 +148,7 @@
           <button class="tb" id="selMath" hidden title="Claude turns your handwritten formula into a typed one">To formula</button>
           <button class="tb" id="selGroup" hidden>Group</button>
           <button class="tb" id="selUngroup" hidden>Ungroup</button>
+          <button class="tb" id="selSize" hidden title="Type an exact size in mm">Size</button>
           <button class="tb" id="selRot90" title="Rotate 90° clockwise" aria-label="Rotate 90°"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
           <button class="tb" id="selText" hidden title="Text of the imported page inside your lasso">Text</button>
           <button class="tb" id="selShot" hidden title="Copy the box as a picture, like a screenshot">Copy as picture</button>
@@ -204,6 +205,10 @@
   <div class="later-list" id="laterList"></div>
 </div>
 <div class="wheel" id="wheel" hidden aria-label="Pencil menu"></div>
+<div class="pop size-pop" id="sizePop" hidden>
+  <div class="pop-title">Exact size</div>
+  <form id="sizeForm"><div id="sizeRows"></div><p class="size-err" id="sizeErr" hidden></p><div class="size-act"><button type="submit" class="btn primary">Apply</button></div></form>
+</div>
 <div class="pop tech-pop" id="techPop" hidden>
   <div class="pop-title">Line type</div>
   <div class="tech-ls" id="techLs"></div>
@@ -225,6 +230,7 @@
     <button data-shape="hexagon" title="Hexagon" aria-label="Hexagon"><svg viewBox="0 0 24 24"><path d="M7.5 4h9l4.5 8-4.5 8h-9L3 12z"/></svg></button>
     <button data-shape="star" title="Star" aria-label="Star"><svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.8 6.3.7-4.7 4.3 1.3 6.2L12 16.9 6.4 20l1.3-6.2L3 9.5l6.3-.7z"/></svg></button>
     <button data-shape="spring" title="Spring" aria-label="Spring"><svg viewBox="0 0 24 24"><path d="M2 12h3l1.5-5 3 10 3-10 3 10 3-10 1.5 5h3"/></svg></button>
+    <button data-shape="dim" class="tech-only" hidden title="Dimension" aria-label="Dimension"><svg viewBox="0 0 24 24"><path d="M4 8v10M20 8v10M4 13h16M4 13l3-2M4 13l3 2M20 13l-3-2M20 13l-3 2"/></svg></button>
     <button data-shape="dline" title="Dashed line" aria-label="Dashed line"><svg viewBox="0 0 24 24"><path d="M4 20l3-3M10 14l3-3M16 8l4-4"/></svg></button>
   </div>
   <button class="btn ghost" id="compassOpen" title="Compass: circles and arcs from a centre point"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="4" r="1.6"/><path d="M11.3 5.5 6 19M12.7 5.5 18 19M5 15.5c4 3.2 10 3.2 14 0"/></svg>&nbsp;Compass</button>

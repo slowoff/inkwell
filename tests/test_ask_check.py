@@ -23,7 +23,8 @@ async def main():
         await ctx.route('**/functions/v1/ask', ask)
         page = await ctx.new_page(); errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
-        await page.goto(URL); await page.wait_for_function('!!window.__inkwellBooted', timeout=15000)
+        await page.goto(URL); await page.wait_for_function('navigator.serviceWorker && navigator.serviceWorker.controller', timeout=15000)
+        await page.wait_for_timeout(2500); await page.wait_for_function('!!window.__inkwellBooted', timeout=15000)
         await page.evaluate("""async () => { const W = __inkwell; await W.newPage(); W.Sync.sb = W.Sync.sb || {};
           W.Sync.sb.auth = {getSession: async () => ({data: {session: {access_token: 'tok'}}})}; W.Ask.open(); }""")
         opts = await page.evaluate("[...document.querySelectorAll('#askModeSel option')].map(o => o.value + ':' + o.textContent)")

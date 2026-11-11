@@ -172,6 +172,8 @@ function shapePolys(shape, b, w){
 }
 function shapeItems(shape, b){
   if(shape === 'dim'){ const r = Tech.on() ? Tech.dimFromPick(b) : null; return r ? [r.main, ...r.parts.filter(Boolean)] : []; }
+  if(shape.startsWith('sym:')) return Tech.symItems(shape.slice(4), b);   // (2.0) robotics symbols
+  if(shape === 'parts') return [Tech.partsItem(b)];
   // (2.0) technical notebook: the chosen line type and width, and the exact shape (it.geo) on the main line
   const ts = shape === 'honeycomb' || shape === 'grid' ? null : Tech.style(), tech = Tech.on();
   const w = ts ? ts.w : penWidth(), polys = shapePolys(shape, b, w), g = polys.length > 1 ? 'g' + newId() : null;
@@ -306,7 +308,7 @@ $('hcDraw').addEventListener('click', () => {
 renderGrid(); renderHc();
 // (1.92) two buttons open it: Shapes in the top bar / its menu, and #shapeRail at the foot of the toolbar column on the side
 let shapeAnchor = $('shapeBtn');
-function openShapes(e){ if(!cur){ toast('Open a page first'); return; } shapeAnchor = e.currentTarget; document.querySelectorAll('#shapeGrid .tech-only').forEach(b => { b.hidden = !Tech.on(); }); renderSnapShapes(); renderGrid(); renderHc(); showGridPanel(false); showHcPanel(false); openPop('shapePop', shapeAnchor); }
+function openShapes(e){ if(!cur){ toast('Open a page first'); return; } shapeAnchor = e.currentTarget; document.querySelectorAll('#shapePop .tech-only').forEach(b => { b.hidden = !Tech.on(); }); if(Tech.on()) Tech.renderSyms(); renderSnapShapes(); renderGrid(); renderHc(); showGridPanel(false); showHcPanel(false); openPop('shapePop', shapeAnchor); }
 $('shapeBtn').addEventListener('click', openShapes);
 $('shapeRail').addEventListener('click', openShapes);
 $('shapeGrid').addEventListener('click', e => {

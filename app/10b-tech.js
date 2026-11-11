@@ -390,8 +390,112 @@ Object.assign(Tech, {
   }
 });
 
+/* ---------- (2.0 stage 3) robotics symbols and the parts list ----------
+   A symbol is a group of ordinary strokes (so it moves, recolours, erases, exports and syncs like any drawing); its first stroke
+   carries it.sym = name, which the parts list counts. Shapes are in mm around the symbol's middle, at a sensible real size;
+   dragging a box scales a symbol to fit it. Parts lists are text boxes marked it.pl; they are rewritten whenever a symbol on
+   the page is added or removed (in the same undo step). */
+const SYM = (() => {
+  const C = (cx, cy, r, o) => { const V = [], n = Math.max(16, Math.round(r * 6)); for(let i = 0; i < n; i++){ const t = i / n * Math.PI * 2; V.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); } return [V, true, o]; };
+  const R = (x0, y0, x1, y1, o) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1]], true, o];
+  const L = (...pts) => [pts, false];
+  const Lo = (o, ...pts) => [pts, false, o];
+  const arc = (cx, cy, r, a0, a1) => { const V = []; for(let i = 0; i <= 12; i++){ const t = (a0 + (a1 - a0) * i / 12) * Math.PI / 180; V.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); } return [V, false]; };
+  const gear = () => {
+    const z = 12, ro = 15, rr = 12.6, V = [];
+    for(let i = 0; i < z; i++){
+      const a = i / z * Math.PI * 2, s = Math.PI * 2 / z;
+      for(const [f, r] of [[0, rr], [0.18, ro], [0.5, ro], [0.68, rr]]) V.push([r * Math.cos(a + f * s), r * Math.sin(a + f * s)]);
+    }
+    return [[V, true], C(0, 0, 4), Lo('c', [-18, 0], [18, 0]), Lo('c', [0, -18], [0, 18])];
+  };
+  const balls = () => { const out = []; for(let i = 0; i < 8; i++){ const t = i / 8 * Math.PI * 2; out.push(C(8 * Math.cos(t), 8 * Math.sin(t), 1.6)); } return out; };
+  const pins = () => { const out = []; for(let i = 0; i < 11; i++){ const x = -17 + i * 3.4; out.push(R(x - 0.7, -12.7, x + 0.7, -11.3), R(x - 0.7, 11.3, x + 0.7, 12.7)); } return out; };
+  return {
+    gear: {name: 'Gear', grp: 'mech', d: gear},
+    wheel: {name: 'Wheel', grp: 'mech', d: () => [C(0, 0, 20), C(0, 0, 15.5), C(0, 0, 4), Lo('c', [-23, 0], [23, 0]), Lo('c', [0, -23], [0, 23])]},
+    bearing: {name: 'Bearing', grp: 'mech', d: () => [C(0, 0, 11), C(0, 0, 5), ...balls()]},
+    pivot: {name: 'Pivot / joint', grp: 'mech', d: () => [C(0, 0, 3), C(0, 0, 0.9)]},
+    horn: {name: 'Servo horn', grp: 'mech', d: () => [C(0, 0, 4), C(18, 0, 2.5), L([0, -4], [18, -2.5]), L([0, 4], [18, 2.5]), C(10, 0, 0.8), C(14, 0, 0.8), C(18, 0, 0.8), C(0, 0, 1.2)]},
+    shaft: {name: 'Shaft', grp: 'mech', d: () => [R(-20, -3, 20, 3), Lo('c', [-23, 0], [23, 0])]},
+    motor: {name: 'Motor', grp: 'elec', d: () => [C(0, 0, 7), L([-3.5, 3], [-3.5, -3], [0, 0.6], [3.5, -3], [3.5, 3]), L([-13, 0], [-7, 0]), L([7, 0], [13, 0])]},
+    servo: {name: 'Servo', grp: 'elec', d: () => [R(-12, -7, 12, 7), C(5, 0, 2.5), L([5, -2.5], [5, -12]), C(5, -12, 1.2), L([-12, -3], [-17, -3]), L([-12, 0], [-17, 0]), L([-12, 3], [-17, 3])]},
+    battery: {name: 'Battery', grp: 'elec', d: () => [L([-13, 0], [-2, 0]), L([2, 0], [13, 0]), L([-2, -6], [-2, 6]), Lo('k', [2, -3], [2, 3]), L([-7, -6], [-4, -6]), L([-5.5, -7.5], [-5.5, -4.5])]},
+    switch: {name: 'Switch', grp: 'elec', d: () => [L([-13, 0], [-5, 0]), C(-4, 0, 1), C(4, 0, 1), L([5, 0], [13, 0]), L([-3.1, -0.6], [4.5, -5])]},
+    led: {name: 'LED', grp: 'elec', d: () => [L([-13, 0], [-4, 0]), L([4, 0], [13, 0]), [[[-4, -4], [-4, 4], [4, 0]], true], L([4, -4], [4, 4]), L([0, -5], [3.5, -8.5]), L([1.8, -8.5], [3.5, -8.5], [3.5, -6.8]), L([3.5, -4], [7, -7.5]), L([5.3, -7.5], [7, -7.5], [7, -5.8])]},
+    resistor: {name: 'Resistor', grp: 'elec', d: () => [R(-6, -2.5, 6, 2.5), L([-13, 0], [-6, 0]), L([6, 0], [13, 0])]},
+    sensor: {name: 'Sensor', grp: 'elec', d: () => [R(-8, -6, 8, 6), arc(8, 0, 3.5, -45, 45), arc(8, 0, 6, -45, 45), arc(8, 0, 8.5, -45, 45), L([-8, -3], [-13, -3]), L([-8, 0], [-13, 0]), L([-8, 3], [-13, 3])]},
+    board: {name: 'Controller board', grp: 'elec', d: () => [R(-20, -14, 20, 14), R(-7, -7, 7, 7), R(-24, -4, -20, 4), ...pins()]}
+  };
+})();
+Object.assign(Tech, {
+  symBox(key){
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for(const [V] of SYM[key].d()) for(const q of V){ x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
+    return [x0, y0, x1, y1];
+  },
+  // the symbol's strokes; a tap: real size around the tap; a box: scaled to fit it, centred
+  symItems(key, b){
+    const S = SYM[key]; if(!S) return [];
+    const [x0, y0, x1, y1] = this.symBox(key), bw = x1 - x0, bh = y1 - y0;
+    let k = MM, cx, cy;
+    if(b.tap){ cx = b.x0; cy = b.y0; }
+    else {
+      const W = Math.abs(b.x1 - b.x0), H = Math.abs(b.y1 - b.y0);
+      if(W * cam.z < 8 && H * cam.z < 8){ cx = b.x0; cy = b.y0; }
+      else { k = Math.min(W / bw, H / bh) || MM; cx = (b.x0 + b.x1) / 2; cy = (b.y0 + b.y1) / 2; }
+    }
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2, g = 'g' + newId(), c = prefs.pen.c, out = [];
+    const base = Math.max(0.3, 0.5 * k / MM) * MM;
+    for(const [V, closed, o] of S.d()){
+      const P = V.map(q => [cx + (q[0] - mx) * k, cy + (q[1] - my) * k]);
+      const it = {t: 's', id: 's' + newId() + Math.random().toString(36).slice(2, 5), c, w: o === 'k' ? base * 1.5 : o === 'c' ? base * 0.6 : base, hl: 0, ls: o === 'c' ? 'c' : 'n', g, p: polyPts(P, closed, 1.5)};
+      if(!out.length) it.sym = key;
+      out.push(it);
+    }
+    return out;
+  },
+  // small picture of a symbol for the menu
+  symIcon(key){
+    const [x0, y0, x1, y1] = this.symBox(key), s = Math.max(x1 - x0, y1 - y0) || 1, pad = s * 0.08;
+    const d = SYM[key].d().map(([V, closed]) => 'M' + V.map(q => (+q[0].toFixed(2)) + ' ' + (+q[1].toFixed(2))).join('L') + (closed ? 'Z' : '')).join('');
+    return `<svg viewBox="${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}" style="fill:none;stroke:currentColor;stroke-width:${(s / 22).toFixed(2)};stroke-linejoin:round;stroke-linecap:round"><path d="${d}"/></svg>`;
+  },
+  renderSyms(){
+    const el = $('symGrid'); if(!el) return;
+    const btn = k => `<button type="button" data-sym="${k}" title="${esc(SYM[k].name)}" aria-label="${esc(SYM[k].name)}">${this.symIcon(k)}<span>${esc(SYM[k].name)}</span></button>`;
+    const keys = Object.keys(SYM);
+    el.innerHTML = '<div class="sym-h">Mechanical</div>' + keys.filter(k => SYM[k].grp === 'mech').map(btn).join('') +
+      '<div class="sym-h">Electronics</div>' + keys.filter(k => SYM[k].grp === 'elec').map(btn).join('');
+  },
+  /* parts list */
+  partsHTML(){
+    const n = {};
+    for(const it of cur.items.values()) if(it.sym && SYM[it.sym]) n[it.sym] = (n[it.sym] || 0) + 1;
+    const keys = Object.keys(SYM).filter(k => n[k]);
+    return '<p><b>Parts list</b></p>' + (keys.length ? keys.map(k => `<p>${n[k]} × ${esc(SYM[k].name)}</p>`).join('') : '<p>No parts yet: add symbols from Shapes</p>');
+  },
+  partsItem(b){ return {t: 'x', id: 'x' + newId(), x: b.x0, y: b.y0, w: 200, fs: 1, html: this.partsHTML(), pl: 1}; },
+  // rewrite every parts list on the page when a symbol came or went; returns [before, after] pairs
+  followParts(before, after){
+    const touched = before.concat(after).some(([id, it]) => it && it.sym) || before.some(([id]) => { const x = cur.items.get(id); return x && x.sym; });
+    if(!touched) return null;
+    const html = this.partsHTML(), B = [], A = [];
+    for(const it of cur.items.values()) if(it.pl && it.html !== html){ B.push([it.id, it]); A.push([it.id, Object.assign({}, it, {html})]); }
+    if(!A.length) return null;
+    setItems(A);
+    return [B, A];
+  }
+});
+
 $('techBtn').addEventListener('click', e => { Tech.render(); openPop('techPop', e.currentTarget); });
 $('techLs').addEventListener('click', e => { const b = e.target.closest('[data-ls]'); if(!b) return; prefs.techLs = b.dataset.ls; savePrefs(); Tech.render(); closePops(); });
 $('techSnap').addEventListener('click', e => { const b = e.target.closest('[data-step]'); if(!b) return; prefs.techSnap = +b.dataset.step; savePrefs(); Tech.render(); });
 $('selSize').addEventListener('click', () => Tech.openSize());
 $('sizeForm').addEventListener('submit', e => { e.preventDefault(); Tech.applySize(); });
+$('symGrid').addEventListener('click', e => {
+  const b = e.target.closest('[data-sym]'); if(!b) return;
+  closePops();
+  startPick({kind: 'shape', shape: 'sym:' + b.dataset.sym}, 'Tap to place the ' + SYM[b.dataset.sym].name.toLowerCase() + ' at its real size, or drag a box to size it');
+});
+$('partsBtn').addEventListener('click', () => { closePops(); startPick({kind: 'shape', shape: 'parts'}, 'Tap where the parts list should go'); });

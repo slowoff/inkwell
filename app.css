@@ -1223,3 +1223,11 @@ body.scanning #askQuick{background:var(--accent);color:var(--accent-fg)}
 .size-row em{font-style:normal;color:var(--muted);font-size:14px}
 .size-err{color:var(--danger,#c0392b);font-size:13px;margin:4px 2px}
 .size-act{display:flex;justify-content:flex-end;margin-top:8px}
+.sym-panel{margin-top:6px}
+.sym-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:4px 0 8px}
+.sym-h{grid-column:1/-1;font-size:12px;color:var(--muted);margin:4px 2px 0}
+.sym-grid button{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 2px;border-radius:9px;color:var(--fg);min-height:64px}
+.sym-grid button svg{width:38px;height:30px}
+.sym-grid button span{font-size:11px;color:var(--muted);text-align:center;line-height:1.15}
+.sym-grid button:active{background:var(--panel2)}
+.sym-panel .btn{width:100%}

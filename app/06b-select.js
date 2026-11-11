@@ -27,7 +27,7 @@ function hitItem(sx, sy, target){
   const [wx, wy] = toWorld(sx, sy), tol = 14 / cam.z;
   const list = [...cur.items.values()].reverse();
   for(const it of list){
-    if(it.t !== 's') continue;
+    if(it.t !== 's' || Tech.hidden(it)) continue;
     const g = geoOf(it);
     if(wx < g.b[0] - tol || wx > g.b[2] + tol || wy < g.b[1] - tol || wy > g.b[3] + tol) continue;
     const p = it.p, lim = (tol + it.w / 2) ** 2;
@@ -76,6 +76,7 @@ function finishLasso(a){
   for(let i = 0; i < wp.length; i += 2){ lb[0] = Math.min(lb[0], wp[i]); lb[1] = Math.min(lb[1], wp[i+1]); lb[2] = Math.max(lb[2], wp[i]); lb[3] = Math.max(lb[3], wp[i+1]); }
   const lw = lb[2] - lb[0], lh = lb[3] - lb[1];
   for(const it of cur.items.values()){
+    if(Tech.hidden(it)) continue;   // (2.0) hidden layer
     if(it.t === 's'){
       const p = it.p, n = p.length / 3, step = Math.max(1, Math.floor(n / 40)) * 3;
       let inside = 0, tot = 0;

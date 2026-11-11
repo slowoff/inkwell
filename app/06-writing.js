@@ -107,7 +107,7 @@ function eraseAt(sx, sy){
 function eraseFormulas(wx, wy, R){
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 'm' || it.ne) continue;   // ne: part of a graph, only removed with the Select tool (1.57)
+    if(it.t !== 'm' || it.ne || Tech.hidden(it)) continue;   // ne: part of a graph, only removed with the Select tool (1.57)
     const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
     if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
     act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); hit = true;
@@ -119,7 +119,7 @@ function eraseFormulas(wx, wy, R){
 function eraseTexts(wx, wy, R){
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 'x' || it.ne || (editing && editing.id === it.id)) continue;
+    if(it.t !== 'x' || it.ne || Tech.hidden(it) || (editing && editing.id === it.id)) continue;
     const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
     if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
     const el = elMap.get(it.id); if(!el) continue;
@@ -188,7 +188,7 @@ function eraseWorld(wx, wy, R){
   if(act.mode === 'area'){ eraseArea(wx, wy, R); return; }
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 's' || it.ne) continue;
+    if(it.t !== 's' || it.ne || Tech.hidden(it)) continue;
     const g = geoOf(it), pad = R + it.w / 2;
     if(wx < g.b[0] - pad || wx > g.b[2] + pad || wy < g.b[1] - pad || wy > g.b[3] + pad) continue;
     const lim = pad * pad, p = it.p;
@@ -205,7 +205,7 @@ function eraseWorld(wx, wy, R){
 function eraseArea(wx, wy, R){
   let hit = false;
   for(const it of [...cur.items.values()]){
-    if(it.t !== 's' || it.fl || it.ne) continue;   // graphs (ne) and their backgrounds stay: Select + delete removes them
+    if(it.t !== 's' || it.fl || it.ne || Tech.hidden(it)) continue;   // graphs (ne) and their backgrounds stay: Select + delete removes them
     const g = geoOf(it), pad = R + it.w / 2;
     if(wx < g.b[0] - pad || wx > g.b[2] + pad || wy < g.b[1] - pad || wy > g.b[3] + pad) continue;
     const cut = R + it.w * 0.35, lim = cut * cut, p = it.p;

@@ -43,7 +43,7 @@ async function openPage(id, opts = {}){
   if(saved && isFinite(saved.z)) Object.assign(cam, saved);
   else { cam.z = 1; cam.ox = W > 900 ? 56 : 20; cam.oy = 28; }
   slPages = null;
-  clearSel(); updUndo(); renderRuler(); Tech.render(); invalidate();
+  clearSel(); updUndo(); renderRuler(); Tech.render(); Tech.renderLayers(); invalidate();
   markActivePage(); markBadgeSoon();
   if(width() === 'narrow') app.dataset.view = 'editor';
   if(Ask.histOpen && !$('askPanel').hidden) Ask.showHistory();   // (1.68) the chat filter follows the open page
@@ -62,7 +62,7 @@ function showEmpty(){
   cur = null; slPages = null;
   worldBack.innerHTML = ''; worldFront.innerHTML = ''; elMap.clear(); geo.clear();
   $('stageEmpty').hidden = false; $('title').value = '';
-  clearSel(); updUndo(); renderRuler(); Tech.render(); invalidate();
+  clearSel(); updUndo(); renderRuler(); Tech.render(); Tech.renderLayers(); invalidate();
 }
 async function newPage(tmplId){
   let sec = ui.sec && getDoc(ui.sec);
@@ -586,7 +586,7 @@ function renderOpts(){
   $('swatches').hidden = !ink; $('colorBtn').hidden = !ink;
   $('eraseMode').hidden = t !== 'eraser';
   $('assistBtn').hidden = t !== 'pen';
-  Tech.render();
+  Tech.render(); Tech.renderLayers();
   $('hlSnap').hidden = t !== 'hl'; $('hlSnap').classList.toggle('on', !!prefs.hlSnap); $('hlSnap').setAttribute('aria-pressed', prefs.hlSnap ? 'true' : 'false');
   $('assistBtn').classList.toggle('on', !!(prefs.refLine || prefs.autoText));
   if(t === 'eraser') $('eraseMode').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.m === (prefs.eraser.mode === 'area' ? 'area' : 'stroke')));
@@ -1437,9 +1437,9 @@ function openPop(id, anchor){
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }
-function closePops(){ for(const id of ['techPop', 'sizePop', 'paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop', 'spellPop']) closePop(id); }
+function closePops(){ for(const id of ['techPop', 'sizePop', 'layerPop', 'paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop', 'spellPop']) closePop(id); }
 document.addEventListener('pointerdown', e => {
-  if(e.target.closest('.pop') || e.target.closest('#techBtn,#selSize,#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#shapeRail,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"],[data-act="spell"]')) return;
+  if(e.target.closest('.pop') || e.target.closest('#techBtn,#layerBtn,#selSize,#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#shapeRail,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"],[data-act="spell"]')) return;
   closePops();
 }, true);
 let modalAt = 0;

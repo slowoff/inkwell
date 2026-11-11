@@ -402,13 +402,13 @@ async function exportPdf(){
   const parts = [];   // {a, b, h} or {a, b, img}: world top, world bottom, html or image item
   const add = (box, h) => parts.push({a: box[1], b: box[3], h});
   for(const it of cur.items.values()){
-    if(it.t !== 'i') continue;
+    if(it.t !== 'i' || Tech.hidden(it)) continue;
     parts.push({a: it.y, b: it.y + it.h, img: it});
     for(const fp of fieldParts(it, it.x, it.y)) add(fp.box, fp.h);
   }
   const inks = [];   // highlighter first, so pen ink sits on top
   for(const pass of [2, 1, 0]) for(const it of cur.items.values()){
-    if(it.t !== 's' || it.mk || inkPass(it) !== pass) continue;
+    if(it.t !== 's' || it.mk || inkPass(it) !== pass || Tech.hidden(it)) continue;
     const q = itemBox(it);
     const fo = (pass === 1 ? HL_A : 1) * opOf(it);
     // (1.62) highlights blend into the page (multiply), like on screen
@@ -416,7 +416,7 @@ async function exportPdf(){
   }
   const tops = [];
   for(const it of cur.items.values()){
-    if(it.t !== 'x' && it.t !== 'm') continue;
+    if((it.t !== 'x' && it.t !== 'm') || Tech.hidden(it)) continue;
     const el = elMap.get(it.id); if(!el) continue;
     const c = el.cloneNode(true); c.removeAttribute('contenteditable'); c.style.transform = ''; c.style.zoom = '';
     if(it.t === 'm') c.style.color = it.c && it.c !== 'auto' ? inkColor(it.c, true) : '#18212B';
@@ -734,7 +734,7 @@ async function makePdf(){
     await pdfLibs();
     if(stop()) return;
     const {PDFDocument, LineCapStyle, pushGraphicsState, popGraphicsState, rectangle, clip, endPath, concatTransformationMatrix, PDFOperator} = PDFLib;
-    const items = [...page0.items.values()];
+    const items = [...page0.items.values()].filter(it => page0 !== cur || !Tech.hidden(it));   // (2.0) hidden layers stay out
     let all, pick = null, sheets, doc, layer = null, outside = 0, inPage = () => true;
     if(useOrig){
       // (1.85) the original file with the writing on top. Inkwell keeps pictures of imported pages, not the file, so it is chosen here

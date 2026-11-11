@@ -55,7 +55,7 @@ const Tech = {
     const out = [];
     if(!cur) return out;
     for(const it of cur.items.values()){
-      if(it.t !== 's' || it.hl || it.mk || it.dim || it.dp || (skip && skip.has(it.id))) continue;
+      if(it.t !== 's' || it.hl || it.mk || it.dim || it.dp || this.hidden(it) || (skip && skip.has(it.id))) continue;
       const b = geoBox(it); if(x < b[0] - r || x > b[2] + r || y < b[1] - r || y > b[3] + r) continue;
       const P = this.points(it);
       // [x, y, what, item id, point name] (a stroke that ends where it started offers one point)
@@ -170,6 +170,7 @@ const Tech = {
     return `<svg viewBox="0 0 24 24" style="fill:none;stroke:currentColor;stroke-linecap:round">${d}</svg>`;
   },
   render(){
+    const at = $('askTech'); if(at) at.hidden = !this.on();   // Claude panel: Robotics tag
     const show = this.on() && (prefs.tool === 'pen');
     const b = $('techBtn'); if(!b) return;
     b.hidden = !show;
@@ -272,8 +273,8 @@ Object.assign(Tech, {
     const ids = old && old.dim && old.dim.parts && old.dim.parts.length === 5 ? old.dim.parts.slice() : [0, 1, 2, 3, 4].map(i => (i === 4 ? 'x' : 's') + newId() + Math.random().toString(36).slice(2, 5));
     const mainId = old ? old.id : 's' + newId() + Math.random().toString(36).slice(2, 5);
     const g = old && old.g ? old.g : 'g' + newId();
-    const main = Object.assign(built.main, {id: mainId, g, dim: {k: spec.k, a: spec.a, b: spec.b || null, off: spec.off || 0, ang: spec.ang == null ? null : spec.ang, parts: ids}});
-    const parts = built.parts.map((it, i) => it ? Object.assign(it, {id: ids[i], g, dp: mainId}) : null);
+    const main = Object.assign(built.main, {id: mainId, g, ly: 'm', dim: {k: spec.k, a: spec.a, b: spec.b || null, off: spec.off || 0, ang: spec.ang == null ? null : spec.ang, parts: ids}});
+    const parts = built.parts.map((it, i) => it ? Object.assign(it, {id: ids[i], g, dp: mainId, ly: 'm'}) : null);
     return {main, parts, ids};
   },
   // where the dimension line now is (after the user moved it): its signed distance from A-B
@@ -475,7 +476,7 @@ Object.assign(Tech, {
     const keys = Object.keys(SYM).filter(k => n[k]);
     return '<p><b>Parts list</b></p>' + (keys.length ? keys.map(k => `<p>${n[k]} × ${esc(SYM[k].name)}</p>`).join('') : '<p>No parts yet: add symbols from Shapes</p>');
   },
-  partsItem(b){ return {t: 'x', id: 'x' + newId(), x: b.x0, y: b.y0, w: 200, fs: 1, html: this.partsHTML(), pl: 1}; },
+  partsItem(b){ return {t: 'x', id: 'x' + newId(), x: b.x0, y: b.y0, w: 200, fs: 1, html: this.partsHTML(), pl: 1, ly: 'n'}; },
   // rewrite every parts list on the page when a symbol came or went; returns [before, after] pairs
   followParts(before, after){
     const touched = before.concat(after).some(([id, it]) => it && it.sym) || before.some(([id]) => { const x = cur.items.get(id); return x && x.sym; });
@@ -485,6 +486,51 @@ Object.assign(Tech, {
     if(!A.length) return null;
     setItems(A);
     return [B, A];
+  }
+});
+
+/* ---------- (2.0 stage 4) layers ----------
+   Every item on a technical page belongs to a layer (it.ly; none = Drawing): Drawing, Dimensions (dimension lines go there by
+   themselves), Wiring and Notes (parts lists). New things go on the layer chosen in Layers (prefs.techLayer). Which layers are
+   hidden is saved with the page (page data.lyHide), so it syncs. Hidden layers are not drawn, can't be selected or erased
+   and are left out of exports. Older app versions show everything. */
+const TECH_LAYERS = [['d', 'Drawing'], ['m', 'Dimensions'], ['w', 'Wiring'], ['n', 'Notes']];
+const NO_HIDE = new Set();
+Object.assign(Tech, {
+  hideNow(){
+    const p = cur && getDoc(cur.id), h = p && p.data && p.data.lyHide;
+    if(!Array.isArray(h) || !h.length || !this.on(p)) return NO_HIDE;
+    if(this._hk !== h){ this._hk = h; this._hs = new Set(h); }
+    return this._hs;
+  },
+  hidden(it){ const h = this.hideNow(); return h.size > 0 && !!it && h.has(it.ly || 'd'); },
+  layer(){ const v = prefs.techLayer; return TECH_LAYERS.some(l => l[0] === v) ? v : 'd'; },
+  // new things on a technical page go on the chosen layer (a hidden one is shown again, so new ink never vanishes)
+  layerNew(list){
+    if(!this.on()) return list;
+    const ly = this.layer();
+    const out = list.map(it => it.ly || ly === 'd' ? it : Object.assign({}, it, {ly}));
+    const used = new Set(out.map(it => it.ly || 'd')), h = this.hideNow();
+    if([...used].some(k => h.has(k))) this.setHide([...h].filter(k => !used.has(k)));
+    return out;
+  },
+  async setHide(list){
+    const p = cur && getDoc(cur.id); if(!p) return;
+    await patchDoc(p, {lyHide: list});
+    for(const it of cur.items.values()) if(it.t !== 's') itemEl(it);
+    invalidate(); this.renderLayers();
+    if(sel) clearSel();
+  },
+  renderLayers(){
+    const b = $('layerBtn'); if(!b) return;
+    const show = this.on() && !$('opts').hidden;
+    b.hidden = !show; if(!show) return;
+    const h = this.hideNow(), cur_ = this.layer();
+    b.classList.toggle('on', h.size > 0);
+    b.title = 'Layers: drawing on ' + TECH_LAYERS.find(l => l[0] === cur_)[1] + (h.size ? ', ' + h.size + ' hidden' : '');
+    const n = {}; for(const it of cur.items.values()){ const k = it.ly || 'd'; n[k] = (n[k] || 0) + 1; }
+    const eye = on => on ? '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A16.6 16.6 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/></svg>';
+    $('layerList').innerHTML = TECH_LAYERS.map(([k, name]) => `<div class="layer-row${k === cur_ ? ' cur' : ''}${h.has(k) ? ' off' : ''}"><button type="button" class="layer-eye" data-eye="${k}" aria-label="${h.has(k) ? 'Show' : 'Hide'} ${name}" aria-pressed="${h.has(k) ? 'false' : 'true'}">${eye(!h.has(k))}</button><button type="button" class="layer-name" data-ly="${k}"><b>${name}</b><small>${k === cur_ ? 'New things go here · ' : ''}${n[k] || 0} item${(n[k] || 0) === 1 ? '' : 's'}</small></button></div>`).join('');
   }
 });
 
@@ -499,3 +545,9 @@ $('symGrid').addEventListener('click', e => {
   startPick({kind: 'shape', shape: 'sym:' + b.dataset.sym}, 'Tap to place the ' + SYM[b.dataset.sym].name.toLowerCase() + ' at its real size, or drag a box to size it');
 });
 $('partsBtn').addEventListener('click', () => { closePops(); startPick({kind: 'shape', shape: 'parts'}, 'Tap where the parts list should go'); });
+$('layerBtn').addEventListener('click', e => { Tech.renderLayers(); openPop('layerPop', e.currentTarget); });
+$('layerList').addEventListener('click', e => {
+  const eye = e.target.closest('[data-eye]'), nm = e.target.closest('[data-ly]');
+  if(eye){ const h = new Set(Tech.hideNow()); if(h.has(eye.dataset.eye)) h.delete(eye.dataset.eye); else h.add(eye.dataset.eye); Tech.setHide([...h]); }
+  else if(nm){ prefs.techLayer = nm.dataset.ly; savePrefs(); const h = Tech.hideNow(); if(h.has(nm.dataset.ly)) Tech.setHide([...h].filter(k => k !== nm.dataset.ly)); else Tech.renderLayers(); }
+});

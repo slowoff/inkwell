@@ -104,6 +104,7 @@
         <button class="tb" id="colorBtn" title="More colours" aria-label="More colours"><span class="rainbow"></span></button>
         <button class="tb" id="assistBtn" hidden title="Writing: Write to text, Reference line" aria-label="Writing options"><svg viewBox="0 0 24 24"><path d="M3 17h18" stroke-dasharray="3 2.5"/><path d="M4 13c1.5-5 3-5 3.5 0s2-5 3.5 0M14 13c1-4 2.5-4 3 0s1.5-3 3-1"/></svg></button>
         <button class="toggle hl-snap" id="hlSnap" hidden title="Stick to text: the highlight lands exactly on the line of text under it, straight and as tall as the text" aria-label="Stick to text" aria-pressed="false"><span class="sw"></span><svg class="tg-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 18h11"/><path d="M3 12h18" stroke-width="6" opacity=".35"/><path d="M5 12h12"/></svg><span class="tg-lbl">Stick to text</span></button>
+        <button class="tb tech-btn layer-btn" id="layerBtn" hidden aria-label="Layers"><svg viewBox="0 0 24 24"><path d="M12 3 2 8l10 5 10-5-10-5zM2 13l10 5 10-5M2 17.5l10 5 10-5"/></svg></button>
         <button class="tb tech-btn" id="techBtn" hidden title="Line type" aria-label="Line type and snap"></button>
         <button class="tb" id="pasteBtn" hidden title="Paste: what you copied here, or a picture or text from another app (Ctrl+V)">Paste</button>
         <label class="size" id="sizeWrap" title="Thickness"><span class="size-dot" id="sizeDot"></span><input type="range" id="size" min="1" max="100" aria-label="Thickness"></label>
@@ -208,6 +209,11 @@
 <div class="pop size-pop" id="sizePop" hidden>
   <div class="pop-title">Exact size</div>
   <form id="sizeForm"><div id="sizeRows"></div><p class="size-err" id="sizeErr" hidden></p><div class="size-act"><button type="submit" class="btn primary">Apply</button></div></form>
+</div>
+<div class="pop layer-pop" id="layerPop" hidden>
+  <div class="pop-title">Layers</div>
+  <div class="layer-list" id="layerList"></div>
+  <p class="tech-note">Tap a layer to draw on it; the eye shows or hides it. Hidden layers are left out when you export or print.</p>
 </div>
 <div class="pop tech-pop" id="techPop" hidden>
   <div class="pop-title">Line type</div>
@@ -578,7 +584,7 @@
 
 <div class="ask" id="askPanel" hidden>
   <div class="ask-head" id="askHead">
-    <span class="ask-title"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Claude</span>
+    <span class="ask-title"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Claude<span class="ask-tech" id="askTech" hidden title="In a technical notebook Claude helps as a robotics design reviewer">Robotics</span></span>
     <label class="ask-mode"><select id="askModeSel" aria-label="How Claude helps"><option value="normal">Normal</option><option value="tutor">Tutor</option><option value="solve">Solve</option><option value="check">Check</option><option value="practice">Practice</option></select></label>
     <button class="icon-btn" id="askHist" title="History: earlier chats" aria-label="Chat history"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg></button>
     <button class="icon-btn" id="askNew" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>

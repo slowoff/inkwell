@@ -376,7 +376,7 @@ function paintInk(boxes, probe){
   const seen = b => boxes.some(v => !(b[2] < v[0] || b[0] > v[2] || b[3] < v[1] || b[1] > v[3]));
   for(const pass of [2, 1, 0]){
     for(const it of cur.items.values()){
-      if(it.t !== 's' || inkPass(it) !== pass) continue;
+      if(it.t !== 's' || inkPass(it) !== pass || Tech.hidden(it)) continue;   // (2.0) hidden layer
       // (1.69) one broken stroke is skipped instead of stopping the drawing of all the others
       try {
         const g = geoOf(it);
@@ -628,6 +628,7 @@ function itemEl(it){
   el.style.left = it.x + 'px';
   el.style.top = it.y + 'px';
   el.style.opacity = opOf(it) < 1 ? String(opOf(it)) : '';
+  el.classList.toggle('ly-off', Tech.hidden(it));   // (2.0) technical notebook: hidden layer
   if(layer === worldFront) frontXf(el);
   if(it.t === 'i'){
     el.classList.add('it-img');
@@ -865,7 +866,7 @@ function commit(before, after){
   updUndo();
 }
 function apply(after, before){ setItems(after); commit(before, after); }
-function addItems(list){ apply(list.map(it => [it.id, it]), list.map(it => [it.id, null])); }
+function addItems(list){ list = Tech.layerNew(list); apply(list.map(it => [it.id, it]), list.map(it => [it.id, null])); }
 function removeItems(ids){ const before = ids.map(id => [id, cur.items.get(id) || null]); apply(ids.map(id => [id, null]), before); }
 function replaceItems(list){ const before = list.map(it => [it.id, cur.items.get(it.id) || null]); apply(list.map(it => [it.id, it]), before); }
 function undo(){

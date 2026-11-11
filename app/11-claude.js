@@ -36,6 +36,7 @@ const Ask = {
     const pos = LSget('inkwell.askPos', null);
     if(pos){ p.style.left = clamp(pos.x, 4, innerWidth - 120) + 'px'; p.style.top = clamp(pos.y, 4, innerHeight - 60) + 'px'; p.style.right = 'auto'; p.style.bottom = 'auto'; }
     this.renderMode();
+    $('askTech').hidden = !Tech.on();
     if(!this.msgs.length) this.empty();
     askClearBar();
   },
@@ -334,7 +335,7 @@ const Ask = {
       const res = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/ask', {
         method: 'POST', signal: this.ctrl.signal,
         headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + session.access_token, apikey: CFG.SUPABASE_ANON_KEY},
-        body: JSON.stringify({mode: this.mode || prefs.askMode || 'tutor', model: prefs.askModel || 'auto', messages: await this.apiMsgs()})
+        body: JSON.stringify({mode: this.mode || prefs.askMode || 'tutor', model: prefs.askModel || 'auto', tech: Tech.on() ? 1 : undefined, messages: await this.apiMsgs()})   // (2.0) tech: robotics helper
       });
       if(!res.ok){
         let j = {}; try { j = await res.json(); } catch {}

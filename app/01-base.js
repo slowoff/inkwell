@@ -78,7 +78,8 @@ const DEFAULT_PREFS = {
   bg: {type: 'grid', sx: 5 * MM, sy: 5 * MM},
   theme: 'auto',   // 'auto' follows the iPad, or 'light' / 'dark'
   techLs: 'f',     // (2.0) technical notebooks: pen line type f pen, k thick, n thin, h hidden, c centre
-  techSnap: 5,     // (2.0) technical notebooks: snap shapes and held lines to this mm grid (0 = off)
+  techSnap: 5,
+  techLayer: 'd',   // (2.0) technical notebooks: layer new things go on (d drawing, m dimensions, w wiring, n notes)     // (2.0) technical notebooks: snap shapes and held lines to this mm grid (0 = off)
   hexSnap: false,  // (1.89) Hex paper: lines drawn with the pen become straight and their ends and corners land on the honeycomb
   snapHold: 550,   // ms the pen must rest before a stroke is straightened; 0 = off
   leftEdge: false, // true: the page stops at its left edge (endless only up, down and right)

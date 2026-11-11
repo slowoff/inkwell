@@ -298,7 +298,7 @@ const HOLD_STILL = 13;   // screen px (1.73: 9, 1.73.1: 13)
 function dragLineEnd(a, b){
   let len = Math.hypot(b[0] - a[0], b[1] - a[1]), ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
   const sn = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);
-  if(Tech.on()){ const t = Tech.target(b[0], b[1]); if(t){ Tech.why = t[2]; return [t[0], t[1]]; } }   // (2.0) onto an end nearby
+  if(Tech.on()){ const t = Tech.target(b[0], b[1]); if(t){ Tech.endWhy = t[2]; return [t[0], t[1]]; } }   // (2.0) onto an end nearby
   if(prefs.angleSnap !== false && Math.abs(sn - ang) < 0.1) ang = sn;   // (1.73.1) within ~6° (the Line tool: ~3.5°)
   return Tech.lineEnd(a, [a[0] + len * Math.cos(ang), a[1] + len * Math.sin(ang)]);
 }

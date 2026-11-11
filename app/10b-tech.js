@@ -79,8 +79,8 @@ const Tech = {
   // a line's end while dragging: an end point nearby wins; otherwise the length goes to whole grid steps (angle kept)
   lineEnd(a, b, skip){
     if(!this.on()) return b;
-    const t = this.target(b[0], b[1], skip); if(t){ this.why = t[2]; return [t[0], t[1]]; }
-    this.why = '';
+    const t = this.target(b[0], b[1], skip); if(t){ this.endWhy = t[2]; return [t[0], t[1]]; }
+    this.endWhy = '';
     const s = this.step() * MM, len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if(!s || len < 1e-6) return b;
     const k = Math.max(s, Math.round(len / s) * s) / len;
@@ -153,7 +153,7 @@ const Tech = {
   liveStroke(a){
     if(!this.on() || !a.snapped || a.hl) return;
     const P = a.pts, n = P.length;
-    if(a.snapped === 'line') this.label(this.lineText([P[0], P[1]], [P[n-3], P[n-2]]), P[n-3], P[n-2], this.why);
+    if(a.snapped === 'line') this.label(this.lineText([P[0], P[1]], [P[n-3], P[n-2]]), P[n-3], P[n-2], this.endWhy);
     else if(a.snapGeo) this.label(this.boxText(a.snapGeo), a.snapGeo.v[2], a.snapGeo.v[a.snapGeo.k === 'e' ? 1 : 3], '');
   },
   // live label for a shape from the shapes menu being dragged out

@@ -1246,3 +1246,12 @@ body.scanning #askQuick{background:var(--accent);color:var(--accent-fg)}
 .layer-row.cur .layer-name b{color:var(--accent)}
 .layer-row.off .layer-name b{color:var(--muted)}
 .ask-tech{margin-left:8px;font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);letter-spacing:.02em}
+
+/* (2.4) hover tips: mouse/trackpad only (app/12c-tips.js) */
+.tip{position:fixed;z-index:10000;max-width:260px;padding:7px 10px 8px;border-radius:9px;background:var(--raise);color:var(--fg);border:1px solid var(--line);box-shadow:var(--shadow);font-size:13px;line-height:1.35;pointer-events:none;animation:tipIn .12s ease-out}
+.tip[hidden]{display:none}
+.tip-t{font-weight:600}
+.tip-k{margin-left:7px;padding:0 5px;border:1px solid var(--line);border-radius:4px;font:11px/16px var(--f-mono);color:var(--muted);vertical-align:1px}
+.tip-d{display:block;margin-top:2px;color:var(--muted)}
+@keyframes tipIn{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.tip{animation:none}}

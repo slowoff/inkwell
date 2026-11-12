@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.4', '2026-11-12', ['With a mouse or trackpad, resting the pointer on a button shows a small card with its name, what it does and its keyboard shortcut']],
   ['2.3.1', '2026-11-11', ['Technical notebooks: a held line\'s end now keeps following the Pencil across other lines. After it had snapped onto a point once, it used to get stuck near other strokes']],
   ['2.3', '2026-11-11', ['Technical notebooks: layers. Drawing, Dimensions, Wiring and Notes, with the layers button next to the colours. Tap a layer to draw on it, tap the eye to hide or show it. Dimension lines go on Dimensions by themselves, parts lists on Notes. Hidden layers can\'t be selected or erased and are left out of exports', 'Claude shows a Robotics tag on pages in a technical notebook']],
   ['2.2', '2026-11-11', ['Technical notebooks: robotics parts in Shapes. Mechanical: gear, wheel, bearing, pivot, servo horn, shaft. Electronics: motor, servo, battery, switch, LED, resistor, sensor, controller board. Tap to place one at real size, or drag a box to size it', 'Parts list: Shapes → Add parts list. It counts the parts on the page and updates itself when you add or remove one']],

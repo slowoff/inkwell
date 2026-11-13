@@ -734,7 +734,7 @@ async function makePdf(){
     await pdfLibs();
     if(stop()) return;
     const {PDFDocument, LineCapStyle, pushGraphicsState, popGraphicsState, rectangle, clip, endPath, concatTransformationMatrix, PDFOperator} = PDFLib;
-    const items = [...page0.items.values()].filter(it => page0 !== cur || !Tech.hidden(it));   // (2.0) hidden layers stay out
+    const items = [...page0.items.values()].filter(it => page0 === cur ? !Tech.hidden(it) : !Tech.hiddenOn(it, page0.id));   // (2.0) hidden layers stay out (2.5: on every page)
     let all, pick = null, sheets, doc, layer = null, outside = 0, inPage = () => true;
     if(useOrig){
       // (1.85) the original file with the writing on top. Inkwell keeps pictures of imported pages, not the file, so it is chosen here

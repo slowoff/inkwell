@@ -37,7 +37,7 @@ async def main():
                     s = await pg.evaluate(STATE)
                     check(s['over'] <= 1 and s['zoomIn'], f"{tag} {t}: whole bar fits, zoom % visible ({s})")
                     if touch: check(s['minBtn'] >= 39.5, f"{tag} {t}: buttons stay at least 40 px ({s['minBtn']})")
-                    if touch and t in ('pen', 'hl'): check('t2' not in s['cls'] and s['minBtn'] >= 43.5, f"{tag} {t}: only the first step needed, 44 px buttons ({s['cls']})")
+                    if touch and t in ('pen', 'hl'): check('t3' not in s['cls'] and s['minBtn'] >= 43.5, f"{tag} {t}: no more than two steps needed, 44 px buttons ({s['cls']})")   # (2.5) Layers button on every page
                 # the compact finger switch still works and shows its icon
                 await pg.evaluate("__inkwell.setTool('pen')"); await pg.wait_for_timeout(120)
                 fin = await pg.evaluate("(() => { const f = document.getElementById('fingerBtn'); return {ico: f.querySelector('.tg-ico').getBoundingClientRect().width, lbl: f.querySelector('.tg-lbl').offsetWidth, on: f.classList.contains('on')}; })()")
@@ -51,7 +51,7 @@ async def main():
                 check('t3' in s['cls'] and 'fade-r' in s['cls'], f'{tag} with the notebook list open it tightens fully and scrolls the rest ({s})')
                 await pg.click('#sideBtn'); await pg.wait_for_timeout(500)
                 s = await pg.evaluate(STATE)
-                check(s['over'] <= 1 and 'fade-r' not in s['cls'] and 't2' not in s['cls'], f'{tag} closing it again goes back to the roomy layout ({s})')
+                check(s['over'] <= 1 and 'fade-r' not in s['cls'] and 't3' not in s['cls'], f'{tag} closing it again goes back to the roomy layout ({s})')
                 check(not errs, f'{tag} no page errors {errs}')
                 await ctx.close()
         # plenty of room: nothing changes from the old look

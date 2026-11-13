@@ -63,9 +63,16 @@ async def main():
         r = await draw(page, [(A[0] + 5, A[1] + 4), (B[0] - 4, B[1] + 5)])
         P = pts(r['p'])
         check(near(P[0], A) and near(P[-1], B) and dev(P) < 0.01, f'bond lands on two corners, dead straight ({P[0]}, {P[-1]}, want {A}, {B})')
-        # one undo removes it
+        # (2.5) first undo brings back the stroke as drawn, redo straightens it again, two undos remove it
         n = r['n']; await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(100)
-        check((await page.evaluate(LAST))['n'] == n - 1, 'one undo step')
+        u = await page.evaluate(LAST)
+        check(u['n'] == n and dev(pts(u['p'])) > 0.5 and not near(pts(u['p'])[0], A), 'first undo: the stroke as drawn')
+        sq = await page.evaluate("(() => { const a = [...__inkwell.cur.items.values()].filter(i => i.t === 's'); return !!a[a.length - 1].sq; })()")
+        check(not sq, 'as drawn: no sharp corners flag')
+        await page.evaluate("__inkwell.redo()"); await page.wait_for_timeout(100)
+        u = await page.evaluate(LAST); check(near(pts(u['p'])[0], A) and dev(pts(u['p'])) < 0.01, 'redo: straight again')
+        await page.evaluate("__inkwell.undo(); __inkwell.undo()"); await page.wait_for_timeout(100)
+        check((await page.evaluate(LAST))['n'] == n - 1, 'second undo removes it')
         r = await draw(page, [(A[0] + 5, A[1] + 4), (B[0] - 4, B[1] + 5)])
         # second line along the same bond: straight but not on top of the first
         mx, my = (A[0] + B[0]) / 2, (A[1] + B[1]) / 2

@@ -489,28 +489,51 @@ Object.assign(Tech, {
   }
 });
 
-/* ---------- (2.0 stage 4) layers ----------
-   Every item on a technical page belongs to a layer (it.ly; none = Drawing): Drawing, Dimensions (dimension lines go there by
-   themselves), Wiring and Notes (parts lists). New things go on the layer chosen in Layers (prefs.techLayer). Which layers are
-   hidden is saved with the page (page data.lyHide), so it syncs. Hidden layers are not drawn, can't be selected or erased
-   and are left out of exports. Older app versions show everything. */
+/* ---------- (2.0 stage 4, 2.5 all pages) layers ----------
+   Every item belongs to a layer (it.ly; none = the first layer). Technical pages: Drawing, Dimensions (dimension lines go
+   there by themselves), Wiring and Notes (parts lists). (2.5) Every other page: Writing, Highlights (highlighter strokes go
+   there by themselves, older highlights count as Highlights too), Notes and Extra. New things go on the layer chosen in
+   Layers (prefs.techLayer / prefs.pageLayer). Which layers are hidden is saved with the page (page data.lyHide), so it syncs.
+   Hidden layers are not drawn, can't be selected or erased and are left out of exports. A layer key from the other kind of
+   page (page moved between notebooks) counts as the first layer. Older app versions show everything. */
 const TECH_LAYERS = [['d', 'Drawing'], ['m', 'Dimensions'], ['w', 'Wiring'], ['n', 'Notes']];
+const PAGE_LAYERS = [['d', 'Writing'], ['h', 'Highlights'], ['n', 'Notes'], ['e', 'Extra']];
 const NO_HIDE = new Set();
 Object.assign(Tech, {
-  hideNow(){
-    const p = cur && getDoc(cur.id), h = p && p.data && p.data.lyHide;
-    if(!Array.isArray(h) || !h.length || !this.on(p)) return NO_HIDE;
-    if(this._hk !== h){ this._hk = h; this._hs = new Set(h); }
-    return this._hs;
+  layers(p){ return this.on(p) ? TECH_LAYERS : PAGE_LAYERS; },
+  // hidden layers of a page doc (default: the open page); remembers which layer list goes with it
+  hideFor(p){
+    p = p || (cur && getDoc(cur.id));
+    const h = p && p.data && p.data.lyHide;
+    if(!Array.isArray(h) || !h.length) return NO_HIDE;
+    const c = this._hc || (this._hc = new Map()), k = c.get(p.id);
+    if(k && k.h === h) return k.s;
+    const s = new Set(h); s.keys_ = new Set(this.layers(p).map(l => l[0])); s.tech = this.on(p);
+    c.set(p.id, {h, s}); if(c.size > 50) c.delete(c.keys().next().value);
+    return s;
   },
-  hidden(it){ const h = this.hideNow(); return h.size > 0 && !!it && h.has(it.ly || 'd'); },
-  layer(){ const v = prefs.techLayer; return TECH_LAYERS.some(l => l[0] === v) ? v : 'd'; },
-  // new things on a technical page go on the chosen layer (a hidden one is shown again, so new ink never vanishes)
+  hideNow(){ return this.hideFor(); },
+  // the layer an item is on, for this kind of page
+  lyOf(it, tech, keys){
+    const k = it.ly;
+    if(k) return keys ? (keys.has(k) ? k : 'd') : (this.layers().some(l => l[0] === k) ? k : 'd');
+    return !tech && it.t === 's' && it.hl ? 'h' : 'd';
+  },
+  hidden(it){ const h = this.hideNow(); return h.size > 0 && !!it && h.has(this.lyOf(it, h.tech, h.keys_)); },
+  // (2.5) for exports of other pages: is this item on a hidden layer of that page (page doc or id)?
+  hiddenOn(it, page){ const p = typeof page === 'string' ? getDoc(page) : page; const h = this.hideFor(p); return h.size > 0 && !!it && h.has(this.lyOf(it, h.tech, h.keys_)); },
+  layer(){ const t = this.on(), v = t ? prefs.techLayer : prefs.pageLayer; return (t ? TECH_LAYERS : PAGE_LAYERS).some(l => l[0] === v) ? v : 'd'; },
+  // new things go on the chosen layer (a hidden one is shown again, so new ink never vanishes); highlights on normal pages
+  // go on Highlights
   layerNew(list){
-    if(!this.on()) return list;
-    const ly = this.layer();
-    const out = list.map(it => it.ly || ly === 'd' ? it : Object.assign({}, it, {ly}));
-    const used = new Set(out.map(it => it.ly || 'd')), h = this.hideNow();
+    if(!cur) return list;
+    const tech = this.on(), ly = this.layer();
+    const out = list.map(it => {
+      if(it.ly) return it;
+      const k = !tech && it.t === 's' && it.hl ? 'h' : ly;
+      return k === 'd' ? it : Object.assign({}, it, {ly: k});
+    });
+    const used = new Set(out.map(it => this.lyOf(it, tech))), h = this.hideNow();
     if([...used].some(k => h.has(k))) this.setHide([...h].filter(k => !used.has(k)));
     return out;
   },
@@ -523,14 +546,16 @@ Object.assign(Tech, {
   },
   renderLayers(){
     const b = $('layerBtn'); if(!b) return;
-    const show = this.on() && !$('opts').hidden;
+    const show = !!cur && !$('opts').hidden;
     b.hidden = !show; if(!show) return;
-    const h = this.hideNow(), cur_ = this.layer();
+    const tech = this.on(), L = this.layers(), h = this.hideNow(), cur_ = this.layer();
     b.classList.toggle('on', h.size > 0);
-    b.title = 'Layers: drawing on ' + TECH_LAYERS.find(l => l[0] === cur_)[1] + (h.size ? ', ' + h.size + ' hidden' : '');
-    const n = {}; for(const it of cur.items.values()){ const k = it.ly || 'd'; n[k] = (n[k] || 0) + 1; }
+    b.title = 'Layers: drawing on ' + L.find(l => l[0] === cur_)[1] + (h.size ? ', ' + h.size + ' hidden' : '');
+    const n = {}; for(const it of cur.items.values()){ const k = this.lyOf(it, tech); n[k] = (n[k] || 0) + 1; }
     const eye = on => on ? '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A16.6 16.6 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/></svg>';
-    $('layerList').innerHTML = TECH_LAYERS.map(([k, name]) => `<div class="layer-row${k === cur_ ? ' cur' : ''}${h.has(k) ? ' off' : ''}"><button type="button" class="layer-eye" data-eye="${k}" aria-label="${h.has(k) ? 'Show' : 'Hide'} ${name}" aria-pressed="${h.has(k) ? 'false' : 'true'}">${eye(!h.has(k))}</button><button type="button" class="layer-name" data-ly="${k}"><b>${name}</b><small>${k === cur_ ? 'New things go here · ' : ''}${n[k] || 0} item${(n[k] || 0) === 1 ? '' : 's'}</small></button></div>`).join('');
+    const auto = k => !tech && k === 'h' ? 'Highlights go here · ' : '';
+    $('layerList').innerHTML = L.map(([k, name]) => `<div class="layer-row${k === cur_ ? ' cur' : ''}${h.has(k) ? ' off' : ''}"><button type="button" class="layer-eye" data-eye="${k}" aria-label="${h.has(k) ? 'Show' : 'Hide'} ${name}" aria-pressed="${h.has(k) ? 'false' : 'true'}">${eye(!h.has(k))}</button><button type="button" class="layer-name" data-ly="${k}"><b>${name}</b><small>${k === cur_ ? 'New things go here · ' : auto(k)}${n[k] || 0} item${(n[k] || 0) === 1 ? '' : 's'}</small></button></div>`).join('');
+    const sb = $('layerShowAll'); if(sb) sb.hidden = !h.size;
   }
 });
 
@@ -546,8 +571,9 @@ $('symGrid').addEventListener('click', e => {
 });
 $('partsBtn').addEventListener('click', () => { closePops(); startPick({kind: 'shape', shape: 'parts'}, 'Tap where the parts list should go'); });
 $('layerBtn').addEventListener('click', e => { Tech.renderLayers(); openPop('layerPop', e.currentTarget); });
+$('layerShowAll').addEventListener('click', () => Tech.setHide([]));
 $('layerList').addEventListener('click', e => {
   const eye = e.target.closest('[data-eye]'), nm = e.target.closest('[data-ly]');
   if(eye){ const h = new Set(Tech.hideNow()); if(h.has(eye.dataset.eye)) h.delete(eye.dataset.eye); else h.add(eye.dataset.eye); Tech.setHide([...h]); }
-  else if(nm){ prefs.techLayer = nm.dataset.ly; savePrefs(); const h = Tech.hideNow(); if(h.has(nm.dataset.ly)) Tech.setHide([...h].filter(k => k !== nm.dataset.ly)); else Tech.renderLayers(); }
+  else if(nm){ prefs[Tech.on() ? 'techLayer' : 'pageLayer'] = nm.dataset.ly; savePrefs(); const h = Tech.hideNow(); if(h.has(nm.dataset.ly)) Tech.setHide([...h].filter(k => k !== nm.dataset.ly)); else Tech.renderLayers(); }
 });

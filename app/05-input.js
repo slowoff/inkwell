@@ -626,7 +626,8 @@ function endTool(e){
     if(handwriting && prefs.hexSnap){
       const host = HexLine.host(a.pts);   // (1.90.1) inside a honeycomb from Shapes: its own corners, also on other paper
       const V = host ? HexLine.fit(a.pts, host.s, cam.z, host) : cur.bg.type === 'hex' && !HexLine.onPicture(a.pts) ? HexLine.fit(a.pts, cur.bg.sy, cam.z) : null;
-      if(V){ it.p = densify(V, false, a.isPen ? midPressure(a.pts) : shapePr()); it.sq = 1; addItems([it]); return; }
+      // (2.5) two undo steps: Undo once brings back the stroke as drawn (letters on hex paper), Undo again removes it
+      if(V){ addItems([it]); const raw = cur.items.get(it.id) || it; const st = Object.assign({}, raw, {p: densify(V, false, a.isPen ? midPressure(a.pts) : shapePr()), sq: 1}); apply([[st.id, st]], [[st.id, raw]]); return; }
     }
     addItems([it]);
     if(handwriting) WA.stroke(it);   // reference line: notes which line is being written (never moves ink)

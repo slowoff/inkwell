@@ -25,7 +25,7 @@ async def main():
         await page.goto(URL); await page.wait_for_function('navigator.serviceWorker && navigator.serviceWorker.controller', timeout=15000)
         await page.wait_for_timeout(2500); await page.wait_for_function('!!window.__inkwellBooted', timeout=15000)
         await page.evaluate("async () => { const W = __inkwell; await W.newPage(); W.setTool('pen'); }")
-        check(await page.evaluate("document.getElementById('layerBtn').hidden"), 'normal notebook: no Layers button')
+        check(not await page.evaluate("document.getElementById('layerBtn').hidden"), 'normal notebook: Layers button too (2.5)')
         await page.evaluate("""() => { const W = __inkwell, pg = W.docs.get(W.cur.id), s = W.docs.get(pg.data.sec); W.docs.get(s.data.nb).data.tech = true;
             W.prefs.techSnap = 0; W.prefs.techLayer = 'd'; W.cam.z = 1; W.cam.ox = 0; W.cam.oy = 0; W.setTool('pen'); W.invalidate(); }""")
         check(not await page.evaluate("document.getElementById('layerBtn').hidden"), 'technical page: Layers button')

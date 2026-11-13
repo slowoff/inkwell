@@ -1232,7 +1232,9 @@ body.scanning #askQuick{background:var(--accent);color:var(--accent-fg)}
 .sym-grid button:active{background:var(--panel2)}
 .sym-panel .btn{width:100%}
 .ly-off{display:none!important}
+.layer-btn svg{width:22px;height:22px}
 .layer-btn.on{color:var(--accent)}
+.layer-all{width:100%;min-height:44px;margin:4px 0 0}
 .layer-pop{width:270px}
 .layer-list{display:flex;flex-direction:column;gap:2px;margin:4px 0}
 .layer-row{display:flex;align-items:center;gap:4px;border-radius:9px}

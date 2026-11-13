@@ -178,7 +178,7 @@ async def main():
         await page.evaluate("document.getElementById('shapePop').hidden = true")
         P = await pen(off_a_bit(a, b_))
         check(math.hypot(P[0][0] - a[0], P[0][1] - a[1]) < 0.6 and math.hypot(P[-1][0] - b_[0], P[-1][1] - b_[1]) < 0.6, f'line over an edge lands on its corners, on grid paper ({P[0]}, {P[-1]}, want {a}, {b_})')
-        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(60)
+        await page.evaluate("__inkwell.undo(); __inkwell.undo()"); await page.wait_for_timeout(60)
         # a chain across cells
         chain = [a, b_]
         for _ in range(2):
@@ -186,7 +186,7 @@ async def main():
             chain.append(max(nx, key=lambda q: q[0]))
         P = await pen([(q[0] + 3, q[1] - 2) for q in chain])
         check(all(min(math.hypot(q[0] - z[0], q[1] - z[1]) for q in P) < 0.6 for z in chain), 'zig-zag: every corner on the honeycomb')
-        await page.evaluate("__inkwell.undo()"); await page.wait_for_timeout(60)
+        await page.evaluate("__inkwell.undo(); __inkwell.undo()"); await page.wait_for_timeout(60)
         # writing and curves stay; outside stays
         cx, cy = (a[0] + b_[0]) / 2, (a[1] + b_[1]) / 2
         circ = [(cx + 0.5 * S * math.cos(i / 24 * 6.283), cy + 0.5 * S * math.sin(i / 24 * 6.283)) for i in range(25)]

@@ -72,11 +72,14 @@ async def main():
         await page.evaluate("__inkwell.setTool('lasso')"); await page.wait_for_timeout(100)
         check(await vis('#pasteBtn') and not await vis('#freshPaste'), 'Select tool, nothing copied: its own Paste button only')
         await page.evaluate("__inkwell.selectIds(['s_q'])"); await page.wait_for_selector('#selCopy', state='visible')
+        Z0, R0 = await rect('#zoomBtn'), await rect('#rulerBtn')
         await page.click('#selCopy'); await page.wait_for_timeout(500)
         check(await vis('#freshPaste') and not await vis('#pasteBtn'), 'after Copy: the fresh Paste shows, never two Paste buttons')
-        # (1.92) the zoom shares its row with the Shapes button: the Paste button sits under that row, centred on it
-        z, fp, sr = await rect('#zoomBtn'), await rect('#freshPaste'), await rect('#shapeRail')
-        check(z and fp and sr and fp['t'] >= z['b'] - 1 and fp['t'] - z['b'] < 30 and abs((fp['l'] + fp['r']) / 2 - (sr['l'] + z['r']) / 2) < 2, f'left: under the Shapes + zoom % row, centred ({sr}, {z}, {fp})')
+        # (2.5.3) ruler / finger / shapes / zoom are pinned at the foot and must not move when Paste shows: the Paste button sits just above
+        # the ruler row, centred on the column
+        z, fp, sr, ru = await rect('#zoomBtn'), await rect('#freshPaste'), await rect('#shapeRail'), await rect('#rulerBtn')
+        check(z and fp and sr and ru and fp['b'] <= ru['t'] + 1 and ru['t'] - fp['b'] < 30 and abs((fp['l'] + fp['r']) / 2 - (sr['l'] + z['r']) / 2) < 2, f'left: just above the ruler row, centred ({ru}, {z}, {fp})')
+        check(abs(z['t'] - Z0['t']) < 1 and abs(ru['t'] - R0['t']) < 1, f'the pinned rows did not move when Paste appeared ({Z0}, {z})')
         foot = await rect('#sideBtn')
         check(foot and fp['b'] <= foot['t'] - 4, f'clear of the buttons at the foot ({foot})')
         check(fp['h'] >= 43.5, 'fresh Paste is 44 px tall')

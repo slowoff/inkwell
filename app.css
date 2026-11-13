@@ -1283,3 +1283,28 @@ body.scanning #askQuick{background:var(--accent);color:var(--accent-fg)}
   .main[data-bar=left]:not([data-col])::after{left:0;border-right:1px solid var(--line)}
   .main[data-bar=right]:not([data-col])::after{right:var(--sar);border-left:1px solid var(--line)}
 }
+
+/* ---------- (2.5.3) toolbar on the side: tidy column ---------- */
+.ly-name{display:none}
+@media (min-width:761px){
+  /* The column is a grid: tools, the tool's own options, then free space, then ruler / finger / shapes / zoom pinned at
+     the foot. Those four no longer move up and down when the tool changes. If the options are too long, the free
+     space shrinks to nothing and the column scrolls as before. */
+  .main[data-bar=left] .bar2,.main[data-bar=right] .bar2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:max-content max-content max-content minmax(min-content,1fr) max-content max-content;justify-items:center;align-items:start}
+  .main[data-bar=left] .bar2>.tools,.main[data-bar=right] .bar2>.tools{grid-area:1/1/2/3;justify-self:stretch}
+  .main[data-bar=left] .bar2>.opts,.main[data-bar=right] .bar2>.opts{grid-area:2/1/3/3;justify-self:stretch}
+  .main[data-bar=left] .bar2>.fmt,.main[data-bar=right] .bar2>.fmt{grid-area:3/1/4/3;justify-self:stretch}
+  .main[data-bar=left] .bar2>.spacer,.main[data-bar=right] .bar2>.spacer{display:block;grid-area:4/1/5/3;align-self:end;justify-self:stretch;height:1px;background:var(--line);margin:8px 0 2px}
+  .main[data-bar=left] .bar2 .opts::after,.main[data-bar=right] .bar2 .opts::after,.main[data-bar=left] .bar2 .fmt::after,.main[data-bar=right] .bar2 .fmt::after{display:none}
+  .main[data-bar=left] #rulerBtn,.main[data-bar=right] #rulerBtn{grid-area:5/1;margin-top:4px}
+  .main[data-bar=left] #fingerBtn,.main[data-bar=right] #fingerBtn{grid-area:5/2;margin-top:4px}
+  .main[data-bar=left] #shapeRail,.main[data-bar=right] #shapeRail{grid-area:6/1;margin-top:4px}
+  .main[data-bar=left] .bar2 .zoom,.main[data-bar=right] .bar2 .zoom{grid-area:6/2;margin-top:4px}
+  /* the fresh Paste button appears just above the divider, so the four pinned buttons stay where they are */
+  .main[data-bar=left] .bar2 .fresh-paste,.main[data-bar=right] .bar2 .fresh-paste{grid-area:4/1/5/3;align-self:end;margin:8px 0 19px}
+  /* Layers: one wide button that names the layer you are drawing on, instead of a lone icon in the middle */
+  .main[data-bar=left] .bar2 .layer-btn,.main[data-bar=right] .bar2 .layer-btn{width:100%;gap:4px;padding:0 4px;border-radius:10px;background:color-mix(in srgb,var(--fg) 5%,transparent);flex-direction:row}
+  .main[data-bar=left] .bar2 .layer-btn svg,.main[data-bar=right] .bar2 .layer-btn svg{width:16px;height:16px;flex:none}
+  .main[data-bar=left] .bar2 .layer-btn .ly-name,.main[data-bar=right] .bar2 .layer-btn .ly-name{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:600;color:var(--muted)}
+  .main[data-bar=left] .bar2 .layer-btn.on .ly-name,.main[data-bar=right] .bar2 .layer-btn.on .ly-name{color:var(--accent)}
+}

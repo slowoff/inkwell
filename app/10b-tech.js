@@ -550,6 +550,7 @@ Object.assign(Tech, {
     b.hidden = !show; if(!show) return;
     const tech = this.on(), L = this.layers(), h = this.hideNow(), cur_ = this.layer();
     b.classList.toggle('on', h.size > 0);
+    { const nm = $('layerName'); if(nm) nm.textContent = !tech && prefs.tool === 'hl' ? 'Highlights' : L.find(l => l[0] === cur_)[1]; }   // (2.5.3) shown in the side column
     b.title = 'Layers: drawing on ' + L.find(l => l[0] === cur_)[1] + (h.size ? ', ' + h.size + ' hidden' : '');
     const n = {}; for(const it of cur.items.values()){ const k = this.lyOf(it, tech); n[k] = (n[k] || 0) + 1; }
     const eye = on => on ? '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A16.6 16.6 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/></svg>';

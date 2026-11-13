@@ -1257,3 +1257,29 @@ body.scanning #askQuick{background:var(--accent);color:var(--accent-fg)}
 .tip-d{display:block;margin-top:2px;color:var(--muted)}
 @keyframes tipIn{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.tip{animation:none}}
+
+/* ---------- (2.5.2) polish: binder and side column ---------- */
+/* The binder's two heads are exactly as tall as the top bar, so their bottom lines meet the bar's line and the head
+   no longer changes height between a section and a search. --barH = bar padding 6 + button + 6 + 1 px line. */
+:root{--barH:51px}
+@media (any-pointer:coarse){:root{--barH:57px}}
+.nav-head{height:var(--barH);padding-top:0;padding-bottom:0;flex:none}
+.search{margin-top:8px;flex:none}
+.list-head{height:var(--barH);padding-top:0;padding-bottom:0;flex:none}
+.side-grip[data-grip="list"]{top:var(--barH)}
+/* quieter resize handles: a thin line until touched */
+.side-grip::before{width:4px;opacity:.3}
+.side-grip[data-grip="nav"]::before{left:12px}
+/* notebook / section edit form: the two buttons stay on one line each */
+.edit-actions{gap:4px;flex-wrap:wrap}
+.edit-actions .btn{padding:0 10px;white-space:nowrap;font-size:14px}
+/* rows change colour softly; thin scrollbars with a mouse */
+.nb-main,.sec-row,.page-item,.status,.icon-btn,.tb,.tool{transition:background-color .12s,color .12s}
+@media (hover:hover){.nb-list,.pages{scrollbar-width:thin;scrollbar-color:var(--rule-strong) transparent}}
+/* toolbar on the side: a solid foot under the menu and hide buttons, so tools that scroll down end at a clean line
+   instead of sliding under the two buttons */
+@media (min-width:761px){
+  .main[data-bar=left]:not([data-col])::after,.main[data-bar=right]:not([data-col])::after{content:"";position:absolute;bottom:0;width:112px;height:calc(56px + var(--sab));background:var(--panel);border-top:1px solid var(--line);z-index:14;pointer-events:none}
+  .main[data-bar=left]:not([data-col])::after{left:0;border-right:1px solid var(--line)}
+  .main[data-bar=right]:not([data-col])::after{right:var(--sar);border-left:1px solid var(--line)}
+}

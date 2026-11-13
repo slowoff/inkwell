@@ -354,7 +354,7 @@ const HexLine = {
     }
     if(out.length < 2) return null;
     if(out.length === 2){
-      if(HexLine.taken(out[0], out[1], s, host)) return V;
+      if(HexLine.taken(out[0], out[1], s, host)) return HexLine.beside(out[0], out[1], P);   // (2.5.1) double bond: neat line beside it
       if(dist(V[0], V[V.length - 1]) < 0.7 * s) return null;
     }
     return out;
@@ -452,6 +452,14 @@ const HexLine = {
     return sum / (V.length - 1);
   },
   // is there already a line along a to b?
+  /* (2.5.1) the second (or third) line of a double bond: parallel to the bond a-b, a fifth of its length to the side the
+     stroke was drawn on, a little shorter at both ends, so it never ends up crooked from a corner */
+  beside(a, b, P){
+    const L = dist(a, b), ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, nx = -uy, ny = ux;
+    let m = 0; for(const q of P) m += (q[0] - a[0]) * nx + (q[1] - a[1]) * ny;
+    const side = m < 0 ? -1 : 1, o = 0.2 * L * side, k = 0.15 * L;
+    return [[a[0] + ux * k + nx * o, a[1] + uy * k + ny * o], [b[0] - ux * k + nx * o, b[1] - uy * k + ny * o]];
+  },
   taken(a, b, s, host){
     const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]), r = 0.15 * s;
     return [...cur.items.values()].some(it => {

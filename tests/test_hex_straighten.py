@@ -82,6 +82,17 @@ async def main():
         P = pts(r['p'])
         d = abs((P[len(P) // 2][0] - mx) * nx + (P[len(P) // 2][1] - my) * ny)
         check(dev(P) < 0.01 and d > 3, f'double bond: second line straight and beside the first (off by {d:.1f})')
+        # (2.5.1) a crooked second line from the corner (iPad screenshot): it becomes a neat parallel line beside the bond
+        A2, B2 = v(6, 2), v(6, 2, False)
+        await draw(page, [(A2[0] + 4, A2[1] + 3), (B2[0] - 3, B2[1] + 4)])
+        u2 = ((B2[0] - A2[0]) / S, (B2[1] - A2[1]) / S); n2 = (-u2[1], u2[0])
+        tip = (B2[0] - u2[0] * 0.15 * S + n2[0] * 0.25 * S, B2[1] - u2[1] * 0.15 * S + n2[1] * 0.25 * S)
+        r = await draw(page, [(A2[0] + 3, A2[1] + 2), tip], wob=0.8)
+        P = pts(r['p'])
+        offs = [(q[0] - A2[0]) * n2[0] + (q[1] - A2[1]) * n2[1] for q in (P[0], P[-1])]
+        along = [(q[0] - A2[0]) * u2[0] + (q[1] - A2[1]) * u2[1] for q in (P[0], P[-1])]
+        check(dev(P) < 0.01 and all(abs(o - 0.2 * S) < 0.6 for o in offs), f'crooked second line: parallel, a fifth of a bond to the side ({offs})')
+        check(abs(along[0] - 0.15 * S) < 0.6 and abs(along[1] - 0.85 * S) < 0.6, f'crooked second line: a bit shorter at both ends ({along})')
         # zig-zag chain
         Z = [v(8, 1), v(8, 1, False), v(8, 2), v(8, 2, False), v(8, 3)]
         r = await draw(page, [(q[0] + 3, q[1] - 4) for q in Z])

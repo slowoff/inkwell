@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.5.1', '2026-11-13', ['Hex paper and honeycombs: the second line of a double bond always lands neatly beside the bond, parallel and a little shorter, on the side you drew it. Before, a line started near a corner stayed crooked']],
   ['2.5', '2026-11-13', ['Layers on every page: Writing, Highlights, Notes and Extra, with the layers button next to the colours. Tap a layer to draw on it, tap the eye to hide or show it. Highlights go on Highlights by themselves (older ones too), so one tap hides all of them. Hidden layers can\'t be selected or erased and are left out of exports', 'Show all layers button in the layers menu when something is hidden', 'Hex paper and honeycombs: Undo right after a line snapped brings back exactly what you drew, so letters can be written there. Undo again removes it']],
   ['2.4', '2026-11-12', ['With a mouse or trackpad, resting the pointer on a button shows a small card with its name, what it does and its keyboard shortcut']],
   ['2.3.1', '2026-11-11', ['Technical notebooks: a held line\'s end now keeps following the Pencil across other lines. After it had snapped onto a point once, it used to get stuck near other strokes']],

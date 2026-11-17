@@ -272,7 +272,7 @@ function inkPieces(xs, ys, rs, s0, s1, svg){
     if(svg) d += `M${r1(x + r)} ${r1(y)}a${r1(r)} ${r1(r)} 0 1 0 ${r1(-2 * r)} 0a${r1(r)} ${r1(r)} 0 1 0 ${r1(2 * r)} 0Z`;
     else { P.moveTo(x + r, y); P.arc(x, y, r, 0, Math.PI * 2, true); }
   };
-  let pdx = 0, pdy = 0, have = false;
+  let pdx = 0, pdy = 0, plen = 0, have = false;
   disc(xs[s0], ys[s0], rs[s0]);
   for(let i = s0; i < s1; i++){
     let dx = xs[i+1] - xs[i], dy = ys[i+1] - ys[i];
@@ -280,12 +280,17 @@ function inkPieces(xs, ys, rs, s0, s1, svg){
     if(len < 1e-6) continue;
     dx /= len; dy /= len;
     // a disc at this point if the path bends here (keeps the outer side of the bend filled)
-    if(have && (pdx * dx + pdy * dy) < 0.9995 && rs[i] * Math.acos(Math.max(-1, Math.min(1, pdx * dx + pdy * dy))) > 0.05) disc(xs[i], ys[i], rs[i]);
+    const bend = have && (pdx * dx + pdy * dy) < 0.9995 && rs[i] * Math.acos(Math.max(-1, Math.min(1, pdx * dx + pdy * dy))) > 0.05;
+    if(bend) disc(xs[i], ys[i], rs[i]);
+    // (2.6.2) where no disc covers the joint, start this band a little inside the previous one: two pieces that only
+    // touch along one shared edge leave a hairline crack when anti-aliased (very visible on iPad Safari when zoomed)
+    const e = have && !bend ? Math.min(rs[i] * 0.5, plen) : 0;
+    const sx = xs[i] - dx * e, sy = ys[i] - dy * e;
     const nx = -dy, ny = dx, a = rs[i], b = rs[i+1];
-    const q = [[xs[i] + nx * a, ys[i] + ny * a], [xs[i+1] + nx * b, ys[i+1] + ny * b], [xs[i+1] - nx * b, ys[i+1] - ny * b], [xs[i] - nx * a, ys[i] - ny * a]];
+    const q = [[sx + nx * a, sy + ny * a], [xs[i+1] + nx * b, ys[i+1] + ny * b], [xs[i+1] - nx * b, ys[i+1] - ny * b], [sx - nx * a, sy - ny * a]];
     if(svg) d += `M${r1(q[0][0])} ${r1(q[0][1])}L${r1(q[1][0])} ${r1(q[1][1])}L${r1(q[2][0])} ${r1(q[2][1])}L${r1(q[3][0])} ${r1(q[3][1])}Z`;
     else { P.moveTo(q[0][0], q[0][1]); P.lineTo(q[1][0], q[1][1]); P.lineTo(q[2][0], q[2][1]); P.lineTo(q[3][0], q[3][1]); }   // no closePath: filling closes each piece anyway, and closePath made Chrome's Path2D ~100x slower here
-    pdx = dx; pdy = dy; have = true;
+    pdx = dx; pdy = dy; plen = len; have = true;
   }
   disc(xs[s1], ys[s1], rs[s1]);
   return svg ? d : P;

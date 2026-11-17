@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.6.2', '2026-11-17', ['Pen and highlighter: no more thin light cracks across strokes when you zoom in. The small pieces a stroke is drawn from now overlap a little instead of only touching']],
   ['2.6.1', '2026-11-17', ['Graph window, 4 quadrants: with Same from / to on, all four boxes follow one number. Type 5 or -5 in any of them and both axes go from -5 to 5']],
   ['2.6', '2026-11-17', ['Graph window: Same from / to switch under the ranges. While it is on, changing Horizontal from or to changes Vertical from or to as well, and the other way round. Steps stay separate']],
   ['2.5.3', '2026-11-13', ['Toolbar on the side: ruler, finger, shapes and zoom now stay in one place at the foot of the column instead of moving when you change tool', 'Toolbar on the side: Layers is a wide button that shows the layer you are drawing on']],

@@ -593,13 +593,22 @@ $('graphOpen').addEventListener('click', () => {
    from/to and the other way round. Turning it on copies the horizontal range to the vertical one. Steps stay separate. */
 const G_LINK = [['gX0', 'gY0'], ['gX1', 'gY1']];
 function renderGLink(){ const on = !!prefs.graphLink; $('gLink').classList.toggle('on', on); $('gLink').setAttribute('aria-pressed', on ? 'true' : 'false'); }
+/* (2.6.1, Rafael: "like on the 4 quadrants I want all four to be the same") On 4 quadrants all four boxes follow one
+   number: typing 5 or -5 in any of them gives -5 to 5 across and up. The box being typed in is left as typed. */
 function gLinkCopy(from){
   if(!prefs.graphLink) return;
+  if(graphType === 'q4'){
+    const n = String($(from).value).trim().replace(/^[-−]\s*/, '');
+    if(!isFinite(parseFloat(n.replace(',', '.')))) return;   // empty or just "-" while typing: wait
+    for(const id of ['gX0', 'gY0']) if(id !== from) $(id).value = '-' + n;
+    for(const id of ['gX1', 'gY1']) if(id !== from) $(id).value = n;
+    return;
+  }
   for(const pr of G_LINK){ const i = pr.indexOf(from); if(i >= 0) $(pr[1 - i]).value = $(from).value; }
 }
 $('gLink').addEventListener('click', () => {
   prefs.graphLink = !prefs.graphLink; savePrefs(); renderGLink();
-  if(prefs.graphLink){ gLinkCopy('gX0'); gLinkCopy('gX1'); saveGraphForm(); }
+  if(prefs.graphLink){ if(graphType === 'q4') gLinkCopy('gX1'); else { gLinkCopy('gX0'); gLinkCopy('gX1'); } saveGraphForm(); }
   drawGraphPreview();
 });
 // on the fields themselves, so the copy is in place before the dialog's input handler redraws and saves

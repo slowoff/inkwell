@@ -49,6 +49,18 @@ async def main():
         v = await page.evaluate(V); check(v['gYs'] == '1', f'steps stay separate ({v})')
         # hover tip entry exists
         check(await page.evaluate("TIP_TEXT.some(t => t[0] === '#gLink')"), 'hover tip entry')
+        # 4 quadrants: one number sets all four (typed box stays as typed)
+        await page.click('#gType button[data-v="q4"]')
+        await page.locator('#gY1').fill(''); await page.locator('#gY1').type('8')
+        v = await page.evaluate(V); check((v['gX0'], v['gX1'], v['gY0'], v['gY1']) == ('-8', '8', '-8', '8'), f'q4: vertical to 8 -> all four ({v})')
+        await page.locator('#gX0').fill(''); await page.locator('#gX0').type('-2,5')
+        v = await page.evaluate(V); check((v['gX0'], v['gX1'], v['gY0'], v['gY1']) == ('-2,5', '2,5', '-2,5', '2,5'), f'q4: horizontal from -2,5 -> all four ({v})')
+        await page.locator('#gY0').fill(''); await page.locator('#gY0').type('-')
+        v = await page.evaluate(V); check(v['gX1'] == '2,5' and v['gY1'] == '2,5', f'q4: lone minus while typing changes nothing ({v})')
+        await page.locator('#gY0').type('3')
+        v = await page.evaluate(V); check((v['gX0'], v['gX1'], v['gY0'], v['gY1']) == ('-3', '3', '-3', '3'), f'q4: -3 -> all four ({v})')
+        await page.click('#gLink'); await page.fill('#gX1', '9'); await page.click('#gLink')
+        v = await page.evaluate(V); check((v['gX0'], v['gX1'], v['gY0'], v['gY1']) == ('-9', '9', '-9', '9'), f'q4: turning on mirrors horizontal to ({v})')
         # 3D hides it
         await page.click('#gType button[data-v="3d"]')
         check(not await page.is_visible('#gLink'), 'hidden for 3D graphs')

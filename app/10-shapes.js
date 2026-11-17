@@ -585,8 +585,25 @@ $('graphOpen').addEventListener('click', () => {
   if(!$('gX1').value){ $('gNums').checked = true; setGraphType('q1'); }
   $('gFnMsg').textContent = '';
   showModal('graphDlg');
+  renderGLink();
   renderGLook();
 });
+/* (2.6, Rafael: "a button that syncs horizontal from and to and vertical from and to so I only have to change one")
+   Same from / to: while on (prefs.graphLink, per device), typing in Horizontal from/to puts the same value in Vertical
+   from/to and the other way round. Turning it on copies the horizontal range to the vertical one. Steps stay separate. */
+const G_LINK = [['gX0', 'gY0'], ['gX1', 'gY1']];
+function renderGLink(){ const on = !!prefs.graphLink; $('gLink').classList.toggle('on', on); $('gLink').setAttribute('aria-pressed', on ? 'true' : 'false'); }
+function gLinkCopy(from){
+  if(!prefs.graphLink) return;
+  for(const pr of G_LINK){ const i = pr.indexOf(from); if(i >= 0) $(pr[1 - i]).value = $(from).value; }
+}
+$('gLink').addEventListener('click', () => {
+  prefs.graphLink = !prefs.graphLink; savePrefs(); renderGLink();
+  if(prefs.graphLink){ gLinkCopy('gX0'); gLinkCopy('gX1'); saveGraphForm(); }
+  drawGraphPreview();
+});
+// on the fields themselves, so the copy is in place before the dialog's input handler redraws and saves
+for(const id of G_LINK.flat()) $(id).addEventListener('input', () => gLinkCopy(id));
 $('gType').addEventListener('click', e => { const b = e.target.closest('button[data-v]'); if(b){ setGraphType(b.dataset.v); saveGraphForm(); } });
 $('gFn').addEventListener('input', () => {
   try { parseFn($('gFn').value); $('gFnMsg').textContent = ''; } catch(err){ $('gFnMsg').textContent = err.message; }

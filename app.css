@@ -550,6 +550,7 @@ body.scanning .note{bottom:calc(76px + var(--sab) + var(--up,0px))}
 @media (any-pointer:coarse){ .stepper button{width:44px;height:44px} }
 .g-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .g-grid .text-in{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%}
+.g-link{align-self:flex-start;padding:0 2px;color:var(--fg);font-size:14px}
 #gFn{height:40px;border:1px solid var(--line);border-radius:9px;padding:0 10px;background:var(--panel2);font-size:16px;color:var(--fg);width:100%;font-family:var(--f-mono)}
 #graphDlg .seg button.on{background:var(--well-on);color:var(--fg)}
 .stage.picking{cursor:crosshair}

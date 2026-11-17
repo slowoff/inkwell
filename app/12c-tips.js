@@ -108,6 +108,7 @@ const TIP_TEXT = [
   ['#gridOpen', 'Grid', 'Choose rows and columns, then draw it'],
   ['#hcOpen', 'Honeycomb', 'Choose rows and columns, then draw it'],
   ['#graphOpen', 'Graph / axes', 'Axes with a scale, and curves from formulas'],
+  ['#gLink', 'Same from / to', 'Vertical from and to follow horizontal, and the other way round'],
   ['#snapShapes', 'Snap to angles', 'Lines click into 0°, 15°, 45°, 90° when close'],
   ['#partsBtn', 'Parts list', 'A list of the robotics parts on this page that updates itself'],
   ['#scribeBtn', 'Write to text', 'Handwriting becomes typed text when you pause'],

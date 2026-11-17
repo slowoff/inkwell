@@ -212,7 +212,7 @@ html,body{background:var(--paper)}
 .stage canvas{position:absolute;left:0;top:0;pointer-events:none;transform-origin:0 0}
 /* (1.62) highlights blend into the page like real highlighter ink: black text under them stays black */
 #hlm,#live.hl-mul{mix-blend-mode:multiply}
-.world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0}
+.world{position:absolute;left:0;top:0;width:0;height:0;transform-origin:0 0;isolation:isolate}
 #worldFront > *{transform-origin:0 0}
 /* (1.71.2) while the page moved, iPad Safari sometimes drew ink and highlights that lie on a picture UNDER the picture:
    the picture layer gets its own GPU layer while it moves, and the ink canvas (painted with the page) ended up below it.
@@ -1309,3 +1309,37 @@ body.scanning #askQuick{background:var(--accent);color:var(--accent-fg)}
   .main[data-bar=left] .bar2 .layer-btn .ly-name,.main[data-bar=right] .bar2 .layer-btn .ly-name{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:600;color:var(--muted)}
   .main[data-bar=left] .bar2 .layer-btn.on .ly-name,.main[data-bar=right] .bar2 .layer-btn.on .ly-name{color:var(--accent)}
 }
+
+/* ---------- (2.6.3) toolbar on the side: tighter, so Shapes stays in view with the Paste button showing ----------
+   (Rafael: "when I have something to paste I have to scroll down to reach Shapes"). Smaller gaps, a slimmer Paste,
+   Stick to text as a 44 px button beside the colour wheel (lit like Finger), and the text tool's Link as an icon
+   beside the colour A. Buttons stay 44 px. */
+@media (min-width:761px){
+  .main[data-bar=left] .bar2,.main[data-bar=right] .bar2{padding-top:6px}
+  .main[data-bar=left] .bar2 .tools,.main[data-bar=right] .bar2 .tools{gap:2px 4px;padding-bottom:4px;margin-bottom:6px}
+  .main[data-bar=left] .bar2 .opts,.main[data-bar=right] .bar2 .opts{gap:3px 4px}
+  .main[data-bar=left] .bar2 .size,.main[data-bar=right] .bar2 .size{margin-top:0;height:28px}
+  .main[data-bar=left] .bar2 .swatch,.main[data-bar=right] .bar2 .swatch{height:32px}
+  .main[data-bar=left] .bar2 .layer-btn,.main[data-bar=right] .bar2 .layer-btn{height:40px}
+  .main[data-bar=left] .bar2>.spacer,.main[data-bar=right] .bar2>.spacer{margin:4px 0 0}
+  .main[data-bar=left] #rulerBtn,.main[data-bar=right] #rulerBtn,.main[data-bar=left] #fingerBtn,.main[data-bar=right] #fingerBtn,.main[data-bar=left] #shapeRail,.main[data-bar=right] #shapeRail,.main[data-bar=left] .bar2 .zoom,.main[data-bar=right] .bar2 .zoom{margin-top:2px}
+  .main[data-bar=left] .bar2 .fresh-paste,.main[data-bar=right] .bar2 .fresh-paste{height:44px;margin:0 0 2px}
+  .main[data-bar=left] #hlSnap,.main[data-bar=right] #hlSnap{width:44px;height:44px;min-width:44px;padding:0;justify-content:center;border-radius:8px}
+  .main[data-bar=left] #hlSnap .sw,.main[data-bar=right] #hlSnap .sw{display:none}
+  .main[data-bar=left] #hlSnap.on,.main[data-bar=right] #hlSnap.on{background:var(--accent-soft);color:var(--accent)}
+  .main[data-bar=left] #hlSnap.on .tg-ico,.main[data-bar=right] #hlSnap.on .tg-ico{color:var(--accent)}
+  .main[data-bar=left] .bar2 .fmt,.main[data-bar=right] .bar2 .fmt{gap:1px 4px}
+  .main[data-bar=left] .bar2 .fmt [data-act=link] .tg-lbl,.main[data-bar=right] .bar2 .fmt [data-act=link] .tg-lbl{display:none}
+  .main[data-bar=left] .bar2 .fmt .tb,.main[data-bar=right] .bar2 .fmt .tb{min-width:44px}
+  /* text tool: the formatting buttons need the room. The ruler (no use while typing) gives its place to an icon-only
+     Paste, and the formatting buttons are 38 px tall */
+  .main[data-bar=left] .bar2:has(>.fmt:not([hidden])) #rulerBtn,.main[data-bar=right] .bar2:has(>.fmt:not([hidden])) #rulerBtn{display:none}
+  .main[data-bar=left] .bar2:has(>.fmt:not([hidden])) .fresh-paste,.main[data-bar=right] .bar2:has(>.fmt:not([hidden])) .fresh-paste{grid-area:5/1;align-self:start;width:44px;height:44px;margin:2px 0 0;padding:0;justify-content:center}
+  .main[data-bar=left] .bar2:has(>.fmt:not([hidden])) .fresh-paste .fp-lbl,.main[data-bar=right] .bar2:has(>.fmt:not([hidden])) .fresh-paste .fp-lbl{display:none}
+  .main[data-bar=left] .bar2 .fmt .tb,.main[data-bar=right] .bar2 .fmt .tb{height:38px}
+}
+/* (2.7) Arrange (Bring to front / Send to back): the square that moves is tinted */
+#selOrder rect,#selFront rect,#selBack rect{fill:currentColor;fill-opacity:.22}
+/* room for Arrange without a second row: the menu's word buttons are a little narrower, the gaps 1 px */
+.sel-menu{gap:1px}
+.sel-menu>.tb{padding:0 6px}

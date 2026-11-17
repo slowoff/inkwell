@@ -143,7 +143,7 @@ function computeSel(){
   for(const id of sel.ids){ const q = itemBox(cur.items.get(id)); b = [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])]; }
   sel.b = b;
 }
-function clearSel(){ sel = null; $('selBox').hidden = true; if(!$('fadePop').hidden) closePop('fadePop'); TS.clear(); }
+function clearSel(){ sel = null; $('selBox').hidden = true; if(!$('fadePop').hidden) closePop('fadePop'); if(!$('orderPop').hidden) closePop('orderPop'); TS.clear(); }
 function transformItem(it, tf){
   if(tf.r !== undefined) return rotateItem(it, tf.r, tf.ax, tf.ay);   // r can be 0 (back to start)
   const m = (x, y) => [tf.ax + (x - tf.ax) * tf.s + tf.dx, tf.ay + (y - tf.ay) * tf.s + tf.dy];
@@ -299,6 +299,22 @@ $('fadeRange').addEventListener('input', () => {
   fadeLabel(v);
 });
 $('fadeRange').addEventListener('change', fadeCommit);
+// (2.7) Bring to front / Send to back (Rafael: "add a bring to the top and bring to the bottom when you select
+// something"). Sets z (see inZ in 01-base) on what is selected, keeping its own order; one undo step. Works within a kind:
+// pictures stay under the ink, typed text over it.
+function selZ(front){
+  if(!sel || !cur) return;
+  const ids = new Set(sel.ids);
+  const its = inZ(cur.items.values()).filter(it => ids.has(it.id));
+  if(!its.length) return;
+  let lo = 0, hi = 0;
+  for(const it of cur.items.values()){ if(ids.has(it.id)) continue; const z = it.z || 0; if(z < lo) lo = z; if(z > hi) hi = z; }
+  replaceItems(its.map((it, i) => Object.assign({}, it, {z: front ? hi + 1 + i : lo - its.length + i})));
+  note(front ? 'Brought to front' : 'Sent to back');
+}
+$('selOrder').addEventListener('click', e => { if(sel) openPop('orderPop', e.currentTarget); });
+$('selFront').addEventListener('click', () => { closePop('orderPop'); selZ(true); });
+$('selBack').addEventListener('click', () => { closePop('orderPop'); selZ(false); });
 let picTurning = false;
 $('selRot90').addEventListener('click', async () => {
   if(!sel || picTurning) return;

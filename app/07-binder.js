@@ -1344,7 +1344,7 @@ async function openHistory(){
   }
 }
 function drawVersion(cv, data){
-  const items = (data.items || []).map(deser).filter(Boolean);
+  const items = inZ((data.items || []).map(deser).filter(Boolean));
   const ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
   if(!items.length) return;
@@ -1437,9 +1437,9 @@ function openPop(id, anchor){
   p._anchor = anchor; anchor.classList.add('pop-open');
 }
 function closePop(id){ const p = $(id); p.hidden = true; if(p._anchor){ p._anchor.classList.remove('pop-open'); p._anchor = null; } }
-function closePops(){ for(const id of ['techPop', 'sizePop', 'layerPop', 'paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'assistPop', 'tsizePop', 'spellPop']) closePop(id); }
+function closePops(){ for(const id of ['techPop', 'sizePop', 'layerPop', 'paperPop', 'morePop', 'newPop', 'colorPop', 'tcolorPop', 'shapePop', 'laterPop', 'fadePop', 'orderPop', 'assistPop', 'tsizePop', 'spellPop']) closePop(id); }
 document.addEventListener('pointerdown', e => {
-  if(e.target.closest('.pop') || e.target.closest('#techBtn,#layerBtn,#selSize,#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#shapeRail,#laterBtn,#selFade,#assistBtn,[data-act="tcolor"],[data-act="tsize"],[data-act="spell"]')) return;
+  if(e.target.closest('.pop') || e.target.closest('#techBtn,#layerBtn,#selSize,#paperBtn,#moreBtn,#newMore,#colorBtn,#shapeBtn,#shapeRail,#laterBtn,#selFade,#selOrder,#assistBtn,[data-act="tcolor"],[data-act="tsize"],[data-act="spell"]')) return;
   closePops();
 }, true);
 let modalAt = 0;

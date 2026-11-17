@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.7', '2026-11-17', ['Select something: the new Arrange button in the selection menu has Bring to front and Send to back, to put it on top of or under the rest. Pictures always stay under the writing and typed text over it, so it works among strokes, among pictures and among text boxes. Undo puts it back', 'Toolbar on the side: tighter, so Shapes and the zoom stay in view when the Paste button shows. Stick to text is a small button beside the colour wheel, Link is an icon, and with the text tool the Paste button takes the ruler\'s place']],
   ['2.6.2', '2026-11-17', ['Pen and highlighter: no more thin light cracks across strokes when you zoom in. The small pieces a stroke is drawn from now overlap a little instead of only touching']],
   ['2.6.1', '2026-11-17', ['Graph window, 4 quadrants: with Same from / to on, all four boxes follow one number. Type 5 or -5 in any of them and both axes go from -5 to 5']],
   ['2.6', '2026-11-17', ['Graph window: Same from / to switch under the ranges. While it is on, changing Horizontal from or to changes Vertical from or to as well, and the other way round. Steps stay separate']],

@@ -148,7 +148,7 @@ const Ask = {
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.setTransform(s, 0, 0, s, -x0 * s, -y0 * s);
     const inBox = it => { const b = itemBox(it); return !(b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1); };
-    const all = [...cur.items.values()].filter(inBox);
+    const all = inZ(cur.items.values()).filter(inBox);
     for(const it of all.filter(i => i.t === 'i')){
       try {
         const img = new Image(); img.src = await assetURL(it.a); await img.decode();

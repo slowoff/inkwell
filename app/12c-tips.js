@@ -78,6 +78,7 @@ const TIP_TEXT = [
   ['#selUngroup', 'Ungroup', 'Split the group back into its parts'],
   ['#selSize', 'Size', 'Type an exact size in mm'],
   ['#selRot90', 'Rotate 90°', 'Turn the selection a quarter clockwise'],
+  ['#selOrder', 'Arrange', 'Bring the selection to the front or send it to the back'],
   ['#selText', 'Text', 'The imported page text inside your selection'],
   ['#selShot, #tsShot', 'Copy as picture', 'Copy the box as a picture, like a screenshot'],
   ['#selHw, #tsHw', 'Homework', 'Add the selection to your Homework list with a due date'],

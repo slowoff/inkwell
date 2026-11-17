@@ -10,6 +10,14 @@ const {newId, esc, clamp, MM, A4W, A4H, pad2, tsMs, tsKey, tsEq, hhmm, fmtDate, 
 const {dropStraight, hexEdges, ser, opOf, deser, r1, shapePoint, strokeShape, inkPass, strokePath, inkOutline, strokeBox} = InkGeo;
 const {stable, mergeKeys, mergeContent} = InkMerge;
 const {calcEval, parseFn, texPlain} = InkText;
+// (2.7) Bring to front / Send to back: items may carry an optional number z (missing = 0). Things are drawn lowest z
+// first, items with the same z in the order they sit on the page. Only reorders within a kind: pictures stay under the
+// ink, typed text and formulas over it, filled shapes under writing. Older versions ignore z.
+function inZ(items){
+  const a = Array.isArray(items) ? items : [...items];
+  if(!a.some(it => it && it.z)) return a;
+  return a.map((it, i) => [it, i]).sort((p, q) => ((p[0] && p[0].z) || 0) - ((q[0] && q[0].z) || 0) || p[1] - q[1]).map(p => p[0]);
+}
 // (1.75) margin line on the paper: page field bg.ml = colour name, bg.mw = 'thick' or missing; 25 mm from the left edge
 const ML_COLORS = {blue: '#3B82F6', red: '#E5484D', green: '#2FA36B', grey: '#8A96A3'};
 // (1.76) bg.mx = distance from world x = 0 in mm (may be negative); missing = 25

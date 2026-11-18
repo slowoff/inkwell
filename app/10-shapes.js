@@ -142,7 +142,7 @@ function shapePolys(shape, b, w){
     if(shape === 'arrow') return [[[p0, p1], false], [arrowHead(p0, p1, hs), false]];
     if(shape === 'darrow') return [[[p0, p1], false], [arrowHead(p0, p1, hs), false], [arrowHead(p1, p0, hs), false]];
     if(shape === 'dline'){
-      const out = [], dash = Math.max(6, w * 4), gap = dash * 0.7;
+      const out = [], dash = Math.max(2.5, w * 1.2), gap = Math.max(3.5, w * 2.2);   // short dashes (2.7.1): round ends add w, so ~2.2w dash, ~1.2w gap
       for(let t = 0; t < len; t += dash + gap){ const e = Math.min(len, t + dash); out.push([[[x0 + Math.cos(ang) * t, y0 + Math.sin(ang) * t], [x0 + Math.cos(ang) * e, y0 + Math.sin(ang) * e]], false]); }
       return out;
     }

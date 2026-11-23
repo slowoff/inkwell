@@ -96,35 +96,63 @@ function eraseAt(sx, sy){
   const R = eraserRadius() / cam.z;
   const [wx, wy] = toWorld(sx, sy);
   // fill the gap since the last position so fast moves don't skip ink
-  const last = act.lastW; act.lastW = [wx, wy];
-  if(last){
-    const d = Math.hypot(wx - last[0], wy - last[1]), n = Math.floor(d / (R * 0.5));
-    for(let k = 1; k <= n; k++){ const t = k / (n + 1); eraseWorld(last[0] + (wx - last[0]) * t, last[1] + (wy - last[1]) * t, R); }
-  }
+  const last = act.lastW || [wx, wy]; act.lastW = [wx, wy];
+  // (2.7.2) erasing lagged on full pages: every sub-step looked at every item on the page three times, and every hit
+  // repainted all the ink. Now the items near this move are found once, and only the boxes that changed are repainted.
+  const ed = act.ed = {cands: eraseCands(Math.min(last[0], wx) - R, Math.min(last[1], wy) - R, Math.max(last[0], wx) + R, Math.max(last[1], wy) + R, R), dirty: [], full: false, hit: false};
+  const d = Math.hypot(wx - last[0], wy - last[1]), n = Math.floor(d / (R * 0.5));
+  for(let k = 1; k <= n; k++){ const t = k / (n + 1); eraseWorld(last[0] + (wx - last[0]) * t, last[1] + (wy - last[1]) * t, R); }
   eraseWorld(wx, wy, R);
+  act.ed = null;
+  if(ed.hit) changed(ed.full ? undefined : ed.dirty);
 }
+// the items whose box comes within reach of the eraser's path (box x0..x1, y0..y1 already grown by R)
+function eraseCands(x0, y0, x1, y1, R){
+  const out = [];
+  for(const it of cur.items.values()){
+    if(it.t === 's'){
+      const b = geoOf(it).b, pad = it.w / 2;
+      if(b[2] < x0 - pad || b[0] > x1 + pad || b[3] < y0 - pad || b[1] > y1 + pad) continue;
+    } else if(it.t === 'm' || it.t === 'x'){
+      if(it.x > x1 || it.y > y1) continue;   // the box starts at x, y: no layout read needed for these
+      const b = itemBox(it);
+      if(b[2] < x0 || b[3] < y0) continue;
+    } else continue;
+    out.push(it);
+  }
+  return out;
+}
+// an erased or cut stroke: repaint only its box (marks and filled shapes still need the whole layer, as in dirtyBoxes)
+function eraseDirty(it){
+  const ed = act.ed; if(!ed) return;
+  ed.hit = true;
+  if(it.t !== 's') return;
+  if(it.mk || inkPass(it) === 2) ed.full = true; else ed.dirty.push(geoOf(it).b);
+}
+const eraseList = () => act.ed ? act.ed.cands : [...cur.items.values()];
+const eraseLive = it => cur.items.get(it.id) === it;
 // Formulas (graph numbers and labels too) are erased whole by both eraser modes.
 function eraseFormulas(wx, wy, R){
   let hit = false;
-  for(const it of [...cur.items.values()]){
-    if(it.t !== 'm' || it.ne || Tech.hidden(it)) continue;   // ne: part of a graph, only removed with the Select tool (1.57)
+  for(const it of eraseList()){
+    if(it.t !== 'm' || it.ne || !eraseLive(it) || Tech.hidden(it)) continue;   // ne: part of a graph, only removed with the Select tool (1.57)
     const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
     if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
-    act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); hit = true;
+    act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); hit = true; eraseDirty(it);
   }
-  if(hit) changed();
+  if(hit && !act.ed) changed();
 }
 // Text boxes (typed or made by Write to text): the Stroke eraser removes the whole box it touches,
 // the Partial eraser removes only the words it passes over.
 function eraseTexts(wx, wy, R){
   let hit = false;
-  for(const it of [...cur.items.values()]){
-    if(it.t !== 'x' || it.ne || Tech.hidden(it) || (editing && editing.id === it.id)) continue;
+  for(const it of eraseList()){
+    if(it.t !== 'x' || it.ne || !eraseLive(it) || Tech.hidden(it) || (editing && editing.id === it.id)) continue;
     const b = itemBox(it), cx = clamp(wx, b[0], b[2]), cy = clamp(wy, b[1], b[3]);
     if((cx - wx) ** 2 + (cy - wy) ** 2 > R * R) continue;
     const el = elMap.get(it.id); if(!el) continue;
     if(act.mode !== 'area'){
-      act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); act.added.delete(it.id); hit = true; continue;
+      act.removed.push(it); cur.items.delete(it.id); dropEl(it.id); act.added.delete(it.id); hit = true; eraseDirty(it); continue;
     }
     // words under the eraser circle (centre and a ring of sample points), found from screen positions
     const sx0 = SR.left + cam.ox, sy0 = SR.top + cam.oy, rs = R * cam.z, cut = new Map();
@@ -164,7 +192,7 @@ function eraseTexts(wx, wy, R){
     if(!act.removed.includes(orig)) act.removed.push(orig);
     (act.texts || (act.texts = new Set())).add(it.id);
   }
-  if(hit) changed();
+  if(hit && !act.ed) changed();
 }
 function finishTextErase(a){
   if(!a.texts) return;
@@ -187,10 +215,11 @@ function eraseWorld(wx, wy, R){
   eraseTexts(wx, wy, R);
   if(act.mode === 'area'){ eraseArea(wx, wy, R); return; }
   let hit = false;
-  for(const it of [...cur.items.values()]){
-    if(it.t !== 's' || it.ne || Tech.hidden(it)) continue;
+  for(const it of eraseList()){
+    if(it.t !== 's' || it.ne) continue;
     const g = geoOf(it), pad = R + it.w / 2;
     if(wx < g.b[0] - pad || wx > g.b[2] + pad || wy < g.b[1] - pad || wy > g.b[3] + pad) continue;
+    if(!eraseLive(it) || Tech.hidden(it)) continue;
     const lim = pad * pad, p = it.p;
     let touched = false;
     for(let i = 0; i < p.length && !touched; i += 3){
@@ -198,16 +227,19 @@ function eraseWorld(wx, wy, R){
       if(dx * dx + dy * dy <= lim) touched = true;
       else if(i + 3 < p.length && segDist2(wx, wy, p[i], p[i+1], p[i+3], p[i+4]) <= lim) touched = true;
     }
-    if(touched){ act.removed.push(it); cur.items.delete(it.id); geo.delete(it.id); hit = true; }
+    if(touched){ eraseDirty(it); act.removed.push(it); cur.items.delete(it.id); geo.delete(it.id); hit = true; }
   }
-  if(hit) changed();
+  if(hit && !act.ed) changed();
 }
 function eraseArea(wx, wy, R){
   let hit = false;
-  for(const it of [...cur.items.values()]){
-    if(it.t !== 's' || it.fl || it.ne || Tech.hidden(it)) continue;   // graphs (ne) and their backgrounds stay: Select + delete removes them
+  const list = eraseList(), n0 = list.length;
+  for(let li = 0; li < n0; li++){
+    const it = list[li];
+    if(it.t !== 's' || it.fl || it.ne) continue;   // graphs (ne) and their backgrounds stay: Select + delete removes them
     const g = geoOf(it), pad = R + it.w / 2;
     if(wx < g.b[0] - pad || wx > g.b[2] + pad || wy < g.b[1] - pad || wy > g.b[3] + pad) continue;
+    if(!eraseLive(it) || Tech.hidden(it)) continue;
     const cut = R + it.w * 0.35, lim = cut * cut, p = it.p;
     // densify only the segments near the eraser, so the cut is clean even on long straight lines
     const step = Math.max(0.4, cut * 0.35), q = [];
@@ -231,7 +263,7 @@ function eraseArea(wx, wy, R){
     }
     if(run.length) pieces.push(run);
     if(!gone) continue;
-    hit = true;
+    hit = true; eraseDirty(it);
     cur.items.delete(it.id); geo.delete(it.id);
     if(act.added.has(it.id)) act.added.delete(it.id); else act.removed.push(it);
     for(const pp of pieces){
@@ -241,9 +273,10 @@ function eraseArea(wx, wy, R){
       if(it.g) np.g = it.g; if(it.sq) np.sq = 1;
       if(it.o) np.o = it.o;
       cur.items.set(np.id, np); act.added.set(np.id, np);
+      if(act.ed) list.push(np);   // later sub-steps of this move can cut the piece again
     }
   }
-  if(hit) changed();
+  if(hit && !act.ed) changed();
 }
 function segDist2(px, py, ax, ay, bx, by){
   const dx = bx - ax, dy = by - ay, l = dx * dx + dy * dy;

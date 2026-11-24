@@ -277,7 +277,7 @@ function startTool(e, sx, sy, pr){
     act.orig = [...cur.items.values()].filter(it => itemBox(it)[1] >= wy - 0.5);
   } else if(tool === 'eraser'){
     clearSel(); act.kind = 'erase'; act.mode = prefs.eraser.mode === 'area' ? 'area' : 'stroke';
-    act.removed = []; act.added = new Map(); act.cursor = [sx, sy]; act.lastW = null; eraseAt(sx, sy);
+    act.removed = []; act.added = new Map(); act.keys0 = cur ? [...cur.items.keys()] : []; act.cursor = [sx, sy]; act.lastW = null; eraseAt(sx, sy);
   } else if(tool === 'lasso'){
     act.kind = 'lasso'; act.poly = [sx, sy]; act.box = prefs.lassoMode === 'box'; act.tap = prefs.lassoMode === 'tap';
   } else if(tool === 'tape'){
@@ -638,7 +638,12 @@ function endTool(e){
     const was = new Set(a.removed.map(it => it.id));
     const before = a.removed.map(it => [it.id, it]).concat([...a.added.keys()].filter(id => !was.has(id)).map(id => [id, null]));
     const after = a.removed.filter(it => !a.added.has(it.id)).map(it => [it.id, null]).concat([...a.added.values()].map(it => [it.id, it]));
-    if(before.length) commit(before, after);
+    if(before.length){
+      commit(before, after);
+      // (2.7.3) Undo puts the erased strokes back in their place, Redo the pieces in theirs (not on top of everything)
+      const k1 = [...cur.items.keys()], k0 = new Set(a.keys0 || []);
+      seatOp(seatOf(a.removed.map(it => it.id), a.keys0 || []), seatOf([...a.added.keys()].filter(id => !k0.has(id)), k1));
+    }
     if(eraseOnce){ const back = eraseOnce; setTool(back); }
   } else if(a.kind === 'lasso'){
     finishLasso(a);

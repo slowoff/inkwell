@@ -875,19 +875,44 @@ function zTop(list){
   return list.map(it => { const o = Object.assign({}, it); if(top) o.z = top; else delete o.z; return o; });
 }
 function addItems(list){ list = zTop(Tech.layerNew(list)); apply(list.map(it => [it.id, it]), list.map(it => [it.id, null])); }
-function removeItems(ids){ const before = ids.map(id => [id, cur.items.get(id) || null]); apply(ids.map(id => [id, null]), before); }
+function removeItems(ids){ const before = ids.map(id => [id, cur.items.get(id) || null]), sb = seatOf(ids); apply(ids.map(id => [id, null]), before); seatOp(sb); }
+// (2.7.3) Undo put deleted things back at the end of the page (drawn on top). An undo step can carry seats: [id, the id it
+// came right after (null = first)], so Undo (sb) and Redo (sa) put items back in their place in the drawing order.
+function seatOf(ids, keys){
+  keys = keys || [...cur.items.keys()];
+  const want = new Set(ids), out = [];
+  for(let i = 0; i < keys.length; i++) if(want.has(keys[i])) out.push([keys[i], i ? keys[i - 1] : null]);
+  return out;
+}
+function seatOp(sb, sa){ const op = cur.undo[cur.undo.length - 1]; if(!op) return; if(sb && sb.length) op.sb = sb; if(sa && sa.length) op.sa = sa; }
+function seatItems(seat){
+  if(!cur || !seat || !seat.length) return;
+  const m = cur.items, ids = new Set(), after = new Map();
+  for(const [id, prev] of seat){
+    if(!m.has(id)) continue;
+    ids.add(id); const k = prev == null ? '' : prev;
+    (after.get(k) || after.set(k, []).get(k)).push(id);
+  }
+  if(!ids.size) return;
+  const out = [], done = new Set();
+  const put = id => { if(done.has(id)) return; done.add(id); out.push(m.get(id)); const ch = after.get(id); if(ch) for(const c of ch) put(c); };
+  for(const c of after.get('') || []) put(c);
+  for(const id of m.keys()) if(!ids.has(id)) put(id);
+  for(const id of ids) put(id);   // its neighbour is gone: stays at the end
+  m.clear(); for(const it of out) m.set(it.id, it);
+}
 function replaceItems(list){ const before = list.map(it => [it.id, cur.items.get(it.id) || null]); apply(list.map(it => [it.id, it]), before); }
 function undo(){
   if(!cur) return;
   if(editing) finishEditing();
   const op = cur.undo.pop(); if(!op) return;
-  setItems(op.b); cur.redo.push(op); clearSel(); updUndo();
+  setItems(op.b); seatItems(op.sb); cur.redo.push(op); clearSel(); updUndo();
 }
 function redo(){
   if(!cur) return;
   if(editing) finishEditing();   // (1.72) like undo: the box being typed in is finished first (else its old text came back over the redo)
   const op = cur.redo.pop(); if(!op) return;
-  setItems(op.a); cur.undo.push(op); clearSel(); updUndo();
+  setItems(op.a); seatItems(op.sa); cur.undo.push(op); clearSel(); updUndo();
 }
 function updUndo(){ $('undo').disabled = !cur || !cur.undo.length; $('redo').disabled = !cur || !cur.redo.length; }
 function changed(dirty){

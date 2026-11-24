@@ -99,12 +99,27 @@ function eraseAt(sx, sy){
   const last = act.lastW || [wx, wy]; act.lastW = [wx, wy];
   // (2.7.2) erasing lagged on full pages: every sub-step looked at every item on the page three times, and every hit
   // repainted all the ink. Now the items near this move are found once, and only the boxes that changed are repainted.
-  const ed = act.ed = {cands: eraseCands(Math.min(last[0], wx) - R, Math.min(last[1], wy) - R, Math.max(last[0], wx) + R, Math.max(last[1], wy) + R, R), dirty: [], full: false, hit: false};
+  const ed = act.ed = {cands: eraseCands(Math.min(last[0], wx) - R, Math.min(last[1], wy) - R, Math.max(last[0], wx) + R, Math.max(last[1], wy) + R, R), dirty: [], full: false, hit: false, rep: new Map()};
+  const keys0 = act.mode === 'area' ? [...cur.items.keys()] : null;
   const d = Math.hypot(wx - last[0], wy - last[1]), n = Math.floor(d / (R * 0.5));
   for(let k = 1; k <= n; k++){ const t = k / (n + 1); eraseWorld(last[0] + (wx - last[0]) * t, last[1] + (wy - last[1]) * t, R); }
   eraseWorld(wx, wy, R);
   act.ed = null;
+  if(ed.rep.size) eraseSeat(keys0, ed.rep);
   if(ed.hit) changed(ed.full ? undefined : ed.dirty);
+}
+// (2.7.3) the pieces a Partial cut leaves were added at the end of the page, so they were drawn over everything else.
+// Put them back where the cut stroke was in the drawing order (rep: cut stroke id -> its pieces, which may be cut again).
+function eraseSeat(keys0, rep){
+  const m = cur.items, out = [], seen = new Set();
+  const put = id => {
+    if(seen.has(id)) return; seen.add(id);
+    if(m.has(id)) out.push(m.get(id));
+    else { const ch = rep.get(id); if(ch) for(const c of ch) put(c); }
+  };
+  for(const id of keys0) put(id);
+  for(const id of m.keys()) put(id);
+  m.clear(); for(const it of out) m.set(it.id, it);
 }
 // the items whose box comes within reach of the eraser's path (box x0..x1, y0..y1 already grown by R)
 function eraseCands(x0, y0, x1, y1, R){
@@ -272,7 +287,9 @@ function eraseArea(wx, wy, R){
       if(it.mk){ np.mk = 1; if(it.at) np.at = it.at; }
       if(it.g) np.g = it.g; if(it.sq) np.sq = 1;
       if(it.o) np.o = it.o;
+      if(it.ly) np.ly = it.ly; if(it.z) np.z = it.z; if(it.ls) np.ls = it.ls;   // (2.7.3) pieces stay on the stroke's layer, order and line type
       cur.items.set(np.id, np); act.added.set(np.id, np);
+      if(act.ed) (act.ed.rep.get(it.id) || act.ed.rep.set(it.id, []).get(it.id)).push(np.id);
       if(act.ed) list.push(np);   // later sub-steps of this move can cut the piece again
     }
   }

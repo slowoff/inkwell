@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.7.3', '2026-11-24', ['Partial eraser: the rest of a line you rub out stays where it was, under or over the same things, on its layer and with its line type, instead of jumping on top of everything. Undo and Redo of erasing and deleting also put things back in their place']],
   ['2.7.2', '2026-11-23', ['Eraser: no more lag on full pages. Erasing now only redraws the spot you erase instead of all the ink on the page']],
   ['2.7.1', '2026-11-18', ['Shapes, Dashed line: many short dashes instead of a few long ones, and the button shows it the same way']],
   ['2.7', '2026-11-17', ['Select something: the new Arrange button in the selection menu has Bring to front and Send to back, to put it on top of or under the rest. Pictures always stay under the writing and typed text over it, so it works among strokes, among pictures and among text boxes. Undo puts it back', 'Toolbar on the side: tighter, so Shapes and the zoom stay in view when the Paste button shows. Stick to text is a small button beside the colour wheel, Link is an icon, and with the text tool the Paste button takes the ruler\'s place']],

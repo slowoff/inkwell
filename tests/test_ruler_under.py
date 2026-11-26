@@ -1,6 +1,7 @@
-# 2.9: no ink under the ruler / set square; a stroke that runs under it stops at its edge (edges still draw);
-# holding the Pencil on the set square's degree scale puts one pen dot just outside the edge at that angle
-# (numbers -> nearest 10 deg, both rows share the tick; tick marks -> nearest 1 deg).
+# 2.9: no ink under the ruler / set square; a stroke that runs under it stops at its edge (edges still draw).
+# 2.10: pen on the set square's degree half circle shows a preview dot outside the edge that follows along the
+# scale; lifting places one pen dot at that angle (numbers -> nearest 10 deg, both rows share the tick; tick marks
+# -> nearest 1 deg); lifted off the scale -> no dot.
 import asyncio, os, math
 from playwright.async_api import async_playwright
 PORT = os.environ.get('INKWELL_PORT', '8766')
@@ -63,8 +64,8 @@ async def main():
         check(len(s) == n1 + 1 and max(s[-1]['p'][1::3]) - min(s[-1]['p'][1::3]) < 0.5, 'drawing along the long edge still works')
         n1 = len(s)
 
-        async def dot_at(lx, ly):
-            s = await pen([L(lx, ly)], hold=700)
+        async def dot_at(lx, ly, path=None):
+            s = await pen([L(lx, ly)] + [L(*q) for q in (path or [])], hold=60)
             if len(s) != dot_at.n + 1: return None
             dot_at.n = len(s)
             P = s[-1]['p']
@@ -88,11 +89,21 @@ async def main():
         a = math.radians(124)
         d = await dot_at((R + 6) * math.cos(a), -(R + 6) * math.sin(a))
         check(d and abs(d[0] - 124) < 0.3 and outside(d[0], d[1]), f'left half too: 124 deg ({d and d[0]})')
-        # a short tap on the scale (no hold) does nothing
+        # slide along the scale: preview follows, lift places the dot at the last angle
+        A = lambda deg, rr: (rr * math.cos(math.radians(deg)), -rr * math.sin(math.radians(deg)))
+        d = await dot_at(*A(20.2, R + 6), [A(20 + k * 4, R + 6) for k in range(1, 11)])
+        check(d and abs(d[0] - 60) < 0.3, f'slide from 20 to 60 on the ticks, lift: dot at 60 ({d and d[0]})')
+        # preview while the pen is down: live canvas shows the dot (no item yet)
         n = dot_at.n
-        s = await pen([L(R * math.cos(math.radians(60)), -R * math.sin(math.radians(60)))], hold=80)
-        check(len(s) == n, 'a short tap on the scale makes no dot')
-
+        await page.evaluate("""([x, y]) => document.getElementById('stage').dispatchEvent(new PointerEvent('pointerdown', {pointerId: 9, pointerType: 'pen', isPrimary: true, clientX: x, clientY: y, pressure: .5, bubbles: true, cancelable: true, button: 0, buttons: 1}))""", list(L(*A(90.3, R + 6))))
+        await page.wait_for_timeout(150)
+        live = await page.evaluate("__inkwell.act ? __inkwell.act.kind + ':' + __inkwell.act.deg : (typeof act !== 'undefined' && act ? act.kind + ':' + act.deg : 'none')")
+        items_now = len(await page.evaluate(ITEMS))
+        check(live == 'angle:90' and items_now == n, f'pen down on 90: preview, nothing saved yet ({live}, {items_now - n} new)')
+        # slide off the scale (into the middle) and lift: no dot
+        await page.evaluate("""([x, y]) => { const el = document.getElementById('stage'); const f = t => el.dispatchEvent(new PointerEvent(t, {pointerId: 9, pointerType: 'pen', isPrimary: true, clientX: x, clientY: y, pressure: .5, bubbles: true, cancelable: true, button: 0, buttons: t === 'pointerup' ? 0 : 1})); f('pointermove'); f('pointerup'); }""", list(L(0, -60)))
+        await page.wait_for_timeout(200)
+        check(len(await page.evaluate(ITEMS)) == n, 'slid off the scale before lifting: no dot')
         # the straight ruler: a stroke across its middle is cut too
         await page.evaluate("() => { const r = __inkwell.prefs.ruler; delete r.k; centerRuler(true); renderRuler(); }")
         await page.wait_for_timeout(200)

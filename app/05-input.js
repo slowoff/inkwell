@@ -266,13 +266,14 @@ function startTool(e, sx, sy, pr){
     else { act.c = prefs[tool].c; act.w = tool === 'hl' ? hlWidth() : penWidth(); act.hl = tool === 'hl' ? 1 : 0; }
     if(tool === 'pen'){ const ts = Tech.style(); if(ts){ act.ls = ts.ls; act.w = ts.w; } }   // (2.0) technical notebook line type
     act.edge = prefs.ruler.on ? rulerEdge(sx, sy) : null;
-    // (2.9) no ink under the ruler / set square. On the set square's degree scale a held Pencil drops a dot just
-    // outside its edge at that angle (geoScaleAt / geoDot in 06-writing).
+    // (2.9) no ink under the ruler / set square. (2.10) Pen on the set square's degree half circle: a preview dot
+    // shows just outside the edge at that angle and follows along the scale; lifting the pen places it there
+    // (off the scale when lifted = no dot). geoScaleAt / geoDotAt / geoDot in 06-writing.
     if(!act.edge && prefs.ruler.on && onRuler(sx, sy)){
       act.kind = 'under';
       const deg = tool === 'pen' ? geoScaleAt(sx, sy) : null;
-      if(deg != null){ const a = act; a.hold = setTimeout(() => { if(act === a && !a.far) geoDot(deg); }, GEO_DOT_MS); }
-      return;   // no Pencil menu, nothing drawn
+      if(deg != null){ act.kind = 'angle'; act.deg = deg; drawLive(); }
+      return;   // no Pencil menu, no ink
     }
     let X = sx, Y = sy;
     if(act.edge) [X, Y] = projectEdge(act.edge, sx, sy, act.w);
@@ -364,6 +365,7 @@ function toolMove(e){
       if(Math.hypot(sx - act.anchor[0], sy - act.anchor[1]) > HOLD_STILL){ act.anchor = [sx, sy]; act.ancN = 1; armHold(); }
       else { const k = 1 / Math.min(++act.ancN || (act.ancN = 2), 24); act.anchor = [act.anchor[0] + (sx - act.anchor[0]) * k, act.anchor[1] + (sy - act.anchor[1]) * k]; }
     } else if(act.kind === 'erase'){ act.cursor = [sx, sy]; eraseAt(sx, sy); }
+    else if(act.kind === 'angle'){ act.deg = geoScaleAt(sx, sy); }
     else if(act.kind === 'space'){ moveSpace(toWorld(sx, sy)[1] - act.y0); }
     else if(act.kind === 'lasso'){ if(act.box){ act.poly = boxPoly(act.sx, act.sy, sx, sy); act.b1 = [sx, sy]; } else act.poly.push(sx, sy); }
     else if(act.kind === 'tape' || act.kind === 'place' || act.kind === 'pick'){
@@ -643,6 +645,8 @@ function endTool(e){
     addItems([it]);
     if(handwriting) WA.stroke(it);   // reference line: notes which line is being written (never moves ink)
     if(handwriting) Scribe.add(it);
+  } else if(a.kind === 'angle'){
+    if(a.deg != null) geoDot(a.deg);
   } else if(a.kind === 'erase'){
     finishTextErase(a);
     // one undo step: originals that were cut back in, pieces left over out
@@ -792,6 +796,16 @@ function drawLive(){
     Tech.liveStroke(act);
     liveCtx.setTransform(dpr * cam.z, 0, 0, dpr * cam.z, dpr * cam.ox, dpr * cam.oy);
     if(act.tool === 'pen' && !act.hl && !act.mk) WA.guide(act);
+  } else if(act.kind === 'angle'){
+    if(act.deg != null){
+      const d = geoDotAt(act.deg), paper = onPaperAt(paperRects(), ...toWorld(d.x, d.y));
+      liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      liveCtx.beginPath(); liveCtx.arc(d.x, d.y, Math.max(2.5, d.w * cam.z / 2), 0, Math.PI * 2);
+      liveCtx.fillStyle = inkColor(prefs.pen.c, false, paper, 0); liveCtx.fill();
+      liveCtx.font = '600 12px ' + (getComputedStyle(document.body).getPropertyValue('--f-ui') || 'sans-serif');
+      liveCtx.fillStyle = tokens.accent; liveCtx.textAlign = 'center';
+      liveCtx.fillText(act.deg + '°', d.x + d.ux * 16, d.y + d.uy * 16 + 4);
+    }
   } else if(act.kind === 'lasso'){
     const p = act.poly;
     liveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);

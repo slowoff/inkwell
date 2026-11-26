@@ -754,7 +754,7 @@ function renderRulerTicks(){
 }
 // (2.9) degree scale under the Pencil: on the tick marks the nearest whole degree, on the numbers the nearest 10°
 // (both rows: 30 outside and 150 inside share the 30° tick). null elsewhere.
-const GEO_R = 186, GEO_DOT_MS = 400;
+const GEO_R = 186;
 function geoScaleAt(sx, sy){
   if(!isGeo()) return null;
   const [lx, ly] = rulerLocal(sx, sy), r = Math.hypot(lx, ly);
@@ -764,14 +764,18 @@ function geoScaleAt(sx, sy){
   if(r >= GEO_R - 30 && r < GEO_R - 3) return Math.round(d / 10) * 10;
   return null;
 }
-// a dot with the pen just outside the set square, on the line from the middle of the long edge through that angle
+// where the dot for an angle goes (screen px): just outside the set square on the line from the middle of the long
+// edge through that angle; ux/uy = that direction on screen (for the live label)
+function geoDotAt(deg){
+  const r = prefs.ruler, t = deg * Math.PI / 180, lx0 = Math.cos(t), ly0 = -Math.sin(t);
+  const w = penWidth() * 1.6, d = GEO_H / (Math.abs(lx0) + Math.abs(ly0)) + (w * cam.z) / 2 + 4;
+  const c = Math.cos(r.a), s = Math.sin(r.a), ux = lx0 * c - ly0 * s, uy = lx0 * s + ly0 * c;
+  return {x: r.cx + ux * d, y: r.cy + uy * d, ux, uy, w};
+}
 function geoDot(deg){
   if(!cur) return;
-  const r = prefs.ruler, t = deg * Math.PI / 180, ux = Math.cos(t), uy = -Math.sin(t);
-  const w = penWidth() * 1.6, d = GEO_H / (Math.abs(ux) + Math.abs(uy)) + (w * cam.z) / 2 + 4;
-  const lx = ux * d, ly = uy * d, c = Math.cos(r.a), s = Math.sin(r.a);
-  const [wx, wy] = toWorld(r.cx + lx * c - ly * s, r.cy + lx * s + ly * c);
-  addItems([{t: 's', id: 's' + newId(), c: prefs.pen.c, w, hl: 0, p: [wx, wy, 0.5]}]);
+  const d = geoDotAt(deg), [wx, wy] = toWorld(d.x, d.y);
+  addItems([{t: 's', id: 's' + newId(), c: prefs.pen.c, w: d.w, hl: 0, p: [wx, wy, 0.5]}]);
   note('Dot at ' + deg + '°');
 }
 // (2.8) set square face: outline, mm scale along the long edge (0 in the middle, follows zoom like the ruler),

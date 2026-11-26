@@ -307,7 +307,7 @@ select.pf-ls option:checked{background:#9fbbe8}
 .geo-glass,.geo-face{display:none}
 .ruler.geo{width:600px;height:300px;margin:-300px 0 0 -300px;transform-origin:50% 100%;border-radius:0;background:none;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}
 .ruler.geo .ruler-ticks{display:none}
-.ruler.geo .geo-glass{display:block;position:absolute;inset:0;clip-path:polygon(0 100%,50% 0,100% 100%);background:color-mix(in srgb,var(--raise) 72%,transparent);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.ruler.geo .geo-glass{display:block;position:absolute;inset:0;clip-path:polygon(0 100%,50% 0,100% 100%);background:color-mix(in srgb,var(--raise) 50%,transparent);-webkit-backdrop-filter:blur(1px);backdrop-filter:blur(1px)}
 .ruler.geo .geo-face{display:block;position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
 .geo-face line{stroke:var(--muted);stroke-width:1}
 .geo-face .geo-out{fill:none;stroke:var(--rule-strong);stroke-width:1.5}

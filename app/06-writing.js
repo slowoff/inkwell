@@ -598,16 +598,43 @@ function rulerLocal(sx, sy){
   const r = prefs.ruler, dx = sx - r.cx, dy = sy - r.cy, c = Math.cos(r.a), s = Math.sin(r.a);
   return [dx * c + dy * s, -dx * s + dy * c];
 }
-function onRuler(sx, sy){ const [lx, ly] = rulerLocal(sx, sy); return Math.abs(lx) <= RULER_HALF_W && Math.abs(ly) <= RULER_HALF_H; }
+// (2.8) Set square (Geodreieck): prefs.ruler.k 'g' (missing = ruler). Right isosceles triangle in screen px: the long
+// edge lies on local y = 0 from -GEO_H to GEO_H with its middle (0 of the mm scale, centre of the degree scale) at
+// cx, cy; the right angle points up, GEO_H above it. Pens follow all three edges.
+const GEO_H = 300, GEO_ROW = -90;   // GEO_ROW: local y of the Snap / angle / kind row (inside the triangle)
+const isGeo = () => prefs.ruler.k === 'g';
+const GEO_EDGES = [[-GEO_H, 0, GEO_H, 0], [GEO_H, 0, 0, -GEO_H], [0, -GEO_H, -GEO_H, 0]].map(([x0, y0, x1, y1]) => {
+  const len = Math.hypot(x1 - x0, y1 - y0), ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+  let nx = uy, ny = -ux;   // turn the outward side away from the triangle's centre (0, -GEO_H / 3)
+  if(nx * (0 - x0) + ny * (-GEO_H / 3 - y0) > 0){ nx = -nx; ny = -ny; }
+  return {x0, y0, ux, uy, nx, ny, len};
+});
+function onRuler(sx, sy){
+  const [lx, ly] = rulerLocal(sx, sy);
+  if(isGeo()) return ly <= 0 && Math.abs(lx) <= GEO_H + ly;
+  return Math.abs(lx) <= RULER_HALF_W && Math.abs(ly) <= RULER_HALF_H;
+}
 function rulerEdge(sx, sy){
   const [lx, ly] = rulerLocal(sx, sy);
+  if(isGeo()){
+    let best = null, bd = 26;
+    GEO_EDGES.forEach((g, i) => {
+      const t = (lx - g.x0) * g.ux + (ly - g.y0) * g.uy, d = Math.abs((lx - g.x0) * g.nx + (ly - g.y0) * g.ny);
+      if(t >= -20 && t <= g.len + 20 && d < bd){ bd = d; best = {seg: i}; }
+    });
+    return best;
+  }
   if(Math.abs(lx) > RULER_HALF_W + 20) return null;
   if(Math.abs(Math.abs(ly) - RULER_HALF_H) < 26) return {side: ly < 0 ? -1 : 1};
   return null;
 }
 function projectEdge(edge, sx, sy, w){
-  const r = prefs.ruler, [lx] = rulerLocal(sx, sy);
-  const ly = edge.side * (RULER_HALF_H + (w * cam.z) / 2 + 1);
+  const r = prefs.ruler, [px, py] = rulerLocal(sx, sy), off = (w * cam.z) / 2 + 1;
+  let lx = px, ly;
+  if(edge.seg != null){
+    const g = GEO_EDGES[edge.seg], t = (px - g.x0) * g.ux + (py - g.y0) * g.uy;
+    lx = g.x0 + g.ux * t + g.nx * off; ly = g.y0 + g.uy * t + g.ny * off;
+  } else ly = edge.side * (RULER_HALF_H + off);
   const c = Math.cos(r.a), s = Math.sin(r.a);
   return [r.cx + lx * c - ly * s, r.cy + lx * s + ly * c];
 }
@@ -634,7 +661,7 @@ function rulerMove(){
 function rulerVisible(){ const r = prefs.ruler; return r.cx != null && r.cx > 20 && r.cy > 20 && r.cx < W - 20 && r.cy < H - 20; }
 function centerRuler(straight){
   if(!(W > 0 && H > 0)) return;
-  prefs.ruler.cx = W / 2; prefs.ruler.cy = H / 2;
+  prefs.ruler.cx = W / 2; prefs.ruler.cy = H / 2 + (isGeo() ? -GEO_ROW : 0);   // set square: its control row in the middle
   if(straight) prefs.ruler.a = 0;
 }
 // mouse: move with the hand grip, turn with the arrows at the ends
@@ -667,8 +694,8 @@ for(const h of ['rulerGrip', 'rulerTurnL', 'rulerTurnR']){
 // turn handles) clicks into 15° steps. A short tap (finger, Pencil or mouse) toggles it.
 // (1.50.1) a finger on the pill still counts for moving/turning the ruler (the pill used to swallow it, so a
 // two-finger twist with one finger on the pill only dragged the ruler); only a tap that stays put toggles.
-{
-  const el = $('rulerSnap'); let down = null;
+function rulerPill(id, onTap){
+  const el = $(id); let down = null;
   el.addEventListener('pointerdown', e => {
     if(e.pointerType !== 'touch' || pick || prefs.tool === 'space'){ e.stopPropagation(); e.preventDefault(); }   // Pencil/mouse (or a finger while placing a shape / using Space) would draw instead
     down = {id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), far: false};
@@ -678,20 +705,35 @@ for(const h of ['rulerGrip', 'rulerTurnL', 'rulerTurnR']){
     if(!down || down.id !== e.pointerId) return;
     const d = down; down = null;
     if(d.far || touches.size > 1 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 12 || performance.now() - d.t > 700) return;
-    const r = prefs.ruler; r.snap = r.snap === false; savePrefs(); renderRuler();
-    note(r.snap ? 'Ruler snap on · clicks into 0°, 15°, 45°, 90°' : 'Ruler snap off · turns to any angle');
+    onTap();
   }, true);
   addEventListener('pointercancel', e => { if(down && down.id === e.pointerId) down = null; }, true);
   el.addEventListener('click', e => e.stopPropagation());
 }
+rulerPill('rulerSnap', () => {
+  const r = prefs.ruler; r.snap = r.snap === false; savePrefs(); renderRuler();
+  note(r.snap ? 'Ruler snap on · clicks into 0°, 15°, 45°, 90°' : 'Ruler snap off · turns to any angle');
+});
+// (2.8) ruler <-> set square. The centre moves along the ruler's own up/down so the pill stays under the finger.
+rulerPill('rulerKind', () => {
+  const r = prefs.ruler, geo = !isGeo(), d = geo ? -GEO_ROW : GEO_ROW;
+  r.cx -= d * Math.sin(r.a); r.cy += d * Math.cos(r.a);
+  if(geo) r.k = 'g'; else delete r.k;
+  savePrefs(); renderRuler();
+  note(geo ? 'Set square · draw along any edge, angles on the scale' : 'Ruler');
+});
 function renderRuler(){
   const el = $('ruler'), r = prefs.ruler;
   $('rulerSnap').classList.toggle('on', r.snap !== false); $('rulerSnap').setAttribute('aria-pressed', r.snap !== false);
   el.hidden = !r.on || !cur;
   $('rulerBtn').classList.toggle('on', !!r.on);
   if(!r.on) return;
+  const geo = isGeo();
+  el.classList.toggle('geo', geo);
+  $('rulerKind').setAttribute('aria-label', geo ? 'Ruler' : 'Set square'); $('rulerKind').title = geo ? 'Ruler: switch back to the ruler' : 'Set square: switch to a set square with a protractor scale';
+  $('rulerKind').classList.toggle('to-ruler', geo);
   el.style.transform = `translate(${r.cx}px,${r.cy}px) rotate(${r.a}rad)`;
-  el.style.setProperty('--turn-off', Math.round(Math.max(110, Math.min(RULER_HALF_W - 27, W / 2 - 50))) + 'px');   // turn handles stay on narrow screens
+  el.style.setProperty('--turn-off', (geo ? GEO_H - 70 : Math.round(Math.max(110, Math.min(RULER_HALF_W - 27, W / 2 - 50)))) + 'px');   // turn handles stay on narrow screens
   let deg = ((Math.round(r.a * 180 / Math.PI) % 180) + 180) % 180; if(deg > 90) deg -= 180;   // same as shape rotation: clockwise positive, -89 … 90
   $('rulerAngle').textContent = deg + '°';
   if(rulerZ !== cam.z) renderRulerTicks();
@@ -707,4 +749,26 @@ function renderRulerTicks(){
     if(cm && mm * 10 >= 22) h += `<b style="left:${x.toFixed(1)}px">${i / 10}</b>`;
   }
   box.innerHTML = h;
+  renderGeoFace();
+}
+// (2.8) set square face: outline, mm scale along the long edge (0 in the middle, follows zoom like the ruler),
+// degree scale 0–180° both ways around the middle, centre line up to the right angle
+function renderGeoFace(){
+  const mm = MM * cam.z, H = GEO_H, R = 186, f = v => v.toFixed(1);
+  let every = 1; while(mm * every < 4) every *= 5;
+  let h = `<polygon class="geo-out" points="${-H},0 0,${-H} ${H},0"/><line class="geo-mid" x1="0" y1="0" x2="0" y2="${-H + 8}"/>`;
+  for(let i = 0; i * mm <= H - 12; i += every){
+    const len = i % 10 === 0 ? 14 : i % 5 === 0 ? 10 : 6;
+    for(const x of i ? [i * mm, -i * mm] : [0]) h += `<line x1="${f(x)}" y1="0" x2="${f(x)}" y2="${-len}"/>`;
+    if(i && i % 10 === 0 && mm * 10 >= 22) for(const x of [i * mm, -i * mm]) h += `<text x="${f(x)}" y="-17">${i / 10}</text>`;
+  }
+  for(let d = 0; d <= 180; d++){
+    const t = d * Math.PI / 180, c = Math.cos(t), s = -Math.sin(t), len = d % 10 === 0 ? 12 : d % 5 === 0 ? 8 : 4;
+    h += `<line x1="${f(R * c)}" y1="${f(R * s)}" x2="${f((R + len) * c)}" y2="${f((R + len) * s)}"/>`;
+    if(d % 10 === 0 && d && d < 180){
+      h += `<text x="${f((R - 9) * c)}" y="${f((R - 9) * s + 3)}">${d}</text>`;
+      h += `<text class="geo-in" x="${f((R - 21) * c)}" y="${f((R - 21) * s + 3)}">${180 - d}</text>`;
+    }
+  }
+  $('geoFace').innerHTML = h;
 }

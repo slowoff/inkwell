@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.8', '2026-11-26', ['Ruler: new set square (Geodreieck). Tap the triangle button on the ruler to switch. Draw along any of its three edges, read millimetres from 0 in the middle of the long edge and angles on the 0–180° scale. Move and turn it like the ruler; the triangle button switches back']],
   ['2.7.3', '2026-11-24', ['Partial eraser: the rest of a line you rub out stays where it was, under or over the same things, on its layer and with its line type, instead of jumping on top of everything. Undo and Redo of erasing and deleting also put things back in their place']],
   ['2.7.2', '2026-11-23', ['Eraser: no more lag on full pages. Erasing now only redraws the spot you erase instead of all the ink on the page']],
   ['2.7.1', '2026-11-18', ['Shapes, Dashed line: many short dashes instead of a few long ones, and the button shows it the same way']],

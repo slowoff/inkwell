@@ -115,6 +115,8 @@ const TIP_TEXT = [
   ['#scribeBtn', 'Write to text', 'Handwriting becomes typed text when you pause'],
   ['#waRef', 'Reference line', 'A faint guide under the line you are writing'],
   ['#rulerSnap', 'Snap', 'Turning the ruler clicks into 0°, 15°, 45°, 90°'],
+  ['#rulerKind.to-ruler', 'Ruler', 'Switch back to the straight ruler'],
+  ['#rulerKind', 'Set square', 'Switch to a set square (Geodreieck) with mm and degree scales; draw along any edge'],
   ['#calcDeg', 'Degrees / radians', 'Switch how angles are measured'],
 ];
 const Tip = {

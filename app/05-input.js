@@ -18,7 +18,7 @@ const penWidth = () => 0.6 * Math.pow(25, prefs.pen.s / 100);
 const midPressure = p => { const a = []; for(let i = 2; i < p.length; i += 3) a.push(p[i]); a.sort((x, y) => x - y); return a[a.length >> 1]; };
 const shapePr = () => prefs.penPr > 0 && prefs.penPr <= 1 ? prefs.penPr : 0.55;
 function notePenPr(a){
-  if(!a.isPen || a.snapped || a.edge || a.hl || a.pts.length < 24) return;
+  if(!a.isPen || a.snapped || a.edge || a.cut || a.hl || a.pts.length < 24) return;
   const m = midPressure(a.pts);
   prefs.penPr = +(prefs.penPr > 0 ? prefs.penPr * 0.7 + m * 0.3 : m).toFixed(3);
   savePrefs();
@@ -266,6 +266,14 @@ function startTool(e, sx, sy, pr){
     else { act.c = prefs[tool].c; act.w = tool === 'hl' ? hlWidth() : penWidth(); act.hl = tool === 'hl' ? 1 : 0; }
     if(tool === 'pen'){ const ts = Tech.style(); if(ts){ act.ls = ts.ls; act.w = ts.w; } }   // (2.0) technical notebook line type
     act.edge = prefs.ruler.on ? rulerEdge(sx, sy) : null;
+    // (2.9) no ink under the ruler / set square. On the set square's degree scale a held Pencil drops a dot just
+    // outside its edge at that angle (geoScaleAt / geoDot in 06-writing).
+    if(!act.edge && prefs.ruler.on && onRuler(sx, sy)){
+      act.kind = 'under';
+      const deg = tool === 'pen' ? geoScaleAt(sx, sy) : null;
+      if(deg != null){ const a = act; a.hold = setTimeout(() => { if(act === a && !a.far) geoDot(deg); }, GEO_DOT_MS); }
+      return;   // no Pencil menu, nothing drawn
+    }
     let X = sx, Y = sy;
     if(act.edge) [X, Y] = projectEdge(act.edge, sx, sy, act.w);
     act.pts = [...toWorld(X, Y), pr];
@@ -337,6 +345,9 @@ function toolMove(e){
     const st = Math.hypot(sx - act.lp[0], sy - act.lp[1]);
     if(st >= 1.5){ act.trav = (act.trav || 0) + st; act.lp = [sx, sy]; if(act.trav > 8) clearTimeout(act.wheelT); }
     if(act.kind === 'stroke'){
+      // (2.9) a stroke that runs under the ruler / set square stops at its edge
+      if(act.cut) continue;
+      if(!act.edge && !act.snapped && prefs.ruler.on && onRuler(sx, sy)){ act.cut = true; continue; }
       if(act.snapped){
         if(act.snapped === 'line'){ act.pts = densify([act.lineStart, dragLineEnd(act.lineStart, toWorld(sx, sy))], false, act.snapPr); }
         continue;

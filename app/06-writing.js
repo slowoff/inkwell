@@ -619,8 +619,9 @@ function rulerEdge(sx, sy){
   if(isGeo()){
     let best = null, bd = 26;
     GEO_EDGES.forEach((g, i) => {
-      const t = (lx - g.x0) * g.ux + (ly - g.y0) * g.uy, d = Math.abs((lx - g.x0) * g.nx + (ly - g.y0) * g.ny);
-      if(t >= -20 && t <= g.len + 20 && d < bd){ bd = d; best = {seg: i}; }
+      // (2.9) outside the edge 26 px, inside only 10 px: the degree scale near the legs is for holding (geoDot)
+      const t = (lx - g.x0) * g.ux + (ly - g.y0) * g.uy, sd = (lx - g.x0) * g.nx + (ly - g.y0) * g.ny, d = Math.abs(sd);
+      if(t >= -20 && t <= g.len + 20 && sd > -10 && d < bd){ bd = d; best = {seg: i}; }
     });
     return best;
   }
@@ -751,10 +752,32 @@ function renderRulerTicks(){
   box.innerHTML = h;
   renderGeoFace();
 }
+// (2.9) degree scale under the Pencil: on the tick marks the nearest whole degree, on the numbers the nearest 10°
+// (both rows: 30 outside and 150 inside share the 30° tick). null elsewhere.
+const GEO_R = 186, GEO_DOT_MS = 400;
+function geoScaleAt(sx, sy){
+  if(!isGeo()) return null;
+  const [lx, ly] = rulerLocal(sx, sy), r = Math.hypot(lx, ly);
+  if(ly > 2) return null;
+  const d = Math.max(0, Math.min(180, Math.atan2(-ly, lx) * 180 / Math.PI));
+  if(r >= GEO_R - 3 && r <= GEO_R + 13) return Math.round(d);
+  if(r >= GEO_R - 30 && r < GEO_R - 3) return Math.round(d / 10) * 10;
+  return null;
+}
+// a dot with the pen just outside the set square, on the line from the middle of the long edge through that angle
+function geoDot(deg){
+  if(!cur) return;
+  const r = prefs.ruler, t = deg * Math.PI / 180, ux = Math.cos(t), uy = -Math.sin(t);
+  const w = penWidth() * 1.6, d = GEO_H / (Math.abs(ux) + Math.abs(uy)) + (w * cam.z) / 2 + 4;
+  const lx = ux * d, ly = uy * d, c = Math.cos(r.a), s = Math.sin(r.a);
+  const [wx, wy] = toWorld(r.cx + lx * c - ly * s, r.cy + lx * s + ly * c);
+  addItems([{t: 's', id: 's' + newId(), c: prefs.pen.c, w, hl: 0, p: [wx, wy, 0.5]}]);
+  note('Dot at ' + deg + '°');
+}
 // (2.8) set square face: outline, mm scale along the long edge (0 in the middle, follows zoom like the ruler),
 // degree scale 0–180° both ways around the middle, centre line up to the right angle
 function renderGeoFace(){
-  const mm = MM * cam.z, H = GEO_H, R = 186, f = v => v.toFixed(1);
+  const mm = MM * cam.z, H = GEO_H, R = GEO_R, f = v => v.toFixed(1);
   let every = 1; while(mm * every < 4) every *= 5;
   let h = `<polygon class="geo-out" points="${-H},0 0,${-H} ${H},0"/><line class="geo-mid" x1="0" y1="0" x2="0" y2="${-H + 8}"/>`;
   for(let i = 0; i * mm <= H - 12; i += every){

@@ -662,6 +662,7 @@ async function renderVersion(){
 }
 /* (1.47) Change log: "See changes" next to the version in Settings. Newest first; add an entry with every release. */
 const CHANGELOG = [
+  ['2.9', '2026-11-26', ['Ruler and set square: nothing gets drawn under them any more. A line that runs into them stops at the edge; drawing along the edges works as before', 'Set square: hold the Pencil on an angle number (or a tick) of the degree scale and a dot appears just outside the edge at that angle. Then draw the line from the 0 point to the dot']],
   ['2.8.1', '2026-11-26', ['Set square: a bit see-through, so you can see the lines and writing under it']],
   ['2.8', '2026-11-26', ['Ruler: new set square (Geodreieck). Tap the triangle button on the ruler to switch. Draw along any of its three edges, read millimetres from 0 in the middle of the long edge and angles on the 0–180° scale. Move and turn it like the ruler; the triangle button switches back']],
   ['2.7.3', '2026-11-24', ['Partial eraser: the rest of a line you rub out stays where it was, under or over the same things, on its layer and with its line type, instead of jumping on top of everything. Undo and Redo of erasing and deleting also put things back in their place']],
